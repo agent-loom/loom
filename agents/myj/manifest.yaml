@@ -1,0 +1,84 @@
+api_version: agent.platform/v1
+kind: AgentPackage
+
+metadata:
+  id: myj
+  name: 美宜佳数字店员
+  description: MYJ demo Agent Package for Agent Platform MVP
+  owner: retail-ai
+  domain: retail
+  tags:
+    - demo
+    - myj
+
+version:
+  package_version: 0.1.0
+  runtime_compat: ">=0.1.0 <0.2.0"
+  release_channel: dev
+
+runtime:
+  backend: native
+  entrypoint: agents.myj.adapter:MyjAdapter
+  max_iterations: 4
+  timeout_ms: 5000
+
+models:
+  default:
+    provider: demo
+    model: native-demo
+    temperature: 0.2
+    max_tokens: 1024
+
+prompts:
+  orchestrator: prompts/orchestrator.md
+  reply_style: prompts/reply_style.md
+
+tools:
+  allow:
+    - myj.goods_search
+    - myj.goods_location
+  deny:
+    - terminal
+    - code_execution
+  timeout_ms: 3000
+  max_parallel: 2
+
+knowledge:
+  sources: []
+
+routing:
+  strategy: single
+  fallback_worker: direct_reply
+
+session:
+  scope: tenant_store_user
+  history_window: 20
+  memory_enabled: false
+
+context:
+  required:
+    - context.tenant.retailer_id
+  optional:
+    - context.store.store_id
+    - context.channel.channel_id
+
+output:
+  protocol: agent-chat/v1
+  supports:
+    - text
+    - cards
+    - commands
+  command_allowlist:
+    - product.recommend
+    - product.locate
+    - cart.add
+    - human.handoff
+
+safety:
+  policy: policies/safety.yaml
+
+evals:
+  suites:
+    - evals/golden.yaml
+  required_pass_rate: 0.9
+

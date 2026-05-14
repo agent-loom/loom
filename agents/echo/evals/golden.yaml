@@ -1,0 +1,8 @@
+- id: echo_demo_001
+  input:
+    agent_id: echo
+    input:
+      query: "hello world"
+  expected:
+    output_contains:
+      - "hello world"

@@ -1,0 +1,36 @@
+api_version: agent.platform/v1
+kind: SafetyPolicy
+
+rules:
+  - id: deny_high_risk_tools
+    description: 禁止执行终端命令和代码
+    action: deny
+    match:
+      tool_names:
+        - terminal
+        - code_execution
+
+  - id: deny_secrets_in_output
+    description: 输出中不得包含密钥或敏感信息
+    action: deny
+    match:
+      output_patterns:
+        - "(?i)(api[_-]?key|password|secret|token)\\s*[:=]\\s*\\S+"
+
+  - id: command_allowlist
+    description: 只允许 manifest 声明的 command
+    action: enforce
+    match:
+      output_commands:
+        - product.recommend
+        - product.locate
+        - cart.add
+        - human.handoff
+
+  - id: pii_guard
+    description: 不主动输出顾客手机号、身份证等 PII
+    action: warn
+    match:
+      output_patterns:
+        - "1[3-9]\\d{9}"
+        - "\\d{15,18}[xX]?"

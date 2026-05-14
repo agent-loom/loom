@@ -1,0 +1,70 @@
+api_version: agent.platform/v1
+kind: AgentPackage
+
+metadata:
+  id: echo
+  name: Echo Demo Agent
+  description: Minimal echo agent for platform extensibility validation
+  owner: platform-team
+  domain: demo
+  tags:
+    - demo
+    - echo
+
+version:
+  package_version: 0.1.0
+  runtime_compat: ">=0.1.0 <0.2.0"
+  release_channel: dev
+
+runtime:
+  backend: native
+  entrypoint: agents.echo.adapter:EchoAdapter
+  max_iterations: 1
+  timeout_ms: 3000
+
+models:
+  default:
+    provider: demo
+    model: native-demo
+    temperature: 0.0
+    max_tokens: 256
+
+prompts:
+  orchestrator: prompts/orchestrator.md
+
+tools:
+  allow: []
+  deny:
+    - terminal
+    - code_execution
+  timeout_ms: 3000
+  max_parallel: 1
+
+knowledge:
+  sources: []
+
+routing:
+  strategy: single
+  fallback_worker: direct_reply
+
+session:
+  scope: session
+  history_window: 5
+  memory_enabled: false
+
+context:
+  required: []
+  optional: []
+
+output:
+  protocol: agent-chat/v1
+  supports:
+    - text
+  command_allowlist: []
+
+safety: {}
+
+evals:
+  suites:
+    - evals/golden.yaml
+  required_pass_rate: 1.0

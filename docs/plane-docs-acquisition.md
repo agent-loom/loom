@@ -32,7 +32,7 @@ docs/vendor/plane/openapi.json
 docs/vendor/plane/endpoints.md
 ```
 
-其中 JSON 通过 `Accept: application/json` header 从 `/api/schema/` 获取。
+其中 JSON 通过 `Accept: application/json` header 从 `/api/schema/` 获取。当前实例不支持 `?format=openapi-json` 方式，后续更新 JSON 时必须继续使用 header。
 
 ## 2. 获取完整 REST API 文档
 
@@ -56,7 +56,6 @@ ENABLE_DRF_SPECTACULAR=1
 
 ```text
 GET http://10.193.0.147:3333/api/schema/
-GET http://10.193.0.147:3333/api/schema/?format=openapi-json
 GET http://10.193.0.147:3333/api/schema/swagger-ui/
 GET http://10.193.0.147:3333/api/schema/redoc/
 ```
@@ -66,7 +65,7 @@ GET http://10.193.0.147:3333/api/schema/redoc/
 | Endpoint | 说明 |
 | --- | --- |
 | `/api/schema/` | YAML 格式 OpenAPI schema |
-| `/api/schema/?format=openapi-json` | JSON 格式 OpenAPI schema |
+| `/api/schema/` + `Accept: application/json` | JSON 格式 OpenAPI schema |
 | `/api/schema/swagger-ui/` | Swagger UI |
 | `/api/schema/redoc/` | ReDoc 文档 |
 

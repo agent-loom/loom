@@ -1,0 +1,37 @@
+stages:
+  - lint
+  - test
+  - contract
+  - eval
+
+default:
+  image: python:3.12
+  before_script:
+    - pip install uv
+    - uv sync --extra dev
+
+lint:
+  stage: lint
+  script:
+    - uv run ruff check src tests scripts
+
+unit_tests:
+  stage: test
+  script:
+    - uv run pytest tests/unit
+
+contract_tests:
+  stage: contract
+  script:
+    - uv run pytest tests/contract
+
+agent_eval:
+  stage: eval
+  script:
+    - uv run python scripts/validate_manifest.py
+    - uv run python scripts/smoke_test.py
+    - uv run python scripts/run_agent_eval.py --changed-only --agent myj --report eval-report.json
+  artifacts:
+    when: always
+    paths:
+      - eval-report.json

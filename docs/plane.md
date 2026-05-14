@@ -1,6 +1,6 @@
 # Plane 集成设计
 
-本文档定义 `agent-platform` 如何接入已部署的 Plane，把 Plane 作为需求、Issue、看板和 AI 研发任务流的入口。
+本文档定义 `agent-platform` 如何接入已部署的 Plane，把 Plane 作为需求、Work Item、看板和 AI 研发任务流的入口。
 
 当前 Plane 实例：
 
@@ -13,14 +13,14 @@ Plane Developer Docs: https://developers.plane.so/
 官方文档确认 Plane 提供：
 
 1. REST API，用于管理 projects、work items、states、labels、types、custom properties、cycles、modules、intake 等。
-2. Webhooks，用于接收 project、issue、cycle、module、issue comment 等事件。
+2. Webhooks，用于接收 project、work item、cycle、module、comment 等事件。
 3. MCP Server，可让 Claude Code、Cursor、VSCode、Zed 等 AI 工具通过 MCP 操作 Plane。
 
 ## 1. Plane 在平台里的定位
 
 ```text
 Plane
-负责：需求、Issue、看板、AI 拆解状态、业务验收入口
+负责：需求、Work Item、看板、AI 拆解状态、业务验收入口
 
 GitLab
 负责：代码、分支、MR、CI、Review、制品
@@ -304,14 +304,14 @@ sequenceDiagram
     participant GitLab as GitLab
 
     User->>Plane: create intake / work item
-    Plane->>Webhook: issue create event
+    Plane->>Webhook: work item create event
     Webhook->>DevFlow: POST /webhooks/plane
     DevFlow->>AI: analyze requirement
     AI-->>DevFlow: spec + acceptance + open questions
     DevFlow->>Plane: add comment
     DevFlow->>Plane: move to Clarifying / Designing
     User->>Plane: confirm requirement
-    Plane->>Webhook: issue update state=Ready for AI Dev
+    Plane->>Webhook: work item update state=Ready for AI Dev
     Webhook->>DevFlow: trigger task pack
     DevFlow->>GitLab: create branch + MR
     DevFlow->>Plane: update gitlab_mr + state=AI Developing
@@ -331,10 +331,10 @@ X-Plane-Signature: <hmac_sha256>
 
 ```text
 Project
-Issue
+Work Item
 Cycle
 Module
-Issue Comment
+Work Item Comment
 ```
 
 平台 webhook endpoint：
@@ -445,7 +445,7 @@ AI 需求理解 Agent 回写评论：
 | 事件 | Plane 更新 | GitLab 更新 |
 | --- | --- | --- |
 | Work Item 进入 `Ready for AI Dev` | 生成 task pack | 创建 branch + draft MR |
-| MR 创建成功 | 写入 `gitlab_mr` 字段，状态到 `AI Developing` | MR 描述引用 Plane issue |
+| MR 创建成功 | 写入 `gitlab_mr` 字段，状态到 `AI Developing` | MR 描述引用 Plane Work Item |
 | CI 开始 | 状态到 `Testing / Eval` | pipeline running |
 | CI / Eval 通过 | 状态到 `Human Review` | MR ready for review |
 | MR 合并 | 状态到 `Staging` | main merged |
@@ -456,7 +456,7 @@ AI 需求理解 Agent 回写评论：
 避免双向同步过度：
 
 1. Plane 保存 GitLab MR 链接和摘要。
-2. GitLab MR 保存 Plane issue 链接。
+2. GitLab MR 保存 Plane Work Item 链接。
 3. 细节以各自系统为准。
 
 ## 15. MVP 落地步骤

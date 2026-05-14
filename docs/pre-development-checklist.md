@@ -37,7 +37,7 @@
 - [ ] 创建 `.env.example`。
 - [ ] 创建基础目录结构。
 
-### 1.5 GitLab
+### 1.5 GitLab / Plane
 
 - [ ] 创建 GitLab 项目。
 - [ ] 设置默认分支。
@@ -45,6 +45,10 @@
 - [ ] 设置 MR approval 规则。
 - [ ] 设置 GitLab CI runner。
 - [ ] 设置必要 token 和权限。
+- [ ] Plane `Agent Platform` Project 已创建。
+- [ ] Plane states / labels / custom properties 已配置。
+- [ ] Plane API Key 已生成并放入 secret。
+- [ ] Plane webhook secret 已生成。
 
 ## 2. P1 强烈建议完成
 
@@ -75,8 +79,8 @@
 
 ## 3. P2 可后置
 
-- [ ] Plane 项目创建。
-- [ ] Plane Adapter 设计。
+- [ ] Plane MCP 配置。
+- [ ] Plane OpenAPI 快照更新流程。
 - [ ] Langfuse 接入。
 - [ ] Hermes Adapter 设计。
 - [ ] Web 管理后台设计。

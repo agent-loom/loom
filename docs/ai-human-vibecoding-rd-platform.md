@@ -67,7 +67,7 @@ flowchart TB
         ProductAI[需求理解 Agent]
         ArchitectAI[架构设计 Agent]
         PlannerAI[任务拆解 Agent]
-        Board[Issue / Kanban]
+        Board[Work Item / Kanban]
         CodingAgents[Claude Code / Codex / Coding Agents]
         TestAI[测试与评测 Agent]
         Reviewer[人类 Review / 验收]
@@ -250,7 +250,7 @@ flowchart LR
     Spec --> ArchitectAgent[架构设计 Agent]
     ArchitectAgent --> Design[设计文档 / ADR]
     Design --> PlannerAgent[任务拆解 Agent]
-    PlannerAgent --> Issues[Issue / Kanban]
+    PlannerAgent --> Issues[Work Item / Kanban]
     Issues --> Coding[Claude Code / Codex 开发]
     Coding --> PR[Pull Request]
     PR --> TestAgent[测试生成 / 回归评测]
@@ -346,7 +346,7 @@ agents/
 
 ## 7. Issue 看板设计
 
-平台应该把 AI 研发过程显式化，不要让 coding agent 在黑盒里自由发挥。推荐用 Issue / Kanban 管理每次 Agent 变更。
+平台应该把 AI 研发过程显式化，不要让 coding agent 在黑盒里自由发挥。推荐用 Plane Work Item / Kanban 管理每次 Agent 变更；如果降级到 GitLab-only，则对应为 GitLab Issue / Board。
 
 ### 7.1 看板泳道
 

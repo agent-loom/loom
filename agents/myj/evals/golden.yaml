@@ -1,0 +1,20 @@
+- id: myj_demo_001
+  input:
+    protocol_version: agent-chat/v1
+    request_id: eval_myj_001
+    agent_id: myj
+    session_id: eval_session_001
+    context:
+      tenant:
+        tenant_id: tenant_myj
+        retailer_id: myj
+      store:
+        store_id: V01031
+    input:
+      query: 帮我推荐一瓶低糖饮料
+      capabilities:
+        - text
+  expected:
+    output_contains:
+      - MYJ demo agent 已收到
+

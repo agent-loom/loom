@@ -20,7 +20,7 @@ Accepted for MVP draft.
 1. `myj` 类型业务 Agent 需要强业务协议、门店上下文、商品/位置/促销工具和 RAG。
 2. Hermes 具备通用 Agent runtime、tool registry、plugin、session、gateway 等能力。
 3. GitLab 适合承载代码、MR、CI、Review 和制品。
-4. Plane 适合作为需求和 Issue 看板，但 MVP 不强制接入。
+4. Plane 已部署为需求和 Work Item 看板，MVP 接入最小 PlaneAdapter，但不做完整双向同步。
 
 ## 决策
 
@@ -103,11 +103,19 @@ Agent Platform 负责：
 4. 灰度发布状态
 5. Runtime 观测
 
-### 5. Plane 可作为需求看板，但不进入 MVP 强依赖
+### 5. Plane 作为需求看板，MVP 做最小接入
 
-MVP 可以先用 GitLab Issue 或本地 YAML task pack。Plane Adapter 放在第二阶段。
+MVP 使用已部署 Plane 作为需求和 Work Item 看板。第一阶段只实现最小 PlaneAdapter：
 
-原因：避免第一阶段集成过多系统，先跑通核心研发闭环。
+1. 读取 Work Item。
+2. 更新 Work Item 状态。
+3. 写入评论。
+4. 写入 GitLab MR / Eval report 链接。
+5. 接收 Plane webhook 触发 `Ready for AI Dev -> GitLab MR`。
+
+第一阶段不做完整 Plane 双向同步，不把发布状态、runtime trace、Agent Registry 状态完整复制进 Plane。
+
+原因：Plane 已部署，接入成本可控；但平台仍必须把生产状态保留在 Agent Platform 内，避免 Plane 成为生产事实源。
 
 ### 6. 先契约后实现
 
@@ -164,7 +172,7 @@ MVP 可以先用 GitLab Issue 或本地 YAML task pack。Plane Adapter 放在第
 1. 产品需求和 AI 需求理解体验较弱。
 2. 长期做 AI 研发工作台不如 Plane 灵活。
 
-结论：MVP 可接受；长期建议 Plane + GitLab。
+结论：当前不作为主路线。Plane 已部署，MVP 应实现最小 PlaneAdapter；GitLab-only 只作为 Plane 不可用时的降级方案。
 
 ## 后果
 

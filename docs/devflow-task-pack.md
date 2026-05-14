@@ -15,7 +15,7 @@ DevFlow Task Pack 是 AI coding agent 的结构化任务输入。它的目标是
 ## 2. 使用位置
 
 ```text
-Plane Issue / GitLab Issue
+Plane Work Item / GitLab Issue
         |
         v
 DevFlow Requirement Parser
@@ -44,7 +44,7 @@ metadata:
   source:
     system: plane
     issue_id: AGENT-123
-    url: https://plane.example.com/issues/AGENT-123
+    url: http://10.193.0.147:3333/
 
 repository:
   provider: gitlab
@@ -191,7 +191,7 @@ MR 描述必须包含：
 ```markdown
 ## Source Task
 
-Plane/GitLab issue link
+Plane Work Item / GitLab issue link
 
 ## Requirement Summary
 

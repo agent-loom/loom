@@ -19,7 +19,7 @@ Agent Platform
 flowchart TB
     subgraph Plane[Plane / 需求看板]
         Intake[需求 Intake]
-        Issue[Issue / Kanban]
+        WorkItem[Work Item / Kanban]
         Spec[需求规格]
         Acceptance[验收标准]
     end
@@ -48,8 +48,8 @@ flowchart TB
     end
 
     Intake --> Planner
-    Planner --> Issue
-    Issue --> Codex
+    Planner --> WorkItem
+    WorkItem --> Codex
     Codex --> Branch
     Branch --> MR
     MR --> CI
@@ -61,7 +61,7 @@ flowchart TB
     EvalRunner --> Deploy
     Deploy --> Runtime
     Runtime --> Trace
-    Trace --> Issue
+    Trace --> WorkItem
 ```
 
 ## 最佳职责划分
@@ -69,7 +69,7 @@ flowchart TB
 | 模块 | Plane | GitLab | Agent Platform |
 | --- | --- | --- | --- |
 | 业务需求 | 主责 | 只引用 | 不负责 |
-| Issue / Kanban | 主责 | 可同步精简 issue | 不负责 |
+| Work Item / Kanban | 主责 | 可同步精简 GitLab issue | 不负责 |
 | 代码仓库 | 不负责 | 主责 | 不负责 |
 | MR / Review | 不负责 | 主责 | 可读取状态 |
 | CI / 测试 | 不负责 | 主责 | 触发 eval 或读取结果 |
@@ -108,7 +108,7 @@ AI 需求理解 Agent 做两件事：
 输出：
 
 ```
-Plane issue
+Plane Work Item
 ├── 需求背景
 ├── 用户场景
 ├── 输入输出协议
@@ -120,7 +120,7 @@ Plane issue
 
 ### 2. DevFlow 创建 GitLab 分支和 MR
 
-AI DevFlow 从 Plane issue 生成 task pack：
+AI DevFlow 从 Plane Work Item 生成 task pack：
 
 ```yaml
 task:
@@ -148,7 +148,7 @@ task:
 Coding Agent 的输入应该是：
 
 ```
-Plane issue + task pack + 当前代码仓库 + 允许修改路径
+Plane Work Item + task pack + 当前代码仓库 + 允许修改路径
 ```
 
 不要让 AI 自由读一个口头需求直接改全仓库。
@@ -235,7 +235,7 @@ GitLab MR comment:
 - Changed agents: promo_recommendation
 ```
 
-同时回写 Plane issue 状态：
+同时回写 Plane Work Item 状态：
 
 ```
 Testing / Eval -> Human Review
@@ -246,7 +246,7 @@ Testing / Eval -> Human Review
 MR 必须包含 checklist：
 
 ```markdown
-## Linked Plane Issue
+## Linked Plane Work Item
 
 AGENT-123
 
@@ -491,7 +491,7 @@ Plane + GitLab
 
 ```
 Plane:
-- 需求、Issue、看板
+- 需求、Work Item、看板
 
 GitLab:
 - repo、branch、MR、CI、review
@@ -504,7 +504,7 @@ Agent Platform:
 
 先做自动化：
 
-1. Plane issue 创建后，AI 生成需求规格。
+1. Plane Work Item 创建后，AI 生成需求规格。
 2. 点击“Ready for AI Dev”后，DevFlow 创建 GitLab branch + MR。
 3. Codex/Claude Code 根据 issue + task pack 修改代码。
 4. GitLab CI 跑 test + eval。

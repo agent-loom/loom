@@ -36,7 +36,7 @@
 | GitLab Adapter | 支持创建分支、创建 MR、评论 MR、读取 pipeline 状态 |
 | CI 契约 | 支持 lint、unit test、manifest validate、agent eval |
 | 人审机制 | MR checklist + required approval |
-| Plane | 第一阶段可只设计 adapter，不强制接入 |
+| Plane Adapter | 接入已部署 Plane，支持读取/更新 Work Item、评论、状态和最小 webhook |
 
 ### 2.3 第一个 Agent
 
@@ -159,3 +159,4 @@ MVP 成功不是功能多，而是边界清晰：
 8. 增加 `agents/myj` demo package。
 9. 实现 eval runner。
 10. 实现 GitLab MR task pack 草案。
+11. 实现最小 PlaneAdapter，打通 `Ready for AI Dev -> GitLab MR`。

@@ -10,6 +10,7 @@
 - [DevFlow Task Pack 契约](devflow-task-pack.md)
 - [ADR-0001 架构基线决策](adr/0001-architecture-baseline.md)
 - [正式开工检查清单](pre-development-checklist.md)
+- [设计文档一致性检查报告](consistency-check.md)
 
 ## 总体设计
 
