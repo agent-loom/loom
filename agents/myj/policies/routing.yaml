@@ -1,0 +1,36 @@
+# MYJ 路由策略
+
+routing:
+  strategy: hybrid
+  rules:
+    - intent: goods_search
+      keywords: ["推荐", "商品", "饮料", "低糖", "零食", "买", "要"]
+      worker: goods_worker
+      tools: [myj.goods_search]
+
+    - intent: goods_location
+      keywords: ["哪里", "在哪", "位置", "货架", "找"]
+      worker: location_worker
+      tools: [myj.goods_location]
+
+    - intent: store_consult
+      keywords: ["退款", "支付", "营业", "几点", "流程"]
+      worker: store_worker
+      tools: [myj.store_consult]
+
+    - intent: promotion
+      keywords: ["优惠", "促销", "打折", "会员", "活动"]
+      worker: promotion_worker
+      tools: [myj.promotion_lookup]
+
+    - intent: direct_reply
+      keywords: ["你好", "谢谢", "再见", "你是谁"]
+      worker: direct_reply
+
+    - intent: human_handoff
+      keywords: ["转人工", "人工", "客服"]
+      worker: handoff
+
+  fallback_worker: direct_reply
+
+  confidence_threshold: 0.7

@@ -9,6 +9,7 @@ class Settings(BaseModel):
     env: str = "dev"
     registry_root: Path = Field(default=Path("agents"))
     default_agent_id: str = "myj"
+    api_key: str | None = None
 
     plane_base_url: str | None = None
     plane_workspace_slug: str | None = None
@@ -25,6 +26,7 @@ def get_settings() -> Settings:
         env=os.getenv("AGENT_PLATFORM_ENV", "dev"),
         registry_root=Path(os.getenv("AGENT_PLATFORM_REGISTRY_ROOT", "agents")),
         default_agent_id=os.getenv("AGENT_PLATFORM_DEFAULT_AGENT_ID", "myj"),
+        api_key=os.getenv("AGENT_PLATFORM_API_KEY"),
         plane_base_url=os.getenv("PLANE_BASE_URL"),
         plane_workspace_slug=os.getenv("PLANE_WORKSPACE_SLUG"),
         plane_api_key=os.getenv("PLANE_API_KEY"),

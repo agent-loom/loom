@@ -1,0 +1,55 @@
+- id: intent_goods_search
+  input:
+    protocol_version: agent-chat/v1
+    request_id: eval_intent_001
+    agent_id: myj
+    session_id: eval_intent_sess
+    context:
+      tenant:
+        tenant_id: tenant_myj
+        retailer_id: myj
+      store:
+        store_id: V01031
+    input:
+      query: 帮我推荐一瓶低糖饮料
+  expected:
+    must_call_tools:
+      - myj.goods_search
+    output_contains:
+      - 低糖
+
+- id: intent_goods_location
+  input:
+    protocol_version: agent-chat/v1
+    request_id: eval_intent_002
+    agent_id: myj
+    session_id: eval_intent_sess
+    context:
+      tenant:
+        tenant_id: tenant_myj
+        retailer_id: myj
+      store:
+        store_id: V01031
+    input:
+      query: 可乐在哪里
+  expected:
+    must_call_tools:
+      - myj.goods_location
+    output_contains:
+      - MYJ demo agent 已收到
+
+- id: intent_direct_reply
+  input:
+    protocol_version: agent-chat/v1
+    request_id: eval_intent_003
+    agent_id: myj
+    session_id: eval_intent_sess
+    context:
+      tenant:
+        tenant_id: tenant_myj
+        retailer_id: myj
+    input:
+      query: 你好
+  expected:
+    output_contains:
+      - MYJ demo agent 已收到

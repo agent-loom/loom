@@ -1,0 +1,38 @@
+# MYJ 知识源配置
+
+sources:
+  - id: myj_goods
+    type: vector_collection
+    backend: weaviate
+    collection: Good
+    filters:
+      tenant_field: retailer_id
+      store_field: store_code
+    sync:
+      schedule: "0 2 * * *"
+      source: business_api
+      endpoint: /api/v1/goods/sync
+
+  - id: myj_location
+    type: vector_collection
+    backend: weaviate
+    collection: Location
+    filters:
+      tenant_field: retailer_id
+      store_field: store_code
+    sync:
+      schedule: "0 3 * * *"
+      source: business_api
+      endpoint: /api/v1/locations/sync
+
+  - id: myj_consultation
+    type: vector_collection
+    backend: weaviate
+    collection: Consultation
+    filters:
+      tenant_field: retailer_id
+      store_field: store_code
+    sync:
+      schedule: "0 4 * * *"
+      source: business_api
+      endpoint: /api/v1/consultation/sync

@@ -1,0 +1,27 @@
+# MYJ 输出策略
+
+output:
+  protocol: agent-chat/v1
+
+  supports:
+    - text
+    - cards
+    - commands
+    - debug
+
+  command_allowlist:
+    - product.recommend
+    - product.locate
+    - cart.add
+    - human.handoff
+
+  formatting:
+    max_display_length: 500
+    tts_enabled: true
+    card_max_items: 5
+    include_source_attribution: false
+
+  fallback:
+    no_result: "抱歉，暂时没有找到相关信息。您可以换个说法或联系门店工作人员。"
+    error: "系统繁忙，请稍后再试。"
+    handoff: "好的，正在为您转接人工客服。"

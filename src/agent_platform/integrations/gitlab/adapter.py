@@ -86,6 +86,46 @@ class GitLabAdapter:
             return None
         return pipeline.get("status")
 
+    async def update_commit_status(
+        self,
+        project_id: str,
+        sha: str,
+        state: str,
+        *,
+        name: str = "agent-platform/eval",
+        description: str = "",
+        target_url: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "state": state,
+            "name": name,
+            "description": description,
+        }
+        if target_url:
+            payload["target_url"] = target_url
+        return await self._request(
+            "POST",
+            f"/api/v4/projects/{project_id}/statuses/{sha}",
+            json=payload,
+        )
+
+    async def download_artifacts(
+        self,
+        project_id: str,
+        job_id: int,
+    ) -> bytes:
+        async with httpx.AsyncClient(
+            base_url=self.base_url,
+            headers=self.headers,
+            timeout=60,
+            transport=self.transport,
+        ) as client:
+            response = await client.get(
+                f"/api/v4/projects/{project_id}/jobs/{job_id}/artifacts"
+            )
+            response.raise_for_status()
+            return response.content
+
     async def _request(self, method: str, path: str, **kwargs) -> dict[str, Any]:
         async with httpx.AsyncClient(
             base_url=self.base_url,

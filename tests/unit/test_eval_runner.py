@@ -12,8 +12,8 @@ async def test_eval_runner_myj():
 
     report = await EvalRunner().run_agent(spec)
 
-    assert report.total == 1
-    assert report.passed == 1
+    assert report.total == 4
+    assert report.passed == 4
     assert report.pass_rate == 1.0
     assert report.required_pass_rate == 0.9
     assert report.gate_passed is True

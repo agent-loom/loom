@@ -39,6 +39,29 @@ class PlaneAdapter:
         path = f"/api/v1/workspaces/{self.workspace_slug}/projects/{project_id}/work-items/"
         return await self._request("GET", path, params={"search": query})
 
+    async def create_work_item(
+        self,
+        project_id: str,
+        *,
+        name: str,
+        description: str = "",
+        state_id: str | None = None,
+        priority: str | None = None,
+        labels: list[str] | None = None,
+        properties: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        path = f"/api/v1/workspaces/{self.workspace_slug}/projects/{project_id}/work-items/"
+        payload: dict[str, Any] = {"name": name, "description_html": description}
+        if state_id:
+            payload["state"] = state_id
+        if priority:
+            payload["priority"] = priority
+        if labels:
+            payload["labels"] = labels
+        if properties:
+            payload["properties"] = properties
+        return await self._request("POST", path, json=payload)
+
     async def add_comment(self, project_id: str, work_item_id: str, body: str) -> dict[str, Any]:
         path = (
             f"/api/v1/workspaces/{self.workspace_slug}/projects/{project_id}"
@@ -65,6 +88,14 @@ class PlaneAdapter:
         state_id: str,
     ) -> dict[str, Any]:
         return await self.update_work_item(project_id, work_item_id, state=state_id)
+
+    async def update_custom_properties(
+        self,
+        project_id: str,
+        work_item_id: str,
+        properties: dict[str, Any],
+    ) -> dict[str, Any]:
+        return await self.update_work_item(project_id, work_item_id, properties=properties)
 
     async def _request(self, method: str, path: str, **kwargs) -> dict[str, Any]:
         async with httpx.AsyncClient(

@@ -20,10 +20,22 @@ async def main() -> int:
         action="store_true",
         help="Evaluate agents changed in git; falls back to --agent when none are detected.",
     )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        dest="eval_all",
+        help="Evaluate all registered agents.",
+    )
     args = parser.parse_args()
 
     registry = AgentRegistry(Path(args.registry_root))
-    agent_ids = _changed_agent_ids(Path(args.registry_root)) if args.changed_only else []
+
+    if args.eval_all:
+        agent_ids = [spec.agent_id for spec in registry.list_agents()]
+    elif args.changed_only:
+        agent_ids = _changed_agent_ids(Path(args.registry_root))
+    else:
+        agent_ids = []
     if not agent_ids:
         agent_ids = [args.agent]
 

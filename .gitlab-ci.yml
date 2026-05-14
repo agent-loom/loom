@@ -3,6 +3,9 @@ stages:
   - test
   - contract
   - eval
+  - package
+  - deploy
+  - promote
 
 default:
   image: python:3.12
@@ -10,28 +13,117 @@ default:
     - pip install uv
     - uv sync --extra dev
 
+variables:
+  AGENT_PLATFORM_ENV: ci
+  AGENT_PLATFORM_REGISTRY_ROOT: agents
+
+# --- Stage: lint ---
 lint:
   stage: lint
   script:
-    - uv run ruff check src tests scripts
+    - uv run ruff check src tests scripts agents
 
+# --- Stage: test ---
 unit_tests:
   stage: test
   script:
-    - uv run pytest tests/unit
+    - uv run pytest tests/unit -v --tb=short
+  artifacts:
+    when: always
+    reports:
+      junit: junit-report.xml
 
+integration_tests:
+  stage: test
+  script:
+    - uv run pytest tests/integration -v --tb=short
+  artifacts:
+    when: always
+    reports:
+      junit: junit-integration.xml
+
+# --- Stage: contract ---
 contract_tests:
   stage: contract
   script:
-    - uv run pytest tests/contract
+    - uv run pytest tests/contract -v --tb=short
+  allow_failure: true
+
+# --- Stage: eval ---
+manifest_validation:
+  stage: eval
+  script:
+    - uv run python scripts/validate_manifest.py
+
+smoke_test:
+  stage: eval
+  script:
+    - uv run python scripts/smoke_test.py
 
 agent_eval:
   stage: eval
   script:
-    - uv run python scripts/validate_manifest.py
-    - uv run python scripts/smoke_test.py
-    - uv run python scripts/run_agent_eval.py --changed-only --agent myj --report eval-report.json
+    - uv run python scripts/run_agent_eval.py --agent myj --report eval-report.json
   artifacts:
     when: always
     paths:
       - eval-report.json
+
+agent_eval_all:
+  stage: eval
+  script:
+    - uv run python scripts/run_agent_eval.py --all --report eval-report-all.json
+  artifacts:
+    when: always
+    paths:
+      - eval-report-all.json
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+# --- Stage: package ---
+package_agents:
+  stage: package
+  script:
+    - uv run python scripts/package_agent.py --agent changed
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 7 days
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+# --- Stage: deploy ---
+deploy_staging:
+  stage: deploy
+  script:
+    - uv run python scripts/deploy_agent.py --agent changed --channel staging --auto-eval
+  environment:
+    name: staging
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+
+# --- Stage: promote ---
+promote_canary:
+  stage: promote
+  script:
+    - uv run python scripts/promote_agent.py --agent changed --channel prod --traffic 5
+  environment:
+    name: production
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+
+promote_full:
+  stage: promote
+  script:
+    - uv run python scripts/promote_agent.py --agent changed --channel prod --traffic 100
+  environment:
+    name: production
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+  needs:
+    - promote_canary

@@ -45,7 +45,7 @@ evals:
         )
     )
 
-    assert result.response.output.status == "failed"
-    assert result.response.error is not None
-    assert result.response.error.code == "RUNTIME_NOT_IMPLEMENTED"
+    assert result.response.output.status == "completed"
+    assert result.response.output.text.display.startswith("[Hermes]")
+    assert result.response.debug["runtime_backend"] == "hermes"
 

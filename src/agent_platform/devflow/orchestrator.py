@@ -11,6 +11,7 @@ from agent_platform.integrations.plane.adapter import PlaneAdapter
 logger = logging.getLogger(__name__)
 
 READY_FOR_AI_DEV_STATES = {"Ready for AI Dev", "ready_for_ai_dev"}
+AI_DEVELOPING_STATE = "AI Developing"
 
 
 @dataclass(frozen=True)
@@ -27,11 +28,15 @@ class DevFlowOrchestrator:
         plane: PlaneAdapter,
         gitlab: GitLabAdapter,
         gitlab_project_id: str,
+        *,
+        ai_developing_state_id: str | None = None,
     ):
         self.plane = plane
         self.gitlab = gitlab
         self.gitlab_project_id = gitlab_project_id
+        self.ai_developing_state_id = ai_developing_state_id
         self.task_pack_generator = TaskPackGenerator()
+        self._processed_items: set[str] = set()
 
     async def handle_webhook_event(
         self,
@@ -49,6 +54,12 @@ class DevFlowOrchestrator:
         project_id = work_item.get("project") or work_item.get("project_id", "")
         work_item_id = work_item.get("id", "")
         title = work_item.get("name") or work_item.get("title", "Untitled")
+
+        idempotency_key = f"{work_item_id}:{new_state}"
+        if idempotency_key in self._processed_items:
+            logger.info("Skipping duplicate event: %s", idempotency_key)
+            return None
+        self._processed_items.add(idempotency_key)
 
         work_item_detail = await self._fetch_work_item_detail(project_id, work_item_id)
         agent_id = self._extract_agent_id(work_item_detail)
@@ -84,6 +95,28 @@ class DevFlowOrchestrator:
             work_item_id,
             f"<p>DevFlow: GitLab MR created — <a href=\"{mr_url}\">{branch}</a></p>",
         )
+
+        if self.ai_developing_state_id:
+            try:
+                await self.plane.update_work_item_state(
+                    project_id, work_item_id, self.ai_developing_state_id
+                )
+                logger.info("Moved work item %s to AI Developing", work_item_id)
+            except Exception:
+                logger.warning("Failed to move work item %s to AI Developing", work_item_id)
+
+        try:
+            await self.plane.update_custom_properties(
+                project_id,
+                work_item_id,
+                {
+                    "gitlab_branch": branch,
+                    "gitlab_mr_url": mr_url,
+                    "gitlab_mr_iid": str(mr_iid) if mr_iid else None,
+                },
+            )
+        except Exception:
+            logger.warning("Failed to update custom properties for %s", work_item_id)
 
         logger.info("DevFlow: %s -> branch=%s mr=%s", work_item_id, branch, mr_url)
         return DevFlowResult(

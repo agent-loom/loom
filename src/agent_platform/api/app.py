@@ -8,7 +8,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import StreamingResponse
 
+from agent_platform.api.streaming import stream_agent_response
 from agent_platform.config import get_settings
 from agent_platform.devflow.orchestrator import DevFlowOrchestrator
 from agent_platform.devflow.task_pack import TaskPackGenerator
@@ -48,6 +50,7 @@ class DeployAgentRequest(BaseModel):
     tenant_id: str | None = None
     traffic_percent: int = 100
     eval_passed: bool = True
+    auto_eval: bool = False
 
 
 class CreateTaskPackRequest(BaseModel):
@@ -70,6 +73,35 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class AuthMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, api_key: str | None = None):
+        super().__init__(app)
+        self.api_key = api_key
+
+    async def dispatch(self, request: Request, call_next):
+        if not self.api_key:
+            return await call_next(request)
+        if request.url.path in {"/health", "/docs", "/openapi.json", "/redoc"}:
+            return await call_next(request)
+        auth_header = request.headers.get("authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+            if token == self.api_key:
+                return await call_next(request)
+        api_key_header = request.headers.get("x-api-key")
+        if api_key_header == self.api_key:
+            return await call_next(request)
+        return JSONResponse(
+            status_code=401,
+            content={
+                "error": {
+                    "code": "UNAUTHORIZED",
+                    "message": "invalid or missing API key",
+                }
+            },
+        )
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     registry = AgentRegistry(Path(settings.registry_root))
@@ -77,8 +109,12 @@ def create_app() -> FastAPI:
     runtime_manager = RuntimeManager()
     eval_runner = EvalRunner(runtime_manager)
     task_pack_generator = TaskPackGenerator()
+    webhook_deliveries: set[str] = set()
 
     app = FastAPI(title="Agent Platform", version="0.1.0")
+
+    if settings.api_key:
+        app.add_middleware(AuthMiddleware, api_key=settings.api_key)
 
     app.add_middleware(
         CORSMiddleware,
@@ -133,6 +169,18 @@ def create_app() -> FastAPI:
     async def list_agent_deployments() -> list[dict]:
         return [deployment.model_dump(mode="json") for deployment in registry.list_deployments()]
 
+    @app.get("/api/v1/sessions")
+    async def list_sessions(agent_id: str | None = None) -> list[dict]:
+        sessions = runtime_manager.session_store.list_sessions(agent_id)
+        return [s.model_dump(mode="json") for s in sessions]
+
+    @app.get("/api/v1/sessions/{session_id}")
+    async def get_session(session_id: str) -> dict:
+        session = runtime_manager.session_store.load(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail=f"session not found: {session_id}")
+        return session.model_dump(mode="json")
+
     @app.post("/api/v1/agent-packages/{agent_id}/versions/{version}/deploy")
     async def deploy_agent(agent_id: str, version: str, payload: DeployAgentRequest) -> dict:
         try:
@@ -144,6 +192,19 @@ def create_app() -> FastAPI:
                 status_code=404,
                 detail=f"agent version not found: {agent_id}@{version}",
             )
+
+        if payload.auto_eval and payload.channel in {"staging", "prod"}:
+            report = await eval_runner.run_agent(spec)
+            if not report.gate_passed:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"eval gate failed: pass_rate={report.pass_rate:.1%} "
+                        f"required={report.required_pass_rate:.1%}"
+                    ),
+                )
+            payload.eval_passed = True
+
         if payload.channel in {"staging", "prod"} and not payload.eval_passed:
             raise HTTPException(status_code=409, detail="eval gate must pass before deployment")
 
@@ -166,6 +227,30 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return await eval_runner.run_agent(spec)
 
+    @app.post("/api/v1/evals/ci-callback")
+    async def eval_ci_callback(
+        agent_id: str,
+        project_id: str | None = None,
+        mr_iid: int | None = None,
+        work_item_id: str | None = None,
+    ) -> dict:
+        try:
+            spec = registry.get(agent_id)
+        except AgentNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        report = await eval_runner.run_agent(spec)
+        result: dict = {"agent_id": agent_id, "gate_passed": report.gate_passed}
+
+        if devflow and project_id and mr_iid:
+            from agent_platform.evals.feedback import EvalFeedback
+            gitlab_adapter = devflow.gitlab
+            feedback = EvalFeedback(gitlab=gitlab_adapter)
+            await feedback.post_to_gitlab(report, project_id, mr_iid)
+            result["gitlab_comment_posted"] = True
+
+        return result
+
     @app.post("/api/v1/devflow/task-packs")
     async def create_task_pack(payload: CreateTaskPackRequest):
         return task_pack_generator.from_requirement(**payload.model_dump())
@@ -178,6 +263,7 @@ def create_app() -> FastAPI:
         header_tenant = getattr(raw_request.state, "tenant_id", None)
         if header_tenant and not request.context.tenant.tenant_id:
             request.context.tenant.tenant_id = header_tenant
+
         try:
             route = router.route(request)
         except AgentNotFoundError as exc:
@@ -208,14 +294,25 @@ def create_app() -> FastAPI:
                 ).model_dump(mode="json"),
             )
 
-        runtime_response = await runtime_manager.run(
-            RuntimeRequest(
-                request=request,
-                agent_spec=route.agent_spec,
-                route_reason=route.reason,
-                deployment_id=route.deployment_id,
-            )
+        runtime_request = RuntimeRequest(
+            request=request,
+            agent_spec=route.agent_spec,
+            route_reason=route.reason,
+            deployment_id=route.deployment_id,
         )
+
+        if request.options.stream:
+            return StreamingResponse(
+                stream_agent_response(runtime_manager, runtime_request),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
+
+        runtime_response = await runtime_manager.run(runtime_request)
         return runtime_response.response
 
     @app.post("/api/v1/integrations/plane/webhook")
@@ -234,6 +331,15 @@ def create_app() -> FastAPI:
                 )
             except PlaneWebhookError as exc:
                 raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+        if x_plane_delivery and x_plane_delivery in webhook_deliveries:
+            return {
+                "status": "duplicate",
+                "delivery_id": x_plane_delivery,
+                "event": x_plane_event,
+            }
+        if x_plane_delivery:
+            webhook_deliveries.add(x_plane_delivery)
 
         result: dict[str, str | None] = {
             "status": "accepted",

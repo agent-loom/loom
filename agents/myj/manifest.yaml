@@ -4,12 +4,13 @@ kind: AgentPackage
 metadata:
   id: myj
   name: 美宜佳数字店员
-  description: MYJ demo Agent Package for Agent Platform MVP
+  description: 面向门店屏、收银机、小程序的便利店业务助手
   owner: retail-ai
   domain: retail
   tags:
-    - demo
-    - myj
+    - store-assistant
+    - product-search
+    - location
 
 version:
   package_version: 0.1.0
@@ -31,6 +32,7 @@ models:
 
 prompts:
   orchestrator: prompts/orchestrator.md
+  direct_reply: prompts/direct_reply.md
   reply_style: prompts/reply_style.md
 
 tools:
@@ -47,13 +49,19 @@ knowledge:
   sources: []
 
 routing:
-  strategy: single
+  strategy: hybrid
+  rules: policies/routing.yaml
   fallback_worker: direct_reply
+  human_handoff_intents:
+    - 转人工
 
 session:
   scope: tenant_store_user
   history_window: 20
   memory_enabled: false
+  compression:
+    enabled: true
+    threshold_tokens: 12000
 
 context:
   required:
@@ -61,6 +69,7 @@ context:
   optional:
     - context.store.store_id
     - context.channel.channel_id
+    - context.device.device_id
 
 output:
   protocol: agent-chat/v1
@@ -68,6 +77,7 @@ output:
     - text
     - cards
     - commands
+    - debug
   command_allowlist:
     - product.recommend
     - product.locate
@@ -76,9 +86,22 @@ output:
 
 safety:
   policy: policies/safety.yaml
+  moderation:
+    input: true
+    output: true
 
 evals:
   suites:
     - evals/golden.yaml
+    - evals/intent_cases.yaml
   required_pass_rate: 0.9
 
+extensions:
+  hermes:
+    enabled_toolsets:
+      - safe
+    disabled_toolsets:
+      - terminal
+      - code_execution
+    max_iterations: 8
+    memory_provider: session

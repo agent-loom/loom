@@ -43,17 +43,8 @@ class EvalRunner:
             response = await self.runtime_manager.run(
                 RuntimeRequest(request=request, agent_spec=spec, route_reason="eval")
             )
-            display = response.response.output.text.display
-            expected_contains = case.expected.get("output_contains", [])
-            missing = [text for text in expected_contains if text not in display]
-            passed = not missing
-            results.append(
-                EvalCaseResult(
-                    id=case.id,
-                    passed=passed,
-                    reason=f"missing expected text: {missing}" if missing else None,
-                )
-            )
+            result = self._evaluate_case(case, response)
+            results.append(result)
 
         passed_count = sum(1 for result in results if result.passed)
         total = len(results)
@@ -67,6 +58,43 @@ class EvalRunner:
             required_pass_rate=required_pass_rate,
             gate_passed=pass_rate >= required_pass_rate,
             results=results,
+        )
+
+    def _evaluate_case(self, case: EvalCase, response) -> EvalCaseResult:
+        failures: list[str] = []
+        display = response.response.output.text.display
+        trace = response.response.trace
+
+        expected_contains = case.expected.get("output_contains", [])
+        missing = [text for text in expected_contains if text not in display]
+        if missing:
+            failures.append(f"missing expected text: {missing}")
+
+        forbidden = case.expected.get("forbidden", [])
+        present = [text for text in forbidden if text in display]
+        if present:
+            failures.append(f"forbidden text found: {present}")
+
+        expected_intent = case.expected.get("intent")
+        if expected_intent and trace:
+            route_reason = trace.route_reason or ""
+            if expected_intent not in route_reason and expected_intent not in display:
+                actual_tools = [tc.tool_name for tc in (trace.tool_calls or [])]
+                if not any(expected_intent in t for t in actual_tools):
+                    failures.append(f"expected intent '{expected_intent}' not detected")
+
+        must_call_tools = case.expected.get("must_call_tools", [])
+        if must_call_tools and trace:
+            actual_tools = [tc.tool_name for tc in (trace.tool_calls or [])]
+            for required_tool in must_call_tools:
+                if not any(required_tool in t for t in actual_tools):
+                    failures.append(f"required tool not called: {required_tool}")
+
+        passed = len(failures) == 0
+        return EvalCaseResult(
+            id=case.id,
+            passed=passed,
+            reason="; ".join(failures) if failures else None,
         )
 
     async def run_agent_to_file(self, spec: AgentSpec, report_path: str) -> EvalReport:

@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
 
 
 class OutputStatus(StrEnum):
@@ -199,12 +204,19 @@ class ManifestRouting(BaseModel):
     strategy: str = "single"
     rules: str | None = None
     fallback_worker: str = "direct_reply"
+    human_handoff_intents: list[str] = Field(default_factory=list)
+
+
+class SessionCompression(BaseModel):
+    enabled: bool = False
+    threshold_tokens: int = 12000
 
 
 class ManifestSession(BaseModel):
     scope: str = "session"
     history_window: int = 20
     memory_enabled: bool = False
+    compression: SessionCompression = Field(default_factory=SessionCompression)
 
 
 class ManifestContext(BaseModel):
@@ -220,11 +232,21 @@ class ManifestOutput(BaseModel):
 
 class ManifestSafety(BaseModel):
     policy: str | None = None
+    moderation: dict[str, bool] = Field(
+        default_factory=lambda: {"input": False, "output": False}
+    )
 
 
 class ManifestEvals(BaseModel):
     suites: list[str] = Field(default_factory=list)
     required_pass_rate: float = 0.0
+
+
+class HermesExtension(BaseModel):
+    enabled_toolsets: list[str] = Field(default_factory=list)
+    disabled_toolsets: list[str] = Field(default_factory=list)
+    max_iterations: int = 8
+    memory_provider: str = "session"
 
 
 class AgentManifest(BaseModel):
@@ -315,6 +337,8 @@ class AgentDefinition(BaseModel):
     version: str
     status: AgentDefinitionStatus = AgentDefinitionStatus.ACTIVE
     manifest: AgentManifest
+    created_at: datetime = Field(default_factory=_utc_now)
+    updated_at: datetime = Field(default_factory=_utc_now)
 
 
 class AgentDeployment(BaseModel):
@@ -325,3 +349,30 @@ class AgentDeployment(BaseModel):
     status: AgentDeploymentStatus = AgentDeploymentStatus.REGISTERED
     tenant_id: str | None = None
     traffic_percent: int = Field(default=100, ge=0, le=100)
+
+
+class SessionMessage(BaseModel):
+    role: Literal["system", "user", "assistant", "tool"]
+    content: str
+    timestamp: datetime = Field(default_factory=_utc_now)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentSession(BaseModel):
+    session_id: str
+    agent_id: str
+    tenant_id: str | None = None
+    store_id: str | None = None
+    user_id: str | None = None
+    channel_id: str | None = None
+    history: list[SessionMessage] = Field(default_factory=list)
+    state_snapshot: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=_utc_now)
+    updated_at: datetime = Field(default_factory=_utc_now)
+
+    def add_message(self, role: str, content: str, **meta: Any) -> None:
+        self.history.append(SessionMessage(role=role, content=content, metadata=meta))
+        self.updated_at = _utc_now()
+
+    def recent_messages(self, window: int) -> list[SessionMessage]:
+        return self.history[-window:] if window > 0 else []
