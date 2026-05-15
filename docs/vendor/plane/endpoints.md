@@ -1,5 +1,7 @@
 # Plane API Endpoint 摘要
 
+> Last verified: 2026-05-15
+
 本文档从 `openapi.json` 提取 Agent Platform DevFlow 近期最需要的 Plane API 分组。完整 API 以 `openapi.yaml` / `openapi.json` 为准。
 
 ## Projects
@@ -19,6 +21,8 @@
 ## Work Items
 
 优先使用 `/work-items/` endpoint，不使用旧 `/issues/` endpoint。
+
+> 注意：Operation 名称中的 `_2`、`_3` 后缀是 OpenAPI 自动去重产物（旧 `/issues/` 占用了无后缀名）。实现时只使用 `_2` 系列（即 `/work-items/` 路径）。`create_work_item_3`（`/work-items/create/`）是批量创建入口，普通创建使用 `create_work_item_2`（POST `/work-items/`）。
 
 | Method | Path | Operation |
 | --- | --- | --- |
@@ -56,6 +60,8 @@
 ## Work Item Comments
 
 优先使用 `/work-items/{issue_id}/comments/` endpoint。
+
+> 注意：路径中的参数名仍为 `issue_id`，这是 Plane API 的命名遗留。实际传入的是 work item 的 UUID。
 
 | Method | Path | Operation |
 | --- | --- | --- |

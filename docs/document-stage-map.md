@@ -25,10 +25,11 @@
 
 | 状态 | 含义 | 维护要求 |
 | --- | --- | --- |
-| `Baseline` | 已作为架构基线或契约 | 修改需要同步 tests / ADR / gap |
+| `Baseline` | 已作为架构基线、契约或持续更新的事实来源 | 修改需要同步 tests / ADR / gap |
+| `Draft` | 设计内容已完整但未开始实现 | 实现前需 review 和对齐契约 |
 | `Implemented` | 已基本对应当前实现 | 实现变更必须同步更新 |
 | `Partially Implemented` | 部分实现，仍有 gap | gap 必须写在 `implementation-gap.md` |
-| `Planned` | 下一阶段设计输入 | 实现前必须细化或拆 ADR |
+| `Planned` | 下一阶段设计输入，文档尚未创建或仅有大纲 | 实现前必须细化或拆 ADR |
 | `Reference` | 外部资料或背景材料 | 不作为实现事实源 |
 
 ## 3. 按阶段的文档地图
@@ -50,9 +51,9 @@
 | `01-contracts/agent-manifest-v1.md` | Baseline | Agent package manifest 契约 |
 | `01-contracts/devflow-task-pack.md` | Baseline | AI coding agent 的结构化任务输入 |
 | `02-architecture/agent-platform-design.md` | Partially Implemented | 生产平台总体设计 |
-| `02-architecture/agent-platform-core-design.md` | Planned | 平台核心能力去业务化、动态工具加载、hook/policy 管线设计 |
+| `02-architecture/agent-platform-core-design.md` | Draft | 平台核心能力去业务化、动态工具加载、hook/policy 管线设计 |
 | `02-architecture/ai-human-vibecoding-rd-platform.md` | Partially Implemented | 生产 + 研发一体化总体设计 |
-| `implementation-gap.md` | Implemented | 当前实现和设计差距事实来源 |
+| `implementation-gap.md` | Baseline | 当前实现和设计差距事实来源（持续更新） |
 
 ### S2. 生产化底座
 
@@ -147,6 +148,7 @@
 | 修改 Hermes 接入边界 | `03-runtime/hermes-runtime.md`，必要时新增 ADR |
 | 修改部署、路由、持久化、DevFlow 实现状态 | `implementation-gap.md` |
 | 新增重大技术路线 | `adr/` 新增 ADR |
+| 修改文档阶段定义或文档状态 | `document-stage-map.md` 和 `README.md` |
 
 ### 5.2 新文档命名规则
 

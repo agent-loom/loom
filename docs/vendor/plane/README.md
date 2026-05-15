@@ -1,5 +1,7 @@
 # Plane OpenAPI Snapshot
 
+> Last verified: 2026-05-15
+
 本目录保存从当前自部署 Plane 实例导出的 OpenAPI 文档。
 
 ```text
@@ -61,6 +63,8 @@ ReDoc: http://10.193.0.147:3333/api/schema/redoc/
 | `Modules` | 11 | 功能模块 |
 
 ## 更新方式
+
+详细获取流程见 [`../99-reference/plane-docs-acquisition.md`](../99-reference/plane-docs-acquisition.md)。快速更新：
 
 ```bash
 curl -sS -o docs/vendor/plane/openapi.yaml \

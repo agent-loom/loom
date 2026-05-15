@@ -1,6 +1,8 @@
 # AI + 人 + Vibe Coding 研发一体化平台设计
 
-本文档描述一个“生产 + 开发一体化”的 Agent 平台设计。平台同时服务两类目标：
+> 本文档定位：**研发自动化设计**——AI 和人的协作流程、Issue/看板/CI 闭环。平台总体设计见 [`agent-platform-design.md`](agent-platform-design.md)；看板状态机和 Plane 集成细节见 [`../04-devflow/plane.md`](../04-devflow/plane.md)。
+
+本文档描述一个”生产 + 开发一体化”的 Agent 平台设计。平台同时服务两类目标：
 
 1. **生产侧**：承载多个业务 Agent，对前端、门店设备、运营后台、消息渠道提供问答、推荐、导购、店务咨询、工具调用等能力。
 2. **研发侧**：当需要新增或改造业务 Agent 时，由 AI 参与需求理解、方案设计、代码生成、测试生成、Issue 看板流转、评审和发布，减少重复开发成本。
@@ -776,7 +778,7 @@ agents/
     policies/
     evals/
 docs/
-  design/
+  02-architecture/
     ai-human-vibecoding-rd-platform.md
 ```
 

@@ -1,5 +1,7 @@
 # Hermes Runtime 能力利用设计
 
+> 相关文档：当前实现与设计的差距分析见 [`implementation-gap.md`](../implementation-gap.md) §2.4（Runtime 与 Hermes）；Hermes spike 设计计划见 [`next-stage-design-plan.md`](../next-stage-design-plan.md) §P0-3。
+
 本文档说明 Hermes 作为 `agent-platform` 的可插拔 Runtime Backend 时，哪些能力可以复用、如何接入、边界在哪里，以及哪些业务 Agent 适合使用 HermesBackend。
 
 结论先行：
@@ -97,10 +99,10 @@ Hermes 只负责某些 Agent 的单次运行能力：
 `myj` 第一阶段不建议直接改成 HermesBackend。更稳妥：
 
 ```text
-阶段 1：myj 使用 NativeRuntimeBackend + adapter 调现有 MYJ
-阶段 2：把 MYJ 工具、prompt、eval manifest 化
-阶段 3：非核心 MYJ 子能力可试 HermesBackend
-阶段 4：如果 HermesBackend 在协议、trace、权限上足够稳定，再评估主链路
+H1：myj 使用 NativeRuntimeBackend + adapter 调现有 MYJ
+H2：把 MYJ 工具、prompt、eval manifest 化
+H3：非核心 MYJ 子能力可试 HermesBackend
+H4：如果 HermesBackend 在协议、trace、权限上足够稳定，再评估主链路
 ```
 
 适合先用 Hermes 的 MYJ 子能力：
@@ -571,35 +573,37 @@ NativeRuntime
 | Memory 泄露租户数据 | session namespace + tenant isolation + 默认关闭长期 memory |
 | run_agent.py 过大难改 | 不改 core，只通过公开接口和轻 patch |
 
-## 15. MVP 接入顺序
+## 15. Hermes 接入顺序
+
+> 注意：以下 H0-H4 是 Hermes 接入的内部阶段，与平台总体的 S0-S5 阶段（见 `document-stage-map.md`）是不同维度。
 
 不建议第一阶段把 Hermes 放进生产主链路。推荐顺序：
 
-### 阶段 0：设计和接口
+### H0：设计和接口
 
 1. 定义 `RuntimeBackend`。
 2. Manifest 支持 `runtime.backend=hermes`。
 3. 定义 Hermes adapter 目录。
 
-### 阶段 1：研发侧试点
+### H1：研发侧试点
 
 1. 用 HermesBackend 跑 `DocAgent`。
 2. 用 HermesBackend 跑 `TestAgent`。
 3. 接入 GitLab MR comment 或本地 task pack。
 
-### 阶段 2：低风险生产 Agent
+### H2：低风险生产 Agent
 
 1. FAQ Agent。
 2. 内部运营助手。
 3. 文档问答 Agent。
 
-### 阶段 3：业务子能力
+### H3：业务子能力
 
 1. MYJ 店务 FAQ 子 Agent。
 2. MYJ 运营问答。
 3. MYJ eval case 生成。
 
-### 阶段 4：评估业务主链路
+### H4：评估业务主链路
 
 只有当以下条件满足，才考虑主链路：
 

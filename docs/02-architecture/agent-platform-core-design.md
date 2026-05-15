@@ -1,5 +1,7 @@
 # Agent Platform 核心功能设计
 
+> 本文档定位：平台**内部重构设计**——代码怎么组织、业务如何剥离、管线如何串联。平台总体设计见 [`agent-platform-design.md`](agent-platform-design.md)。
+
 本文档聚焦 agent-platform 自身作为平台的功能设计。不讨论任何具体业务 Agent（如 MYJ、促销推荐）的功能。目标是让平台成为一个通用的、业务无关的 Agent 运行与管理基础设施。
 
 ## 1. 设计原则
@@ -409,6 +411,8 @@ Knowledge source 由 Agent manifest 声明，平台按 backend type 分发检索
 ```
 
 ## 5. Domain Model 解耦
+
+> **注意**：本节提出的变更将影响 [`01-contracts/agent-request-response.md`](../01-contracts/agent-request-response.md) 中的字段定义和示例。实施前需同步更新契约文档，建议通过 ADR 记录此决策。
 
 当前 `RequestContext` 中的零售行业字段需要泛化：
 

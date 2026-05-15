@@ -1,5 +1,7 @@
 # 实现与设计差距分析
 
+> Last verified against code: 2026-05-15
+
 本文档对齐以下两份设计文档和当前代码实现：
 
 - `docs/02-architecture/agent-platform-design.md`

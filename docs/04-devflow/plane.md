@@ -1,5 +1,7 @@
 # Plane 集成设计
 
+> 相关文档：Plane API 端点速查表见 [`../vendor/plane/endpoints.md`](../vendor/plane/endpoints.md)；OpenAPI 获取方式见 [`../99-reference/plane-docs-acquisition.md`](../99-reference/plane-docs-acquisition.md)。
+
 本文档定义 `agent-platform` 如何接入已部署的 Plane，把 Plane 作为需求、Work Item、看板和 AI 研发任务流的入口。
 
 当前 Plane 实例：
@@ -267,7 +269,8 @@ class PlaneAdapter:
     def get_work_item(self, work_item_id: str) -> PlaneWorkItem:
         ...
 
-    def update_work_item_state(self, work_item_id: str, state: str) -> None:
+    def update_work_item_state(self, work_item_id: str, state_id: str) -> None:
+        """state_id 是 Plane 内部 UUID，通过 States API 查询获得。"""
         ...
 
     def update_custom_properties(self, work_item_id: str, values: dict) -> None:
@@ -361,23 +364,7 @@ if not hmac.compare_digest(expected, received_signature):
 
 ## 12. MCP Server 使用方式
 
-Plane 官方提供 MCP Server。对自部署实例，文档给出的 local stdio 方式使用：
-
-```json
-{
-  "mcpServers": {
-    "plane": {
-      "command": "uvx",
-      "args": ["plane-mcp-server", "stdio"],
-      "env": {
-        "PLANE_API_KEY": "<YOUR_API_KEY>",
-        "PLANE_WORKSPACE_SLUG": "<YOUR_WORKSPACE_SLUG>",
-        "PLANE_BASE_URL": "http://10.193.0.147:3333/api"
-      }
-    }
-  }
-}
-```
+Plane 官方提供 MCP Server。配置方式和环境变量见 [`../99-reference/plane-docs-acquisition.md`](../99-reference/plane-docs-acquisition.md) §4。
 
 建议用途：
 

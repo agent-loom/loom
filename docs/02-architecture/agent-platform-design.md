@@ -1,5 +1,7 @@
 # 多 Agent 平台设计草案
 
+> 本文档定位：平台**总体设计**——做什么、怎么分层、外部交互模型。平台内部代码组织和去业务化重构见 [`agent-platform-core-design.md`](agent-platform-core-design.md)；研发自动化流程见 [`ai-human-vibecoding-rd-platform.md`](ai-human-vibecoding-rd-platform.md)。
+
 本文档描述一个可承载多个业务 Agent 的平台设计。目标不是把 `myj` 继续扩成一个更大的单体 Agent，而是把 `myj` 抽象成平台里的第一个 Agent Package，后续可以用同一套运行时接入更多零售商、业务域、设备形态和知识库。
 
 ## 1. 设计目标
@@ -956,7 +958,9 @@ flowchart LR
 
 ## 22. 重构优先级
 
-建议按“先契约、再拆分、再替换 runtime”的顺序推进。
+> 最新优先级和实现差距以 [`implementation-gap.md`](../implementation-gap.md) 为准。以下为初始规划，保留做参考。
+
+建议按”先契约、再拆分、再替换 runtime”的顺序推进。
 
 | 优先级 | 工作 | 目的 |
 | --- | --- | --- |
