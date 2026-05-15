@@ -2,8 +2,8 @@
 
 本文档对齐以下两份设计文档和当前代码实现：
 
-- `docs/agent-platform-design.md`
-- `docs/ai-human-vibecoding-rd-platform.md`
+- `docs/02-architecture/agent-platform-design.md`
+- `docs/02-architecture/ai-human-vibecoding-rd-platform.md`
 
 结论：当前实现已经覆盖了平台 MVP 的骨架，具备“多 Agent Package + 统一请求响应契约 + 路由 + RuntimeBackend 抽象 + DevFlow API + Plane/GitLab Adapter + Eval + 基础测试”的能力。但距离设计里的生产级 Agent Platform 还有明显差距，主要集中在持久化、真实 Hermes/LLM 集成、真实外部系统闭环、Coding Agent 执行器、权限治理、发布治理和线上观测。
 
@@ -35,7 +35,7 @@
 
 ```text
 .venv/bin/python -m pytest
-367 passed
+373 passed
 
 .venv/bin/ruff check src tests scripts
 All checks passed

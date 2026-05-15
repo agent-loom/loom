@@ -149,9 +149,9 @@ agent-platform/
 
 可以正式开工的最低条件：
 
-1. `docs/mvp.md` 已确认。
-2. `docs/contracts/agent-request-response.md` 已确认。
-3. `docs/contracts/agent-manifest-v1.md` 已确认。
-4. `docs/devflow-task-pack.md` 已确认。
+1. `docs/00-baseline/mvp.md` 已确认。
+2. `docs/01-contracts/agent-request-response.md` 已确认。
+3. `docs/01-contracts/agent-manifest-v1.md` 已确认。
+4. `docs/01-contracts/devflow-task-pack.md` 已确认。
 5. Git 仓库已初始化。
 6. 第一批开发任务已拆分。

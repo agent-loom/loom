@@ -10,17 +10,17 @@
 
 ```text
 docs/README.md
-docs/mvp.md
-docs/agent-platform-design.md
-docs/ai-human-vibecoding-rd-platform.md
-docs/gitlab.md
-docs/plane.md
-docs/plane-docs-acquisition.md
-docs/hermes-runtime.md
-docs/devflow-task-pack.md
-docs/pre-development-checklist.md
-docs/contracts/agent-request-response.md
-docs/contracts/agent-manifest-v1.md
+docs/00-baseline/mvp.md
+docs/02-architecture/agent-platform-design.md
+docs/02-architecture/ai-human-vibecoding-rd-platform.md
+docs/04-devflow/gitlab.md
+docs/04-devflow/plane.md
+docs/99-reference/plane-docs-acquisition.md
+docs/03-runtime/hermes-runtime.md
+docs/01-contracts/devflow-task-pack.md
+docs/00-baseline/pre-development-checklist.md
+docs/01-contracts/agent-request-response.md
+docs/01-contracts/agent-manifest-v1.md
 docs/implementation-gap.md
 docs/adr/0001-architecture-baseline.md
 docs/vendor/plane/README.md
@@ -214,11 +214,11 @@ MYJ 主链路：后续评估
 
 ## 5. 后续文档维护规则
 
-1. 修改 `AgentRequest / AgentResponse` 必须同步更新 `docs/contracts/agent-request-response.md`。
-2. 修改 manifest 字段必须同步更新 `docs/contracts/agent-manifest-v1.md`。
-3. 修改 DevFlow task pack 必须同步更新 `docs/devflow-task-pack.md`。
-4. 修改 Plane API 使用方式必须同步更新 `docs/plane.md`、`docs/plane-docs-acquisition.md` 和 `docs/vendor/plane/endpoints.md`。
-5. 修改 Hermes 接入策略必须同步更新 `docs/hermes-runtime.md` 和 ADR。
+1. 修改 `AgentRequest / AgentResponse` 必须同步更新 `docs/01-contracts/agent-request-response.md`。
+2. 修改 manifest 字段必须同步更新 `docs/01-contracts/agent-manifest-v1.md`。
+3. 修改 DevFlow task pack 必须同步更新 `docs/01-contracts/devflow-task-pack.md`。
+4. 修改 Plane API 使用方式必须同步更新 `docs/04-devflow/plane.md`、`docs/99-reference/plane-docs-acquisition.md` 和 `docs/vendor/plane/endpoints.md`。
+5. 修改 Hermes 接入策略必须同步更新 `docs/03-runtime/hermes-runtime.md` 和 ADR。
 6. 修改部署、路由、持久化或 DevFlow 实现状态必须同步更新 `docs/implementation-gap.md`。
 7. 新增重大决策必须新增 ADR。
 
