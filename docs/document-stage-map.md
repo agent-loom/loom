@@ -60,9 +60,9 @@
 | 文档 | 状态 | 用途 |
 | --- | --- | --- |
 | `next-stage-design-plan.md` | Planned | 下一阶段设计清单和顺序 |
-| `05-production/persistence-storage-design.md` | Planned | 持久化、repository、migration 设计 |
-| `05-production/package-artifact-release-design.md` | Planned | agent artifact、manifest snapshot、发布回滚设计 |
-| `05-production/security-tenant-policy-design.md` | Planned | 鉴权、租户、tool policy、secret、脱敏设计 |
+| `05-production/persistence-storage-design.md` | Draft | 持久化、repository、migration 设计 |
+| `05-production/package-artifact-release-design.md` | Draft | agent artifact、manifest snapshot、发布回滚设计 |
+| `05-production/security-tenant-policy-design.md` | Draft | 鉴权、租户、tool policy、secret、脱敏设计 |
 | `05-production/observability-eval-feedback-design.md` | Planned | trace、metrics、eval report、反馈闭环设计 |
 
 ### S3. Hermes 真接入
@@ -70,7 +70,7 @@
 | 文档 | 状态 | 用途 |
 | --- | --- | --- |
 | `03-runtime/hermes-runtime.md` | Partially Implemented | Hermes 接入边界和能力映射 |
-| `03-runtime/hermes-backend-spike.md` | Planned | 官方 Hermes runtime spike 设计和验收 |
+| `03-runtime/hermes-backend-spike.md` | Draft | 官方 Hermes runtime spike 设计和验收 |
 
 ### S4. AI 研发闭环
 
@@ -78,8 +78,8 @@
 | --- | --- | --- |
 | `04-devflow/gitlab.md` | Partially Implemented | GitLab 交付闭环设计 |
 | `04-devflow/plane.md` | Partially Implemented | Plane Work Item 和看板集成设计 |
-| `04-devflow/devflow-runner-workspace-design.md` | Planned | CodingAgentRunner、workspace、path guard |
-| `04-devflow/devflow-state-sync-design.md` | Planned | Plane/GitLab 状态同步、幂等、重试、DLQ |
+| `04-devflow/devflow-runner-workspace-design.md` | Draft | CodingAgentRunner、workspace、path guard |
+| `04-devflow/devflow-state-sync-design.md` | Draft | Plane/GitLab 状态同步、幂等、重试、DLQ |
 
 ### S5. 多 Agent 规模化
 
