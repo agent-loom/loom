@@ -1,11 +1,11 @@
-# HermesBackend Spike 设计
+# HermesBackend Spike 设计0
 
-> Status: Draft
-> Stage: S3
-> Owner: platform
+> Status: Draft  
+> Stage: S3  
+> Owner: platform  
 > Last verified against code: 2026-05-15
 
-> 前置文档：战略设计见 [`hermes-runtime.md`](./hermes-runtime.md)；差距分析见 [`../implementation-gap.md`](../implementation-gap.md) §2.4；设计计划见 [`../next-stage-design-plan.md`](../next-stage-design-plan.md) §P0-3。
+> 前置文档：战略设计见 `[hermes-runtime.md](./hermes-runtime.md)`；差距分析见 `[../implementation-gap.md](../implementation-gap.md)` §2.4；设计计划见 `[../next-stage-design-plan.md](../next-stage-design-plan.md)` §P0-3。
 
 ---
 
@@ -61,7 +61,7 @@ if self.model_gateway is None:
 
 | 属性 | `runtime/hermes.py` 内的 `ConversationEngine` | `runtime/conversation.py` 的 `ConversationEngine` |
 | --- | --- | --- |
-| `model_gateway` 类型 | `Any \| None` | `ModelGateway`（具体类） |
+| `model_gateway` 类型 | `Any | None` | `ModelGateway`（具体类） |
 | 调用签名 | `converse(system_prompt, user_query, *, model_config, tools, ...)` | `run(context, spec, request)` |
 | 返回值 | `dict`（含 text / tool_calls / run_id） | `ConversationResult` dataclass |
 | 消息格式 | `list[dict[str, str]]` | `list[ModelMessage]`（Pydantic model） |
@@ -86,7 +86,7 @@ if self.model_gateway is None:
 # pyproject.toml
 [project.optional-dependencies]
 hermes = [
-    "hermes-ai>=0.x.y,<0.x+1",   # pin 到 minor 级别，patch 允许浮动
+    "hermes-agent>=0.13.0,<0.14",   # pin 到 minor 级别，patch 允许浮动
 ]
 ```
 
@@ -100,18 +100,25 @@ hermes = [
 
 **Spike A：不调 Hermes API。** 复用平台的 `ModelGateway.chat()` 和 `ToolExecutor.execute()`。
 
-**Spike B：** 调用 Hermes 的 `AIAgent` 核心接口：
+**Spike B：** 调用 Hermes 的 `AIAgent` 核心接口（修正后）：
 
 ```python
-from hermes.ai_agent import AIAgent
+from run_agent import AIAgent
 
 agent = AIAgent(
+    base_url=...,
+    api_key=...,
     provider=...,
     model=...,
-    tools=[...],
+    max_iterations=10,
+    enabled_toolsets=["agent-platform"],
     session_id=...,
+    skip_context_files=True,
+    skip_memory=True,
+    quiet_mode=True,
 )
 result = agent.run_conversation(user_message, system_message, conversation_history)
+# result 是 dict，result["final_response"] 是最终文本
 ```
 
 如果 `run_conversation` 是同步的，adapter 用 `anyio.to_thread.run_sync()` 包装。
@@ -159,7 +166,7 @@ Spike B 需先验证 Hermes 的 tool callback 是 sync 还是 async 调用，再
 
 **Spike B 映射规则：**
 
-```text
+```
 hermes_session_id = f"{tenant_id}:{agent_id}:{platform_session_id}"
 ```
 
@@ -246,8 +253,8 @@ class RuntimeManager:
 
 #### 步骤 2：修改 hermes.py ConversationEngine，对齐 ModelGateway 接口
 
-当前 hermes.py 调用 `self.model_gateway.chat(messages=..., model=..., tools=...)`。
-平台 `ModelGateway.chat()` 的签名是 `chat(self, provider_name, messages, *, model, temperature, max_tokens, tools)`。
+当前 hermes.py 调用 `self.model_gateway.chat(messages=..., model=..., tools=...)`。  
+平台 `ModelGateway.chat()` 的签名是 `chat(self, provider_name, messages, *, model, temperature, max_tokens, tools)`。  
 需要在 `converse()` 中传入 `provider_name`，并使用 `ModelMessage` 对象代替 dict。
 
 修改前（hermes.py 第 191 行）：
@@ -542,6 +549,8 @@ async def test_hermes_tool_call_appears_in_trace():
 
 ## 4. Spike B：真实 Hermes SDK 集成
 
+> **重要：** 本节内容基于初始假设编写。§10-§11 基于实际源码分析提供了修正方案和 B-Q 问题的完整回答。实施时以 §10-§11 为准。
+
 ### 4.1 目标
 
 引入 Hermes Python 包，用 `AIAgent` 替代 hermes.py 内自建的 `ConversationEngine`，证明平台可以驱动真实 Hermes runtime。
@@ -549,17 +558,17 @@ async def test_hermes_tool_call_appears_in_trace():
 ### 4.2 前置条件
 
 1. Spike A 完成，`HermesRuntimeBackend` 已是非 stub。
-2. 确认 Hermes Python 包的 PyPI 名称和版本。
-3. 确认 `AIAgent` 的公开 API 签名（`run_conversation` / `chat` / 其他）。
-4. 确认 Hermes tool handler 是 sync 还是 async callback。
+2. ~~确认 Hermes Python 包的 PyPI 名称和版本。~~ → 已确认：`hermes-agent>=0.13.0`（§10.1）
+3. ~~确认 `AIAgent` 的公开 API 签名（`run_conversation` / `chat` / 其他）。~~ → 已确认（§10.2, §10.3）
+4. ~~确认 Hermes tool handler 是 sync 还是 async callback。~~ → 已确认：sync，`(args: dict, **kw) -> str`（§10.4）
 
 ### 4.3 依赖引入
 
 ```toml
-# pyproject.toml
+# pyproject.toml — 修正后（见 §10.1）
 [project.optional-dependencies]
 hermes = [
-    "hermes-ai>=0.x.y,<0.x+1",
+    "hermes-agent>=0.13.0,<0.14",
 ]
 ```
 
@@ -574,10 +583,10 @@ uv pip install -e ".[hermes]"
 #### 条件导入 + fallback
 
 ```python
-# src/agent_platform/runtime/hermes.py 文件顶部
+# src/agent_platform/runtime/hermes.py 文件顶部 — 修正后（见 §10.1）
 
 try:
-    from hermes.ai_agent import AIAgent
+    from run_agent import AIAgent
     HERMES_AVAILABLE = True
 except ImportError:
     HERMES_AVAILABLE = False
@@ -620,7 +629,7 @@ class HermesRuntimeBackend:
         return await self._run_with_engine(request, hermes_config)
 ```
 
-#### _run_with_hermes 实现
+#### \_run_with_hermes 实现
 
 ```python
 async def _run_with_hermes(
@@ -694,7 +703,7 @@ def _normalize_hermes_result(hermes_result) -> dict:
 import pytest
 
 try:
-    from hermes.ai_agent import AIAgent
+    from run_agent import AIAgent
     HERMES_AVAILABLE = True
 except ImportError:
     HERMES_AVAILABLE = False
@@ -738,7 +747,7 @@ async def test_hermes_fallback_when_sdk_missing():
 
 ### 5.1 决策流程
 
-```text
+```
 HermesRuntimeBackend.run(request)
     |
     +-- PolicyEnforcer.check_pre_run() 失败 --> 返回 POLICY_VIOLATION
@@ -807,13 +816,13 @@ extensions:
 | Spike A | 补 `converse()` 异常处理 | 0.5d | 上一步 |
 | Spike A | 新建 `agents/hermes_echo/manifest.yaml` | 0.5d | 无（可并行） |
 | Spike A | 编写测试并通过 | 1d | 代码改动完成 |
-| **Spike A 小计** | | **3d** | |
-| Spike B | 调研 Hermes SDK API（B-Q1 ~ B-Q7） | 1d | Spike A 完成 |
+| **Spike A 小计** |  | **3d** |  |
+| Spike B | 调研 Hermes SDK API（B-Q1 \~ B-Q7） | 1d | Spike A 完成 |
 | Spike B | 实现条件导入 + `_run_with_hermes` + `_normalize_hermes_result` | 2d | API 调研完成 |
 | Spike B | 实现 `make_hermes_tool_handler` + 解决 sync/async bridge | 0.5d | adapter 完成 |
 | Spike B | fallback 逻辑和 manifest extension 支持 | 0.5d | adapter 完成 |
 | Spike B | 集成测试 | 1d | adapter 完成 |
-| **Spike B 小计** | | **5d** | |
+| **Spike B 小计** |  | **5d** |  |
 
 **建议：Spike A 优先执行。Spike B 在 Hermes SDK 版本和 API 确认后启动。**
 
@@ -840,3 +849,447 @@ extensions:
 3. **真实 LLM provider 注册**：在 `ModelGateway` 中注册 OpenAI-compatible provider（需要 `openai` SDK 或 `httpx` 直连）。
 4. **Hermes 版本升级契约测试**：每次 Hermes 版本升级时，adapter contract test 必须通过。
 5. **生产部署方案**：Hermes SDK 在容器镜像中的安装、API key 注入、provider 配置管理。
+
+---
+
+## 10. Hermes 源码分析补充（基于 hermes-agent v0.13.0）
+
+> 源码路径：`/Users/errocks/py-workspace/hermes-agent`
+> 分析日期：2026-05-15
+> 版本：hermes-agent 0.13.0
+
+本节基于实际 Hermes 源码阅读，补充 Spike B 的 API 细节并回答 §4.5 中的 B-Q1 ~ B-Q7。
+
+### 10.1 包名与导入路径
+
+**§4.3 中的假设需要修正：**
+
+| 假设 | 实际 |
+| --- | --- |
+| 包名 `hermes-ai` | `hermes-agent`（PyPI / `pyproject.toml`） |
+| 导入 `from hermes.ai_agent import AIAgent` | `from run_agent import AIAgent` |
+| 最低 Python | `>=3.11` |
+
+Hermes 不是传统包结构（无 `hermes/` 顶级包），`AIAgent` 定义在项目根目录 `run_agent.py:1094`。安装后通过 `hermes_agent.egg-info` 注册到 Python path。
+
+**修正后的 pyproject.toml 依赖：**
+
+```toml
+[project.optional-dependencies]
+hermes = [
+    "hermes-agent>=0.13.0,<0.14",
+]
+```
+
+**修正后的条件导入：**
+
+```python
+try:
+    from run_agent import AIAgent
+    HERMES_AVAILABLE = True
+except ImportError:
+    HERMES_AVAILABLE = False
+```
+
+### 10.2 AIAgent 构造函数（B-Q1 回答）
+
+完整签名约 60 个参数。平台集成关键参数：
+
+```python
+class AIAgent:
+    def __init__(
+        self,
+        base_url: str = None,           # LLM API endpoint（如 https://openrouter.ai/api/v1）
+        api_key: str = None,            # 优先级：参数 > 环境变量
+        provider: str = None,           # "openai" / "anthropic" / "openrouter" / ...
+        api_mode: str = None,           # "chat_completions" | "anthropic_messages" | "codex_responses" | "bedrock_converse"
+        model: str = "",                # 如 "anthropic/claude-sonnet-4.6"
+        max_iterations: int = 90,       # tool-calling loop 最大迭代次数
+        enabled_toolsets: List[str] = None,  # 仅启用指定 toolset
+        disabled_toolsets: List[str] = None, # 禁用指定 toolset
+        session_id: str = None,         # 会话 ID（自动生成如不提供）
+        session_db = None,              # SessionDB 实例（SQLite 会话存储）
+        skip_context_files: bool = False,  # 跳过 SOUL.md / AGENTS.md 注入
+        skip_memory: bool = False,      # 跳过 memory provider
+        quiet_mode: bool = False,       # 抑制进度输出
+        save_trajectories: bool = False,# 保存对话轨迹到 JSONL
+        platform: str = None,           # "cli" / "telegram" / "discord" / ...
+        user_id: str = None,            # 用户标识
+        # 回调接口
+        tool_progress_callback: callable = None,  # (tool_name, args_preview)
+        tool_start_callback: callable = None,
+        tool_complete_callback: callable = None,
+        stream_delta_callback: callable = None,    # 流式 token 回调
+        thinking_callback: callable = None,
+        reasoning_callback: callable = None,
+        step_callback: callable = None,
+        # ... 其余 ~35 个参数（credential_pool, fallback_model, checkpoints 等）
+    ): ...
+```
+
+**关键发现：AIAgent 构造函数不接受 `tools` 参数。** 工具系统通过全局 registry 管理（见 §10.4）。
+
+### 10.3 run_conversation 接口（B-Q2、B-Q5、B-Q7 回答）
+
+```python
+def run_conversation(
+    self,
+    user_message: str,
+    system_message: str = None,
+    conversation_history: List[Dict[str, Any]] = None,
+    task_id: str = None,
+    stream_callback: Optional[callable] = None,
+    persist_user_message: Optional[str] = None,
+) -> Dict[str, Any]:
+```
+
+**返回值类型：`dict`**，关键字段：
+
+```python
+{
+    "final_response": str,              # 最终文本响应
+    "last_reasoning": str | None,       # 最后一次 reasoning（思考链）
+    "messages": list[dict],             # 完整消息历史（OpenAI 格式）
+    "api_calls": int,                   # 本轮 API 调用次数
+    "completed": bool,                  # 是否正常完成
+    "turn_exit_reason": str,            # 退出原因
+    "interrupted": bool,                # 是否被中断
+    "model": str,                       # 实际使用的模型
+    "provider": str,                    # 实际使用的 provider
+    "input_tokens": int,                # 累计 input tokens
+    "output_tokens": int,               # 累计 output tokens
+    "estimated_cost_usd": float,        # 预估费用
+    # ... 其余 token 统计字段
+}
+```
+
+**`chat()` 方法：** 简单包装，返回 `result["final_response"]`。
+
+**Agent loop 核心逻辑（`run_agent.py:11680`）：**
+
+```python
+while (api_call_count < max_iterations and budget.remaining > 0) or grace_call:
+    if interrupt_requested: break
+    response = client.chat.completions.create(model=model, messages=messages, tools=tool_schemas)
+    # response 经过 NormalizedResponse 规范化
+    if response.tool_calls:
+        for tc in response.tool_calls:
+            result = handle_function_call(tc.name, tc.arguments, task_id)
+            messages.append(tool_result_message(result))
+    else:
+        final_response = response.content
+        break
+```
+
+### 10.4 工具系统（B-Q3、B-Q4 回答）
+
+**架构：全局 registry + 自动发现，非构造函数注入。**
+
+```
+tools/registry.py  →  ToolRegistry（全局单例 `registry`）
+       ↑
+tools/*.py  →  每个文件在 import 时调用 registry.register() 自注册
+       ↑
+model_tools.py  →  discover_builtin_tools() 触发导入；提供 handle_function_call()
+       ↑
+run_agent.py  →  AIAgent 在 loop 中调用 handle_function_call()
+```
+
+**工具注册 API：**
+
+```python
+from tools.registry import registry
+
+registry.register(
+    name="web_search",           # 工具名
+    toolset="web",               # 所属 toolset（用于启用/禁用分组）
+    schema=WEB_SEARCH_SCHEMA,    # OpenAI 格式的 function schema dict
+    handler=lambda args, **kw: web_search_tool(args.get("query", ""), limit=args.get("limit", 5)),
+    check_fn=check_web_api_key,  # 可用性检查函数
+    requires_env=["WEB_API_KEY"],# 必需环境变量
+    is_async=False,              # True 时用 _run_async() bridge
+    emoji="🔍",
+    max_result_size_chars=100_000,
+)
+```
+
+**工具 handler 签名：** `(args: dict, **kwargs) -> str`
+
+- 同步函数（`is_async=False`）直接调用
+- 异步函数（`is_async=True`）通过 `_run_async()` 在持久 event loop 上执行
+- 返回值必须是 `str`（JSON string）
+- `kwargs` 包含 `task_id`, `session_id`, `tool_call_id`, `user_task` 等上下文
+
+**工具调度：** `handle_function_call(function_name, function_args, task_id, ...)` 查 registry，执行 handler，返回 `str`。
+
+**对 Spike B 的影响：**
+
+平台工具不能通过 `AIAgent(tools=...)` 传入。集成方式有两条路径：
+
+| 路径 | 方式 | 优势 | 风险 |
+| --- | --- | --- | --- |
+| R1：注册到 Hermes registry | 将平台 `ToolExecutor` 注册为 Hermes tool | 完全复用 Hermes tool loop | 工具注册在全局空间，多 agent 可能冲突 |
+| R2：自定义 toolset + check_fn | 为平台工具创建独立 toolset，`check_fn` 控制可用性 | 隔离性好 | 需要为每个平台工具生成 schema + handler wrapper |
+
+**推荐路径 R2，具体实现：**
+
+```python
+def register_platform_tools_to_hermes(
+    tool_executor: ToolExecutor,
+    allowed_tools: list[str],
+    toolset_name: str = "agent-platform",
+):
+    """将平台 ToolExecutor 中的工具注册到 Hermes 全局 registry。"""
+    from tools.registry import registry
+
+    for tool_name in allowed_tools:
+        tool_def = tool_executor.registry.get(tool_name)
+        if not tool_def:
+            continue
+
+        schema = {
+            "name": tool_name,
+            "description": tool_def.description,
+            "parameters": tool_def.input_schema or {"type": "object", "properties": {}},
+        }
+
+        def make_handler(name: str):
+            def handler(args: dict, **kwargs) -> str:
+                import asyncio
+                loop = asyncio.new_event_loop()
+                try:
+                    result = loop.run_until_complete(
+                        tool_executor.execute(name, args, allowed_tools=allowed_tools)
+                    )
+                    return json.dumps({"output": str(result.output)}, ensure_ascii=False)
+                finally:
+                    loop.close()
+            return handler
+
+        registry.register(
+            name=tool_name,
+            toolset=toolset_name,
+            schema=schema,
+            handler=make_handler(tool_name),
+            is_async=False,
+        )
+```
+
+### 10.5 Provider 系统
+
+Hermes 的 provider 系统分三层：
+
+```
+ProviderProfile (providers/base.py)
+    声明式配置：name, api_mode, base_url, env_vars, default_headers, fallback_models
+    方法：prepare_messages(), build_extra_body(), fetch_models()
+         ↓
+ProviderTransport (agent/transports/base.py)
+    数据转换：convert_messages() → convert_tools() → build_kwargs() → normalize_response()
+    实现：ChatCompletionsTransport, AnthropicTransport, CodexTransport, BedrockTransport
+         ↓
+AIAgent
+    拥有 OpenAI client 实例，执行实际 API 调用
+    根据 api_mode 选择 transport
+```
+
+**NormalizedResponse（所有 provider 的统一返回格式）：**
+
+```python
+@dataclass
+class NormalizedResponse:
+    content: str | None
+    tool_calls: list[ToolCall] | None
+    finish_reason: str      # "stop" / "tool_calls" / "length" / "content_filter"
+    reasoning: str | None
+    usage: Usage | None
+    provider_data: dict | None
+
+@dataclass
+class ToolCall:
+    id: str | None
+    name: str
+    arguments: str          # JSON string
+    provider_data: dict | None
+```
+
+**对平台集成的影响：** AIAgent 内部使用 OpenAI SDK client，provider 通过 `base_url` + `api_key` 配置。平台的 `ModelGateway` 与 Hermes 的 provider 系统是并行的两套——Spike B 中 Hermes 直接调 LLM，不经过平台 ModelGateway。
+
+### 10.6 Session 管理（B-Q5 回答）
+
+Hermes 使用 `SessionDB`（`hermes_state.py`）实现会话持久化：
+
+- 底层：SQLite WAL mode + FTS5 全文搜索
+- 存储：session metadata、消息历史、模型配置
+- 路径：`~/.hermes/state.db`
+- 会话来源标记：`cli` / `telegram` / `discord` 等
+
+**`AIAgent` 接受 `session_id` 和 `session_db` 参数。** `run_conversation()` 也接受 `conversation_history` 参数注入历史消息。
+
+**平台集成策略（修正 §2.4）：**
+
+```python
+agent = AIAgent(
+    session_id=f"{tenant_id}:{agent_id}:{platform_session_id}",
+    session_db=None,        # 不使用 Hermes 的 SessionDB
+    skip_memory=True,       # 平台管 session，不用 Hermes memory
+    skip_context_files=True,# 不注入 Hermes 的 SOUL.md / AGENTS.md
+)
+
+# conversation_history 由平台 session_store 提供
+result = agent.run_conversation(
+    user_message=query,
+    system_message=system_prompt,
+    conversation_history=platform_session.messages,
+)
+```
+
+### 10.7 Streaming 支持（B-Q6 回答）
+
+`run_conversation()` 接受 `stream_callback: callable` 参数，用于 token 级流式输出：
+
+```python
+result = agent.run_conversation(
+    user_message="...",
+    stream_callback=lambda delta: print(delta, end="", flush=True),
+)
+```
+
+`chat()` 也支持：`agent.chat(message, stream_callback=callback)`。
+
+这意味着平台后续的 streaming 设计可以直接对接 Hermes 的 `stream_callback`，不需要额外适配。
+
+### 10.8 子代理 (Subagent) 模式
+
+Hermes 内置 `delegate_task` 工具实现子代理模式：
+
+- `_build_child_agent()` 在主线程构造子 AIAgent 实例
+- `_run_single_child()` 在 ThreadPoolExecutor 中执行
+- 子代理继承父代理的 toolset 配置（交集约束）
+- 支持嵌套（`role="orchestrator"` 允许子代理继续 delegate）
+- 最大深度默认 1（parent → child），可配置到 3
+
+**对平台的参考价值：** 平台的 `RuntimeManager` 概念上类似——平台是 orchestrator，Hermes 是 child。关键差异是平台需要跨进程边界，而 Hermes 的 delegate 是进程内线程池。
+
+---
+
+## 11. Spike B 修正方案（基于源码分析）
+
+基于 §10 的发现，§4 中的方案需要做以下修正：
+
+### 11.1 修正后的 _run_with_hermes 实现
+
+```python
+async def _run_with_hermes(
+    self, request: RuntimeRequest, hermes_config: dict
+) -> RuntimeResponse:
+    import anyio
+    from run_agent import AIAgent
+
+    model_cfg = hermes_config.get("model", {})
+    tools_config = hermes_config.get("tools", [])
+
+    # 1. 将平台工具注册到 Hermes 全局 registry
+    toolset_name = f"ap-{request.request.agent_id}"
+    if self.tool_executor and tools_config:
+        register_platform_tools_to_hermes(
+            self.tool_executor,
+            allowed_tools=tools_config,
+            toolset_name=toolset_name,
+        )
+
+    # 2. 构造 AIAgent
+    agent = AIAgent(
+        base_url=model_cfg.get("base_url", ""),
+        api_key=model_cfg.get("api_key"),
+        provider=model_cfg.get("provider", ""),
+        model=model_cfg.get("model", ""),
+        max_iterations=hermes_config.get("max_iterations", 10),
+        enabled_toolsets=[toolset_name] if tools_config else [],
+        session_id=f"{request.request.agent_id}:{request.request.session_id}",
+        session_db=None,
+        skip_context_files=True,
+        skip_memory=True,
+        quiet_mode=True,
+    )
+
+    # 3. 在线程中执行（run_conversation 是同步的）
+    system_prompt = hermes_config.get("system_prompt", "")
+    platform_history = hermes_config.get("conversation_history", [])
+
+    hermes_result = await anyio.to_thread.run_sync(
+        lambda: agent.run_conversation(
+            user_message=request.request.input.query,
+            system_message=system_prompt,
+            conversation_history=platform_history,
+        )
+    )
+
+    # 4. 规范化返回值
+    result_dict = self._normalize_hermes_result(hermes_result)
+    return self.response_mapper.to_platform_response(result_dict, request)
+
+@staticmethod
+def _normalize_hermes_result(hermes_result: dict) -> dict:
+    """将 Hermes AIAgent.run_conversation() 返回值转为 ResponseMapper 格式。"""
+
+    # 从 messages 中提取 tool call 信息
+    tool_calls = []
+    for msg in hermes_result.get("messages", []):
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            for tc in msg["tool_calls"]:
+                fn = tc.get("function", tc)
+                tool_calls.append({
+                    "name": fn.get("name", ""),
+                    "input": json.loads(fn.get("arguments", "{}")) if isinstance(fn.get("arguments"), str) else fn.get("arguments", {}),
+                    "output": "",  # tool results 在后续 tool role message 中
+                    "status": "success",
+                })
+
+    return {
+        "text": hermes_result.get("final_response", ""),
+        "tool_calls": tool_calls,
+        "run_id": None,
+        "iterations": hermes_result.get("api_calls", 0),
+        "model_calls": hermes_result.get("api_calls", 0),
+        "model": hermes_result.get("model", ""),
+        "provider": hermes_result.get("provider", ""),
+        "completed": hermes_result.get("completed", False),
+        "input_tokens": hermes_result.get("input_tokens", 0),
+        "output_tokens": hermes_result.get("output_tokens", 0),
+        "estimated_cost_usd": hermes_result.get("estimated_cost_usd", 0.0),
+    }
+```
+
+### 11.2 B-Q 问题完整回答
+
+| 编号 | 问题 | 回答 |
+| --- | --- | --- |
+| B-Q1 | `AIAgent.__init__` 必需参数 | 无必需参数，全部有默认值。平台集成推荐设置：`base_url`, `api_key`, `provider`, `model`, `max_iterations`, `enabled_toolsets`, `session_id`, `skip_context_files=True`, `skip_memory=True`, `quiet_mode=True` |
+| B-Q2 | `run_conversation` 返回值类型 | `dict`，关键字段见 §10.3 |
+| B-Q3 | tool handler 签名 | `(args: dict, **kwargs) -> str`（sync），kwargs 包含 `task_id`, `session_id` 等 |
+| B-Q4 | tool handler sync/async | 默认 sync 调用；`is_async=True` 时通过 `_run_async()` 在持久 event loop 上执行 |
+| B-Q5 | session_id 接受方式 | `AIAgent(session_id=...)` 构造时传入 + `session_db=None` 禁用 Hermes SessionDB |
+| B-Q6 | 流式 API | `run_conversation(stream_callback=callable)` + `chat(stream_callback=callable)` |
+| B-Q7 | tool call trace | 在 `result["messages"]` 中，`role="assistant"` 的消息含 `tool_calls` 列表，`role="tool"` 的消息含 `content`（工具输出） |
+
+### 11.3 Spike B 风险清单（新增）
+
+| 风险 | 影响 | 缓解措施 |
+| --- | --- | --- |
+| Hermes 全局 tool registry 冲突 | 多个 agent 注册同名工具会被拒绝 | 用 `{agent_id}.{tool_name}` 前缀 + 请求结束后 `registry.deregister()` |
+| Hermes 依赖链庞大（openai SDK、httpx 等） | 增加镜像体积、构建时间 | optional dependency group；Spike A 路径作为 fallback |
+| `run_conversation` 是同步阻塞 | 占用 worker 线程直到 LLM 返回 | `anyio.to_thread.run_sync()` 包装；配置 thread pool 大小 |
+| Hermes `run_agent.py` 是 ~15k 行单文件 | 升级时 diff 可能很大 | pin minor version；建立 adapter contract test |
+| Provider 配置在 AIAgent 中绕过平台 ModelGateway | 平台无法统一管理 API key 和配额 | Spike B 阶段 provider 由平台 config 注入；后续可实现平台 proxy provider |
+
+### 11.4 修正后的时间估算
+
+| 阶段 | 工作项 | 估时 | 前置 |
+| --- | --- | --- | --- |
+| Spike B | 实现 `register_platform_tools_to_hermes` + tool handler wrapper | 1d | Spike A 完成 |
+| Spike B | 实现 `_run_with_hermes` + `_normalize_hermes_result` | 1.5d | tool 注册完成 |
+| Spike B | 解决全局 registry 冲突（agent scope prefix + deregister） | 0.5d | _run_with_hermes 完成 |
+| Spike B | fallback 逻辑和 manifest extension 支持 | 0.5d | adapter 完成 |
+| Spike B | 集成测试 + adapter contract test | 1d | adapter 完成 |
+| **Spike B 修正小计** | | **4.5d** | |

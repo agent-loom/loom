@@ -120,7 +120,9 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         request.state.request_id = request_id
         request.state.tenant_id = tenant_id
         response: Response = await call_next(request)
-        response.headers["X-Request-ID"] = request_id
+        final_req_id = getattr(request.state, "request_id", None)
+        if final_req_id:
+            response.headers["X-Request-ID"] = final_req_id
         return response
 
 
@@ -441,6 +443,9 @@ def create_app() -> FastAPI:
         if not request.request_id:
             req_id = getattr(raw_request.state, "request_id", None)
             request.request_id = req_id or f"req_{uuid4().hex}"
+            raw_request.state.request_id = request.request_id
+        else:
+            raw_request.state.request_id = request.request_id
         header_tenant = getattr(raw_request.state, "tenant_id", None)
         if header_tenant and not request.context.tenant.tenant_id:
             request.context.tenant.tenant_id = header_tenant
