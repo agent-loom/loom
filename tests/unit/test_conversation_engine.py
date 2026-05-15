@@ -119,7 +119,7 @@ class TestConversationEngine:
     @pytest.mark.asyncio
     async def test_run_returns_immediately_when_no_tool_calls(self):
         """Stub returns a text response with no tool_calls, so the loop exits at iteration 1."""
-        gw = ModelGateway()  # has stub registered
+        gw = ModelGateway.create_default()
         executor = MagicMock(spec=ToolExecutor)
         engine = ConversationEngine(model_gateway=gw, tool_executor=executor)
 

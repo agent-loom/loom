@@ -21,8 +21,17 @@ class ToolExecutionResult(BaseModel):
 
 
 class ToolExecutor:
-    def __init__(self, registry: ToolRegistry):
+    def __init__(
+        self,
+        registry: ToolRegistry,
+        policy_engine: Any | None = None,
+        hook_registry: Any | None = None,
+        metrics_collector: Any | None = None,
+    ):
         self.registry = registry
+        self.policy_engine = policy_engine
+        self.hook_registry = hook_registry
+        self.metrics_collector = metrics_collector
 
     async def execute(
         self,
@@ -79,12 +88,36 @@ class ToolExecutor:
         max_attempts = definition.max_retries + 1
         last_error: Exception | None = None
 
+        # Hook: pre_tool
+        if self.hook_registry:
+            try:
+                await self.hook_registry.emit(
+                    "pre_tool", {"tool_name": tool_name, "payload": payload},
+                )
+            except Exception:
+                logger.exception("hook pre_tool failed")
+
         for attempt in range(max_attempts):
             try:
                 result = definition.handler(payload)
                 if isawaitable(result):
                     result = await asyncio.wait_for(result, timeout=effective_timeout)
                 latency_ms = self._latency_ms(started)
+                # Hook: post_tool (success)
+                if self.hook_registry:
+                    try:
+                        await self.hook_registry.emit(
+                            "post_tool",
+                            {"tool_name": tool_name, "status": "success"},
+                        )
+                    except Exception:
+                        logger.exception("hook post_tool failed")
+                # Metrics: success
+                if self.metrics_collector:
+                    try:
+                        self.metrics_collector.record_tool_call(tool_name, "success")
+                    except Exception:
+                        logger.exception("metrics record_tool_call failed")
                 return ToolExecutionResult(
                     tool_name=tool_name,
                     output=dict(result),
@@ -120,6 +153,21 @@ class ToolExecutor:
                 break
 
         latency_ms = self._latency_ms(started)
+        # Hook: post_tool (failed)
+        if self.hook_registry:
+            try:
+                await self.hook_registry.emit(
+                    "post_tool",
+                    {"tool_name": tool_name, "status": "failed", "error": str(last_error)},
+                )
+            except Exception:
+                logger.exception("hook post_tool failed")
+        # Metrics: failed
+        if self.metrics_collector:
+            try:
+                self.metrics_collector.record_tool_call(tool_name, "failed")
+            except Exception:
+                logger.exception("metrics record_tool_call failed")
         if isinstance(last_error, TimeoutError):
             return ToolExecutionResult(
                 tool_name=tool_name,

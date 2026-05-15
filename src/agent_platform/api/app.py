@@ -44,6 +44,7 @@ from agent_platform.knowledge import KnowledgeService
 from agent_platform.observability.logging_config import setup_logging
 from agent_platform.observability.metrics import MetricsCollector
 from agent_platform.policy import PolicyEngine
+from agent_platform.registry.artifact import ArtifactStore
 from agent_platform.registry.deployment import DeploymentAuditLog
 from agent_platform.registry.registry import AgentNotFoundError, AgentRegistry
 from agent_platform.router import AgentRouter
@@ -162,7 +163,17 @@ def create_app() -> FastAPI:
     registry = AgentRegistry(Path(settings.registry_root))
     app_semantic_router = SemanticRouter()
     router = AgentRouter(registry, settings, semantic_router=app_semantic_router)
-    runtime_manager = RuntimeManager()
+
+    app_policy_engine = PolicyEngine()
+    app_knowledge_service = KnowledgeService()
+    app_hook_registry = HookRegistry()
+    app_metrics = MetricsCollector()
+
+    runtime_manager = RuntimeManager(
+        policy_engine=app_policy_engine,
+        hook_registry=app_hook_registry,
+        metrics_collector=app_metrics,
+    )
     eval_runner = EvalRunner(runtime_manager)
     task_pack_generator = TaskPackGenerator()
     webhook_deliveries: set[str] = set()
@@ -172,10 +183,8 @@ def create_app() -> FastAPI:
     scaffolder = AgentScaffolder(settings.registry_root)
     architect_agent = ArchitectureDesignAgent()
     test_agent = TestGenerationAgent()
-    app_policy_engine = PolicyEngine()
-    app_knowledge_service = KnowledgeService()
-    app_hook_registry = HookRegistry()
     audit_log = DeploymentAuditLog()
+    artifact_store = ArtifactStore()
     ws_manager = AgentWebSocketManager(router, runtime_manager)
 
     app = FastAPI(title="Agent Platform", version="0.2.0")
@@ -183,7 +192,7 @@ def create_app() -> FastAPI:
     app.state.knowledge_service = app_knowledge_service
     app.state.hook_registry = app_hook_registry
     app.state.semantic_router = app_semantic_router
-    app.state.metrics = MetricsCollector()
+    app.state.metrics = app_metrics
 
     if settings.api_key:
         app.add_middleware(AuthMiddleware, api_key=settings.api_key)
@@ -312,11 +321,20 @@ def create_app() -> FastAPI:
             tenant_id=payload.tenant_id,
             traffic_percent=payload.traffic_percent,
         )
+
+        artifact_meta = artifact_store.create_artifact(
+            agent_id=agent_id,
+            version=version,
+            package_path=spec.package_path,
+        )
+
         audit_log.record_deploy(
             deployment,
             previous_version=previous_deployment.version if previous_deployment else None,
+            artifact_id=artifact_meta.artifact_id,
         )
         result = deployment.model_dump(mode="json")
+        result["artifact_id"] = artifact_meta.artifact_id
         if eval_report:
             result["eval"] = eval_report.model_dump(mode="json")
         return result
@@ -396,14 +414,15 @@ def create_app() -> FastAPI:
 
     @app.post("/api/v1/deployments/rollback")
     async def rollback_deployment(payload: RollbackRequest):
-        target_version = audit_log.get_rollback_version(
+        rollback_info = audit_log.get_rollback_version(
             payload.agent_id, payload.channel,
         )
-        if not target_version:
+        if not rollback_info:
             raise HTTPException(
                 status_code=404,
                 detail=f"no rollback target for {payload.agent_id}:{payload.channel}",
             )
+        target_version, _rollback_artifact_id = rollback_info
         current_deployment = registry.resolve_deployment(
             agent_id=payload.agent_id,
             channel=payload.channel,
@@ -433,6 +452,28 @@ def create_app() -> FastAPI:
     ):
         events = audit_log.list_events(agent_id, channel, limit)
         return [e.model_dump(mode="json") for e in events]
+
+    @app.get("/api/v1/artifacts")
+    async def list_artifacts(agent_id: str | None = None) -> list[dict]:
+        return [a.model_dump(mode="json") for a in artifact_store.list_artifacts(agent_id)]
+
+    @app.get("/api/v1/artifacts/{artifact_id}")
+    async def get_artifact(artifact_id: str) -> dict:
+        meta = artifact_store.get_metadata(artifact_id)
+        if not meta:
+            raise HTTPException(status_code=404, detail=f"artifact not found: {artifact_id}")
+        return meta.model_dump(mode="json")
+
+    @app.get("/api/v1/artifacts/{artifact_id}/download")
+    async def download_artifact(artifact_id: str) -> Response:
+        data = artifact_store.get_data(artifact_id)
+        if not data:
+            raise HTTPException(status_code=404, detail=f"artifact not found: {artifact_id}")
+        return Response(
+            content=data,
+            media_type="application/gzip",
+            headers={"Content-Disposition": f"attachment; filename={artifact_id.replace('@', '_')}.tar.gz"},
+        )
 
     @app.websocket("/ws/agent/chat")
     async def websocket_chat(websocket: WebSocket, session_id: str | None = None):
@@ -584,7 +625,7 @@ def _error_response(
 
 def _missing_required_context(request: AgentRequest, required_paths: list[str]) -> list[str]:
     missing: list[str] = []
-    payload = request.model_dump()
+    payload = request.model_dump(by_alias=True)
     for path in required_paths:
         value = payload
         for part in path.split("."):

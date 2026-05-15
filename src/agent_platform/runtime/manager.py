@@ -1,5 +1,7 @@
 import asyncio
+import logging
 from time import perf_counter
+from typing import Any
 from uuid import uuid4
 
 from agent_platform.domain.models import (
@@ -22,12 +24,17 @@ from agent_platform.runtime.langgraph import LangGraphRuntimeBackend
 from agent_platform.runtime.native import NativeRuntimeBackend
 from agent_platform.session.store import InMemorySessionStore, SessionStore
 
+logger = logging.getLogger(__name__)
+
 
 class RuntimeManager:
     def __init__(
         self,
         run_store: RunStore | None = None,
         session_store: SessionStore | None = None,
+        policy_engine: Any | None = None,
+        hook_registry: Any | None = None,
+        metrics_collector: Any | None = None,
     ):
         self._backends = {
             NativeRuntimeBackend.name: NativeRuntimeBackend(),
@@ -36,6 +43,9 @@ class RuntimeManager:
         }
         self.run_store = run_store or InMemoryRunStore()
         self.session_store: SessionStore = session_store or InMemorySessionStore()
+        self.policy_engine = policy_engine
+        self.hook_registry = hook_registry
+        self.metrics_collector = metrics_collector
 
     def register(self, backend) -> None:
         self._backends[backend.name] = backend
@@ -48,6 +58,37 @@ class RuntimeManager:
             backend = self._backends[backend_name]
         except KeyError as exc:
             raise ValueError(f"runtime backend not registered: {backend_name}") from exc
+
+        # Policy check: check_input
+        if self.policy_engine:
+            policy_set = self.policy_engine.load_policies(request.agent_spec)
+            violations = self.policy_engine.check_input(
+                request.request.input.query, policy_set
+            )
+            if violations:
+                error = AgentError(
+                    code="INPUT_POLICY_VIOLATION",
+                    message="; ".join(v.message for v in violations),
+                    retryable=False,
+                )
+                latency_ms = self._latency_ms(started)
+                return self._build_error_response(request, run_id, backend_name, latency_ms, error)
+
+        # Hook: on_route
+        if self.hook_registry:
+            try:
+                await self.hook_registry.emit(
+                    "on_route", {"backend": backend_name, "run_id": run_id},
+                )
+            except Exception:
+                logger.exception("hook on_route failed")
+
+        # Hook: pre_run
+        if self.hook_registry:
+            try:
+                await self.hook_registry.emit("pre_run", {"request": request, "run_id": run_id})
+            except Exception:
+                logger.exception("hook pre_run failed")
 
         session = self._load_session(request)
         if session:
@@ -65,6 +106,16 @@ class RuntimeManager:
                 message=f"agent runtime timed out after {timeout_ms}ms",
                 retryable=True,
             )
+            if self.hook_registry:
+                try:
+                    await self.hook_registry.emit("on_error", {"error": error, "run_id": run_id})
+                except Exception:
+                    logger.exception("hook on_error failed")
+            if self.metrics_collector:
+                try:
+                    self.metrics_collector.record_request(request.agent_spec.agent_id, "failed")
+                except Exception:
+                    logger.exception("metrics record_request failed")
             return self._build_error_response(request, run_id, backend_name, latency_ms, error)
         except Exception as exc:
             latency_ms = self._latency_ms(started)
@@ -73,6 +124,16 @@ class RuntimeManager:
                 message=str(exc),
                 retryable=False,
             )
+            if self.hook_registry:
+                try:
+                    await self.hook_registry.emit("on_error", {"error": error, "run_id": run_id})
+                except Exception:
+                    logger.exception("hook on_error failed")
+            if self.metrics_collector:
+                try:
+                    self.metrics_collector.record_request(request.agent_spec.agent_id, "failed")
+                except Exception:
+                    logger.exception("metrics record_request failed")
             return self._build_error_response(request, run_id, backend_name, latency_ms, error)
 
         latency_ms = self._latency_ms(started)
@@ -84,10 +145,40 @@ class RuntimeManager:
         trace.latency_ms = latency_ms
         response.response.trace = trace
 
+        # Policy check: check_output
+        if self.policy_engine:
+            policy_set = self.policy_engine.load_policies(request.agent_spec)
+            output_violations = self.policy_engine.check_output(
+                response.response.output.text.display, policy_set
+            )
+            if output_violations:
+                logger.warning("output policy violations: %s", output_violations)
+
         if session:
             display = response.response.output.text.display
             session.add_message("assistant", display)
             self.session_store.save(session)
+            if self.metrics_collector:
+                try:
+                    self.metrics_collector.set_active_sessions(len(self.session_store.list_sessions()))
+                except Exception:
+                    logger.exception("metrics set_active_sessions failed")
+
+        # Hook: post_run
+        if self.hook_registry:
+            try:
+                await self.hook_registry.emit("post_run", {"response": response, "run_id": run_id})
+            except Exception:
+                logger.exception("hook post_run failed")
+
+        # Metrics: success
+        if self.metrics_collector:
+            try:
+                agent_id = request.agent_spec.agent_id
+                self.metrics_collector.record_request(agent_id, "success")
+                self.metrics_collector.record_duration(agent_id, latency_ms / 1000.0)
+            except Exception:
+                logger.exception("metrics recording failed")
 
         self._record_run(
             request=request,
@@ -109,7 +200,7 @@ class RuntimeManager:
                 session_id=session_id,
                 agent_id=request.agent_spec.agent_id,
                 tenant_id=request.request.context.tenant.tenant_id,
-                store_id=request.request.context.store.store_id,
+                location_id=request.request.context.location.location_id,
                 user_id=request.request.context.user.user_id,
                 channel_id=request.request.context.channel.channel_id,
             )

@@ -237,8 +237,8 @@ class TestContextBuilderMetadata:
 
         assert ctx.metadata["agent_id"] == "test-agent"
         assert ctx.metadata["tenant_id"] == "t1"
-        assert ctx.metadata["retailer_id"] == "r1"
-        assert ctx.metadata["store_id"] == "s1"
+        assert ctx.metadata["org_id"] == "r1"
+        assert ctx.metadata["location_id"] == "s1"
         assert ctx.metadata["channel_id"] == "ch1"
         assert ctx.metadata["user_id"] == "u1"
         assert ctx.metadata["locale"] == "en-US"

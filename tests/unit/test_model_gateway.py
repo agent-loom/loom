@@ -146,11 +146,15 @@ class MockProvider:
 
 
 class TestModelGateway:
-    def test_stub_registered_by_default(self):
-        gw = ModelGateway()
+    def test_stub_registered_by_create_default(self):
+        gw = ModelGateway.create_default()
         assert "stub" in gw.list_providers()
         provider = gw.get_provider("stub")
         assert provider.name == "stub"
+
+    def test_empty_by_default(self):
+        gw = ModelGateway()
+        assert gw.list_providers() == []
 
     def test_register_custom_provider(self):
         gw = ModelGateway()
@@ -177,7 +181,7 @@ class TestModelGateway:
 
     @pytest.mark.asyncio
     async def test_routes_to_stub(self):
-        gw = ModelGateway()
+        gw = ModelGateway.create_default()
         messages = [ModelMessage(role="user", content="testing")]
         resp = await gw.chat("stub", messages, model="stub")
 
@@ -194,7 +198,7 @@ class TestModelGateway:
             )
 
     def test_list_providers(self):
-        gw = ModelGateway()
+        gw = ModelGateway.create_default()
         gw.register(MockProvider())
         providers = gw.list_providers()
         assert "stub" in providers

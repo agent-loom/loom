@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import warnings
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 def _utc_now() -> datetime:
@@ -28,13 +29,74 @@ class AgentError(BaseModel):
 
 
 class TenantContext(BaseModel):
+    model_config = {"populate_by_name": True}
+
     tenant_id: str | None = None
-    retailer_id: str | None = None
+    org_id: str | None = Field(default=None, alias="retailer_id")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _warn_deprecated_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "retailer_id" in data:
+            warnings.warn(
+                "Field 'retailer_id' is deprecated, use 'org_id' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        return data
+
+    @property
+    def retailer_id(self) -> str | None:
+        return self.org_id
+
+    @retailer_id.setter
+    def retailer_id(self, value: str | None) -> None:
+        self.org_id = value
 
 
-class StoreContext(BaseModel):
-    store_id: str | None = None
-    store_name: str | None = None
+class LocationContext(BaseModel):
+    model_config = {"populate_by_name": True}
+
+    location_id: str | None = Field(default=None, alias="store_id")
+    location_name: str | None = Field(default=None, alias="store_name")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _warn_deprecated_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "store_id" in data:
+                warnings.warn(
+                    "Field 'store_id' is deprecated, use 'location_id' instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+            if "store_name" in data:
+                warnings.warn(
+                    "Field 'store_name' is deprecated, use 'location_name' instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+        return data
+
+    @property
+    def store_id(self) -> str | None:
+        return self.location_id
+
+    @store_id.setter
+    def store_id(self, value: str | None) -> None:
+        self.location_id = value
+
+    @property
+    def store_name(self) -> str | None:
+        return self.location_name
+
+    @store_name.setter
+    def store_name(self, value: str | None) -> None:
+        self.location_name = value
+
+
+# Backward-compatible alias so existing code referencing StoreContext still works.
+StoreContext = LocationContext
 
 
 class ChannelContext(BaseModel):
@@ -53,13 +115,34 @@ class UserContext(BaseModel):
 
 
 class RequestContext(BaseModel):
+    model_config = {"populate_by_name": True}
+
     tenant: TenantContext = Field(default_factory=TenantContext)
-    store: StoreContext = Field(default_factory=StoreContext)
+    location: LocationContext = Field(default_factory=LocationContext, alias="store")
     channel: ChannelContext = Field(default_factory=ChannelContext)
     device: DeviceContext = Field(default_factory=DeviceContext)
     user: UserContext = Field(default_factory=UserContext)
-    locale: str = "zh-CN"
-    timezone: str = "Asia/Shanghai"
+    locale: str = "en"
+    timezone: str = "UTC"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _warn_deprecated_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "store" in data:
+            warnings.warn(
+                "Field 'store' is deprecated, use 'location' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        return data
+
+    @property
+    def store(self) -> LocationContext:
+        return self.location
+
+    @store.setter
+    def store(self, value: LocationContext) -> None:
+        self.location = value
 
 
 class InputMessage(BaseModel):
@@ -368,12 +451,33 @@ class SessionMessage(BaseModel):
 
 
 class AgentSession(BaseModel):
+    model_config = {"populate_by_name": True}
+
     session_id: str
     agent_id: str
     tenant_id: str | None = None
-    store_id: str | None = None
+    location_id: str | None = Field(default=None, alias="store_id")
     user_id: str | None = None
     channel_id: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _warn_deprecated_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "store_id" in data:
+            warnings.warn(
+                "Field 'store_id' is deprecated, use 'location_id' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        return data
+
+    @property
+    def store_id(self) -> str | None:
+        return self.location_id
+
+    @store_id.setter
+    def store_id(self, value: str | None) -> None:
+        self.location_id = value
     history: list[SessionMessage] = Field(default_factory=list)
     state_snapshot: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=_utc_now)

@@ -82,8 +82,8 @@ class ContextBuilder:
         return {
             "agent_id": spec.agent_id,
             "tenant_id": request.context.tenant.tenant_id,
-            "retailer_id": request.context.tenant.retailer_id,
-            "store_id": request.context.store.store_id,
+            "org_id": request.context.tenant.org_id,
+            "location_id": request.context.location.location_id,
             "channel_id": request.context.channel.channel_id,
             "user_id": request.context.user.user_id,
             "locale": request.context.locale,

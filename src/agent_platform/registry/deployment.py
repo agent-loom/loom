@@ -21,6 +21,7 @@ class DeploymentEvent(BaseModel):
     status: AgentDeploymentStatus
     previous_version: str | None = None
     actor: str = "system"
+    artifact_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -29,13 +30,14 @@ class DeploymentAuditLog:
 
     def __init__(self) -> None:
         self._events: list[DeploymentEvent] = []
-        self._rollback_targets: dict[str, str] = {}
+        self._rollback_targets: dict[str, tuple[str, str | None]] = {}
 
     def record_deploy(
         self,
         deployment: AgentDeployment,
         previous_version: str | None = None,
         actor: str = "system",
+        artifact_id: str | None = None,
     ) -> DeploymentEvent:
         event = DeploymentEvent(
             event_type="deploy",
@@ -46,12 +48,13 @@ class DeploymentAuditLog:
             status=deployment.status,
             previous_version=previous_version,
             actor=actor,
+            artifact_id=artifact_id,
         )
         self._events.append(event)
 
         if previous_version:
             key = f"{deployment.agent_id}:{deployment.channel}"
-            self._rollback_targets[key] = previous_version
+            self._rollback_targets[key] = (previous_version, None)
 
         logger.info(
             "deployment event: %s %s@%s -> %s (channel=%s, traffic=%d%%)",
@@ -91,7 +94,8 @@ class DeploymentAuditLog:
         )
         return event
 
-    def get_rollback_version(self, agent_id: str, channel: str) -> str | None:
+    def get_rollback_version(self, agent_id: str, channel: str) -> tuple[str, str | None] | None:
+        """Return (version, artifact_id) for rollback, or None if no target exists."""
         key = f"{agent_id}:{channel}"
         return self._rollback_targets.get(key)
 

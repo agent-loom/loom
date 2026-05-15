@@ -1,0 +1,23 @@
+suite_name: hermes_echo_golden
+description: Basic golden test cases for Hermes echo agent
+
+cases:
+  - id: basic_greeting
+    input:
+      query: "Hello"
+    expected:
+      contains_any:
+        - "Hello"
+        - "hello"
+        - "Hi"
+        - "hi"
+    tags: [basic]
+
+  - id: simple_question
+    input:
+      query: "What is 2+2?"
+    expected:
+      contains_any:
+        - "4"
+        - "four"
+    tags: [basic]

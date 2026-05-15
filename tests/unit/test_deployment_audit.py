@@ -73,7 +73,7 @@ def test_record_deploy_sets_rollback_target(audit_log: DeploymentAuditLog):
     audit_log.record_deploy(deployment, previous_version="1.0.0")
 
     target = audit_log.get_rollback_version("myj", "prod")
-    assert target == "1.0.0"
+    assert target[0] == "1.0.0"
 
 
 def test_record_deploy_no_rollback_target_without_previous(audit_log: DeploymentAuditLog):
@@ -175,7 +175,7 @@ def test_get_rollback_version_returns_previous(audit_log: DeploymentAuditLog):
     deployment = _make_deployment(version="2.0.0", channel="prod")
     audit_log.record_deploy(deployment, previous_version="1.0.0")
 
-    assert audit_log.get_rollback_version("myj", "prod") == "1.0.0"
+    assert audit_log.get_rollback_version("myj", "prod")[0] == "1.0.0"
 
 
 def test_get_rollback_version_returns_none_when_no_history(audit_log: DeploymentAuditLog):
@@ -199,11 +199,11 @@ def test_get_rollback_version_returns_none_for_wrong_channel(audit_log: Deployme
 def test_rollback_version_updates_on_successive_deploys(audit_log: DeploymentAuditLog):
     dep1 = _make_deployment(version="2.0.0")
     audit_log.record_deploy(dep1, previous_version="1.0.0")
-    assert audit_log.get_rollback_version("myj", "prod") == "1.0.0"
+    assert audit_log.get_rollback_version("myj", "prod")[0] == "1.0.0"
 
     dep2 = _make_deployment(version="3.0.0")
     audit_log.record_deploy(dep2, previous_version="2.0.0")
-    assert audit_log.get_rollback_version("myj", "prod") == "2.0.0"
+    assert audit_log.get_rollback_version("myj", "prod")[0] == "2.0.0"
 
 
 # ---------------------------------------------------------------------------
