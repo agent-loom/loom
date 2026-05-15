@@ -18,6 +18,7 @@ from agent_platform.domain.models import (
     RuntimeResponse,
     ToolCallTrace,
 )
+from agent_platform.runtime.model_gateway import ModelMessage
 
 logger = logging.getLogger(__name__)
 
@@ -173,83 +174,99 @@ class ConversationEngine:
     ) -> dict[str, Any]:
         """Run a multi-turn tool-use loop and return a result dict.
 
-        Returns a dict with keys: text, tool_calls, run_id, iterations,
+        Returns a dict with keys: text, tool_calls, iterations,
         model_calls.
         """
         if self.model_gateway is None:
-            return self._stub_response(system_prompt, user_query, model_config)
+            return self._stub_response(
+                system_prompt, user_query, model_config,
+            )
 
-        messages: list[dict[str, str]] = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_query},
+        messages: list[ModelMessage] = [
+            ModelMessage(role="system", content=system_prompt),
+            ModelMessage(role="user", content=user_query),
         ]
+        provider = model_config.get("provider", "stub")
         tool_call_traces: list[dict[str, Any]] = []
         total_model_calls = 0
 
         for iteration in range(max_iterations):
             total_model_calls += 1
             model_response = await self.model_gateway.chat(
-                messages=messages,
+                provider,
+                messages,
                 model=model_config.get("model", "native-demo"),
-                temperature=model_config.get("temperature", 0.2),
-                max_tokens=model_config.get("max_tokens", 1024),
-                tools=tools,
+                temperature=model_config.get(
+                    "temperature", 0.2,
+                ),
+                max_tokens=model_config.get(
+                    "max_tokens", 1024,
+                ),
+                tools=tools or None,
             )
 
-            # If the model did not request a tool call, we are done.
-            requested_tools = model_response.get("tool_calls", [])
-            if not requested_tools:
+            # If the model did not request tool calls, done.
+            if not model_response.tool_calls:
                 return {
-                    "text": model_response.get("content", ""),
+                    "text": model_response.content,
                     "tool_calls": tool_call_traces,
-                    "run_id": model_response.get("run_id"),
                     "iterations": iteration + 1,
                     "model_calls": total_model_calls,
                 }
 
-            # Execute each requested tool and feed results back.
-            for tc in requested_tools:
-                tool_name = tc.get("name", "")
-                tool_input = tc.get("input", {})
+            # Execute each requested tool, feed results back.
+            for tc in model_response.tool_calls:
+                tool_name = tc.name
+                tool_input = tc.arguments
                 if self.tool_executor:
-                    tool_result = await self.tool_executor.execute(
-                        tool_name,
-                        tool_input,
-                        allowed_tools=[t["name"] for t in tools],
-                        timeout_ms=3000,
+                    tool_result = (
+                        await self.tool_executor.execute(
+                            tool_name,
+                            tool_input,
+                            allowed_tools=[
+                                t["name"] for t in tools
+                            ],
+                            timeout_ms=3000,
+                        )
                     )
                     tool_output = tool_result.output
                     tool_call_traces.append({
                         "name": tool_name,
                         "status": tool_result.trace.status,
-                        "latency_ms": tool_result.trace.latency_ms,
+                        "latency_ms": (
+                            tool_result.trace.latency_ms
+                        ),
                     })
                 else:
-                    tool_output = {"result": f"[stub] {tool_name} not executed"}
+                    tool_output = {
+                        "result": (
+                            f"[stub] {tool_name} not executed"
+                        ),
+                    }
                     tool_call_traces.append({
                         "name": tool_name,
                         "status": "skipped",
                     })
 
-                messages.append({"role": "assistant", "content": "", "tool_calls": [tc]})
-                messages.append({
-                    "role": "tool",
-                    "content": str(tool_output),
-                    "tool_call_id": tc.get("id", ""),
-                })
+                messages.append(
+                    ModelMessage(
+                        role="tool",
+                        content=str(tool_output),
+                    ),
+                )
 
-        # Exhausted iterations -- make one final call to get a closing answer.
+        # Exhausted iterations -- final call for closing answer.
         total_model_calls += 1
         final = await self.model_gateway.chat(
-            messages=messages,
+            provider,
+            messages,
             model=model_config.get("model", "native-demo"),
             temperature=model_config.get("temperature", 0.2),
             max_tokens=model_config.get("max_tokens", 1024),
         )
         return {
-            "text": final.get("content", ""),
+            "text": final.content,
             "tool_calls": tool_call_traces,
-            "run_id": final.get("run_id"),
             "iterations": max_iterations,
             "model_calls": total_model_calls,
         }

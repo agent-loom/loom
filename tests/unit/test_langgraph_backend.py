@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from agent_platform.domain.models import (
@@ -17,7 +19,20 @@ from agent_platform.runtime.langgraph import (
     classify_intent,
     should_continue,
 )
-from agent_platform.tools import ToolExecutor, create_default_tool_registry
+from agent_platform.tools import (
+    ToolExecutor,
+    create_default_tool_registry,
+    load_agent_tools,
+)
+
+_AGENTS_DIR = Path(__file__).resolve().parents[2] / "agents"
+
+
+def _registry_with_myj_tools():
+    """Return a tool registry pre-loaded with the myj agent tools."""
+    registry = create_default_tool_registry()
+    load_agent_tools(registry, _AGENTS_DIR / "myj", "myj")
+    return registry
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -30,20 +45,24 @@ def _make_spec(
     langgraph_ext: dict | None = None,
 ) -> AgentSpec:
     """Build a minimal AgentSpec without touching the filesystem."""
-    from pathlib import Path
 
     manifest_data = {
         "api_version": "agent.platform/v1",
         "kind": "AgentPackage",
         "metadata": {"id": agent_id, "name": "Graph Demo"},
         "version": {"package_version": "0.1.0"},
-        "runtime": {"backend": "langgraph", "max_iterations": max_iterations},
+        "runtime": {
+            "backend": "langgraph",
+            "max_iterations": max_iterations,
+        },
         "tools": {"allow": tools_allow or []},
         "output": {"protocol": "agent-chat/v1"},
         "extensions": {"langgraph": langgraph_ext or {}},
     }
     manifest = AgentManifest.model_validate(manifest_data)
-    return AgentSpec(manifest=manifest, package_path=Path("/tmp/fake"))
+    return AgentSpec(
+        manifest=manifest, package_path=Path("/tmp/fake")
+    )
 
 
 def _make_request(
@@ -53,7 +72,10 @@ def _make_request(
     max_iterations: int = 4,
 ) -> RuntimeRequest:
     if spec is None:
-        spec = _make_spec(tools_allow=tools_allow, max_iterations=max_iterations)
+        spec = _make_spec(
+            tools_allow=tools_allow,
+            max_iterations=max_iterations,
+        )
     return RuntimeRequest(
         request=AgentRequest(
             agent_id=spec.agent_id,
@@ -79,16 +101,26 @@ class TestLangGraphBackendCreatesValidResponse:
 
         assert result.response.output.status == "completed"
         assert result.response.output.text.display
-        assert result.response.debug["runtime_backend"] == "langgraph"
+        assert (
+            result.response.debug["runtime_backend"]
+            == "langgraph"
+        )
         assert result.response.agent.agent_id == "graph_demo"
 
     @pytest.mark.asyncio
-    async def test_response_contains_query_when_no_tool_matches(self):
+    async def test_response_contains_query_when_no_tool_matches(
+        self,
+    ):
         backend = LangGraphRuntimeBackend()
-        request = _make_request("something random with no matching keywords")
+        request = _make_request(
+            "something random with no matching keywords"
+        )
         result = await backend.run(request)
 
-        assert "something random" in result.response.output.text.display
+        assert (
+            "something random"
+            in result.response.output.text.display
+        )
 
 
 class TestToolsCalledDuringGraphExecution:
@@ -96,9 +128,11 @@ class TestToolsCalledDuringGraphExecution:
 
     @pytest.mark.asyncio
     async def test_goods_search_tool_called(self):
-        registry = create_default_tool_registry()
+        registry = _registry_with_myj_tools()
         executor = ToolExecutor(registry)
-        backend = LangGraphRuntimeBackend(tool_executor=executor)
+        backend = LangGraphRuntimeBackend(
+            tool_executor=executor
+        )
 
         request = _make_request(
             query="推荐低糖饮料",
@@ -106,18 +140,24 @@ class TestToolsCalledDuringGraphExecution:
         )
         result = await backend.run(request)
 
-        # Tool should have been called -- we expect trace entries.
         assert len(result.response.trace.tool_calls) >= 1
-        assert result.response.trace.tool_calls[0].tool_name == "myj.goods_search"
-        assert result.response.trace.tool_calls[0].status == "success"
-        # The final answer should contain the tool output summary.
+        assert (
+            result.response.trace.tool_calls[0].tool_name
+            == "myj.goods_search"
+        )
+        assert (
+            result.response.trace.tool_calls[0].status
+            == "success"
+        )
         assert "低糖" in result.response.output.text.display
 
     @pytest.mark.asyncio
     async def test_promotion_lookup_tool_called(self):
-        registry = create_default_tool_registry()
+        registry = _registry_with_myj_tools()
         executor = ToolExecutor(registry)
-        backend = LangGraphRuntimeBackend(tool_executor=executor)
+        backend = LangGraphRuntimeBackend(
+            tool_executor=executor
+        )
 
         request = _make_request(
             query="有什么优惠活动",
@@ -126,32 +166,45 @@ class TestToolsCalledDuringGraphExecution:
         result = await backend.run(request)
 
         assert len(result.response.trace.tool_calls) >= 1
-        assert result.response.trace.tool_calls[0].tool_name == "myj.promotion_lookup"
+        assert (
+            result.response.trace.tool_calls[0].tool_name
+            == "myj.promotion_lookup"
+        )
 
     @pytest.mark.asyncio
     async def test_no_tool_called_when_no_keyword_match(self):
-        registry = create_default_tool_registry()
+        registry = _registry_with_myj_tools()
         executor = ToolExecutor(registry)
-        backend = LangGraphRuntimeBackend(tool_executor=executor)
+        backend = LangGraphRuntimeBackend(
+            tool_executor=executor
+        )
 
         request = _make_request(
             query="unrelated english sentence",
-            tools_allow=["myj.goods_search", "myj.promotion_lookup"],
+            tools_allow=[
+                "myj.goods_search",
+                "myj.promotion_lookup",
+            ],
         )
         result = await backend.run(request)
 
         assert result.response.trace.tool_calls == []
-        assert result.response.output.text.display.startswith("Received:")
+        assert result.response.output.text.display.startswith(
+            "Received:"
+        )
 
 
 class TestMaxIterationsRespected:
-    """The graph must stop even if the conditional edge keeps returning 'continue'."""
+    """The graph must stop even if the conditional edge keeps
+    returning 'continue'."""
 
     @pytest.mark.asyncio
     async def test_iteration_count_in_debug(self):
-        registry = create_default_tool_registry()
+        registry = _registry_with_myj_tools()
         executor = ToolExecutor(registry)
-        backend = LangGraphRuntimeBackend(tool_executor=executor)
+        backend = LangGraphRuntimeBackend(
+            tool_executor=executor
+        )
 
         request = _make_request(
             query="推荐低糖饮料",
@@ -165,9 +218,11 @@ class TestMaxIterationsRespected:
 
     @pytest.mark.asyncio
     async def test_single_iteration_max(self):
-        registry = create_default_tool_registry()
+        registry = _registry_with_myj_tools()
         executor = ToolExecutor(registry)
-        backend = LangGraphRuntimeBackend(tool_executor=executor)
+        backend = LangGraphRuntimeBackend(
+            tool_executor=executor
+        )
 
         spec = _make_spec(
             tools_allow=["myj.goods_search"],
@@ -178,7 +233,6 @@ class TestMaxIterationsRespected:
 
         iterations = result.response.debug.get("iterations", 0)
         assert iterations <= 1
-        # Should still produce a valid response.
         assert result.response.output.status == "completed"
 
     @pytest.mark.asyncio
@@ -191,7 +245,9 @@ class TestMaxIterationsRespected:
         assert should_continue(state) == "end"
 
     @pytest.mark.asyncio
-    async def test_should_continue_returns_continue_below_limit(self):
+    async def test_should_continue_returns_continue_below_limit(
+        self,
+    ):
         state: GraphState = {
             "iteration_count": 1,
             "pending_tool_calls": True,
@@ -201,11 +257,12 @@ class TestMaxIterationsRespected:
 
 
 class TestClassifyIntentNode:
-    """Unit tests for the classify_intent node function in isolation."""
+    """Unit tests for the classify_intent node function in
+    isolation."""
 
     @pytest.mark.asyncio
     async def test_matches_goods_search_keywords(self):
-        registry = create_default_tool_registry()
+        registry = _registry_with_myj_tools()
         executor = ToolExecutor(registry)
 
         state: dict = {
@@ -221,7 +278,7 @@ class TestClassifyIntentNode:
 
     @pytest.mark.asyncio
     async def test_matches_location_keywords(self):
-        registry = create_default_tool_registry()
+        registry = _registry_with_myj_tools()
         executor = ToolExecutor(registry)
 
         state: dict = {
@@ -237,12 +294,15 @@ class TestClassifyIntentNode:
 
     @pytest.mark.asyncio
     async def test_no_match_returns_none(self):
-        registry = create_default_tool_registry()
+        registry = _registry_with_myj_tools()
         executor = ToolExecutor(registry)
 
         state: dict = {
             "query": "random unrelated query in english",
-            "allowed_tools": ["myj.goods_search", "myj.goods_location"],
+            "allowed_tools": [
+                "myj.goods_search",
+                "myj.goods_location",
+            ],
             "_tool_executor": executor,
             "matched_tool": None,
             "pending_tool_calls": False,
@@ -253,12 +313,12 @@ class TestClassifyIntentNode:
 
     @pytest.mark.asyncio
     async def test_no_match_when_tool_not_in_allowed(self):
-        registry = create_default_tool_registry()
+        registry = _registry_with_myj_tools()
         executor = ToolExecutor(registry)
 
         state: dict = {
             "query": "推荐低糖饮料",
-            "allowed_tools": [],  # No tools allowed.
+            "allowed_tools": [],
             "_tool_executor": executor,
             "matched_tool": None,
             "pending_tool_calls": False,
@@ -281,16 +341,20 @@ class TestClassifyIntentNode:
 
 
 class TestStateGraphExecutor:
-    """Sanity tests for the lightweight StateGraph executor itself."""
+    """Sanity tests for the lightweight StateGraph executor."""
 
     @pytest.mark.asyncio
     async def test_simple_linear_graph(self):
         async def node_a(state):
-            state["visited"] = state.get("visited", []) + ["a"]
+            state["visited"] = state.get("visited", []) + [
+                "a"
+            ]
             return state
 
         async def node_b(state):
-            state["visited"] = state.get("visited", []) + ["b"]
+            state["visited"] = state.get("visited", []) + [
+                "b"
+            ]
             return state
 
         g = StateGraph()
@@ -311,12 +375,16 @@ class TestStateGraphExecutor:
             return state
 
         def router(state):
-            return "end" if state["count"] >= 3 else "loop"
+            return (
+                "end" if state["count"] >= 3 else "loop"
+            )
 
         g = StateGraph()
         g.add_node("inc", increment)
         g.add_edge("__start__", "inc")
-        g.add_conditional_edges("inc", router, {"loop": "inc", "end": END})
+        g.add_conditional_edges(
+            "inc", router, {"loop": "inc", "end": END}
+        )
         g.compile()
 
         result = await g.ainvoke({"count": 0})

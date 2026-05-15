@@ -6,7 +6,7 @@ import yaml
 from pydantic import ValidationError
 
 from agent_platform.domain.models import AgentManifest, AgentSpec
-from agent_platform.tools import create_default_tool_registry
+from agent_platform.tools import create_default_tool_registry, load_agent_tools
 
 
 class ManifestError(ValueError):
@@ -28,20 +28,28 @@ _SUPPORTED_OUTPUT_CAPABILITIES = {"text", "tts", "cards", "commands", "debug"}
 
 class ManifestLoader:
     def __init__(self, registered_tools: set[str] | None = None):
-        if registered_tools is None:
-            registered_tools = {tool.name for tool in create_default_tool_registry().list_tools()}
-        self.registered_tools = registered_tools
+        self._explicit_tools = registered_tools
+        # When None, tools are discovered dynamically per-package
+        # via load_agent_tools in load_file().
+        self.registered_tools: set[str] = (
+            registered_tools if registered_tools is not None else set()
+        )
 
     def load_file(self, path: Path) -> AgentSpec:
         manifest_path = path.resolve()
         if not manifest_path.exists():
             raise ManifestError(f"manifest not found: {path}")
         if manifest_path.name != "manifest.yaml":
-            raise ManifestError(f"manifest file must be named manifest.yaml: {path}")
+            raise ManifestError(
+                "manifest file must be named "
+                f"manifest.yaml: {path}"
+            )
 
         raw = yaml.safe_load(manifest_path.read_text()) or {}
         if not isinstance(raw, dict):
-            raise ManifestError(f"manifest must be a mapping: {path}")
+            raise ManifestError(
+                f"manifest must be a mapping: {path}"
+            )
 
         try:
             manifest = AgentManifest.model_validate(raw)
@@ -49,9 +57,20 @@ class ManifestLoader:
             raise ManifestError(str(exc)) from exc
 
         package_path = manifest_path.parent
+
+        # If no explicit tools were provided, dynamically
+        # discover tools from the agent package.
+        if self._explicit_tools is None:
+            registry = create_default_tool_registry()
+            load_agent_tools(
+                registry, package_path, manifest.metadata.id,
+            )
+
         self._validate_contract(manifest, package_path)
         self._validate_file_refs(package_path, raw)
-        return AgentSpec(manifest=manifest, package_path=package_path)
+        return AgentSpec(
+            manifest=manifest, package_path=package_path,
+        )
 
     def _validate_contract(self, manifest: AgentManifest, package_path: Path) -> None:
         if not _AGENT_ID_PATTERN.fullmatch(manifest.metadata.id):

@@ -6,6 +6,7 @@ from logging.config import fileConfig
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import create_async_engine
 
+import agent_platform.persistence.tables  # noqa: F401  — register ORM models with Base.metadata
 from agent_platform.storage.base import Base
 from alembic import context
 

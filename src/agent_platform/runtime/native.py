@@ -20,7 +20,7 @@ from agent_platform.runtime.orchestrator import (
     ToolWorker,
     WorkerOrchestrator,
 )
-from agent_platform.tools import ToolExecutor, create_default_tool_registry
+from agent_platform.tools import ToolExecutor, create_default_tool_registry, load_agent_tools
 
 logger = logging.getLogger(__name__)
 
@@ -28,12 +28,35 @@ logger = logging.getLogger(__name__)
 class NativeRuntimeBackend:
     name = "native"
 
-    def __init__(self, tool_executor: ToolExecutor | None = None):
-        self.tool_executor = tool_executor or ToolExecutor(create_default_tool_registry())
+    def __init__(
+        self, tool_executor: ToolExecutor | None = None,
+    ):
+        self.tool_executor = tool_executor or ToolExecutor(
+            create_default_tool_registry()
+        )
         self._adapters: dict[str, Any] = {}
         self._orchestrator: WorkerOrchestrator | None = None
+        self._loaded_agents: set[str] = set()
 
-    async def run(self, request: RuntimeRequest) -> RuntimeResponse:
+    def _ensure_agent_tools(
+        self, agent_spec: Any,
+    ) -> None:
+        """Load tools for the agent if not already loaded."""
+        agent_id = agent_spec.agent_id
+        if agent_id in self._loaded_agents:
+            return
+        package_path = agent_spec.package_path
+        load_agent_tools(
+            self.tool_executor.registry,
+            package_path,
+            agent_id,
+        )
+        self._loaded_agents.add(agent_id)
+
+    async def run(
+        self, request: RuntimeRequest,
+    ) -> RuntimeResponse:
+        self._ensure_agent_tools(request.agent_spec)
         entry_mode = request.agent_spec.manifest.entry.mode
 
         if entry_mode == "orchestrator_workers":

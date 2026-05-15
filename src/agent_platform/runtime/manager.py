@@ -21,8 +21,10 @@ from agent_platform.domain.models import (
 from agent_platform.observability.trace import InMemoryRunStore, RunStore
 from agent_platform.runtime.hermes import HermesRuntimeBackend
 from agent_platform.runtime.langgraph import LangGraphRuntimeBackend
+from agent_platform.runtime.model_gateway import ModelGateway
 from agent_platform.runtime.native import NativeRuntimeBackend
 from agent_platform.session.store import InMemorySessionStore, SessionStore
+from agent_platform.tools.executor import ToolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +37,16 @@ class RuntimeManager:
         policy_engine: Any | None = None,
         hook_registry: Any | None = None,
         metrics_collector: Any | None = None,
+        model_gateway: ModelGateway | None = None,
+        tool_executor: ToolExecutor | None = None,
     ):
         self._backends = {
-            NativeRuntimeBackend.name: NativeRuntimeBackend(),
-            HermesRuntimeBackend.name: HermesRuntimeBackend(),
-            LangGraphRuntimeBackend.name: LangGraphRuntimeBackend(),
+            NativeRuntimeBackend.name: NativeRuntimeBackend(tool_executor=tool_executor),
+            HermesRuntimeBackend.name: HermesRuntimeBackend(
+                model_gateway=model_gateway,
+                tool_executor=tool_executor,
+            ),
+            LangGraphRuntimeBackend.name: LangGraphRuntimeBackend(tool_executor=tool_executor),
         }
         self.run_store = run_store or InMemoryRunStore()
         self.session_store: SessionStore = session_store or InMemorySessionStore()

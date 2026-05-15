@@ -159,7 +159,7 @@ def _write_manifest(
     eval_dir = tmp_path / "evals"
     eval_dir.mkdir(exist_ok=True)
     (eval_dir / "golden.yaml").write_text("[]")
-    allow = tools_allow if tools_allow is not None else ["myj.goods_search"]
+    allow = tools_allow if tools_allow is not None else []
     deny = tools_deny if tools_deny is not None else []
     sources = "\n".join(knowledge_sources or [])
     entrypoint_line = f"  entrypoint: {runtime_entrypoint}\n" if runtime_entrypoint else ""

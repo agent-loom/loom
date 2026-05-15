@@ -13,7 +13,11 @@ from agent_platform.domain.models import (
     RuntimeResponse,
     ToolCallTrace,
 )
-from agent_platform.tools import ToolExecutor, create_default_tool_registry
+from agent_platform.tools import (
+    ToolExecutor,
+    create_default_tool_registry,
+    load_agent_tools,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -265,10 +269,26 @@ class LangGraphRuntimeBackend:
 
     name = "langgraph"
 
-    def __init__(self, tool_executor: ToolExecutor | None = None) -> None:
+    def __init__(
+        self, tool_executor: ToolExecutor | None = None,
+    ) -> None:
         self.tool_executor = tool_executor or ToolExecutor(
             create_default_tool_registry()
         )
+        self._loaded_agents: set[str] = set()
+
+    def _ensure_agent_tools(self, agent_spec) -> None:
+        """Load tools for the agent if not already loaded."""
+        agent_id = agent_spec.agent_id
+        if agent_id in self._loaded_agents:
+            return
+        package_path = agent_spec.package_path
+        load_agent_tools(
+            self.tool_executor.registry,
+            package_path,
+            agent_id,
+        )
+        self._loaded_agents.add(agent_id)
 
     # -- graph construction -------------------------------------------------
 
@@ -303,6 +323,7 @@ class LangGraphRuntimeBackend:
     # -- execution ----------------------------------------------------------
 
     async def run(self, request: RuntimeRequest) -> RuntimeResponse:
+        self._ensure_agent_tools(request.agent_spec)
         agent = request.agent_spec
         query = request.request.input.query
 

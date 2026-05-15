@@ -43,6 +43,7 @@ from agent_platform.integrations.plane.webhook import (
 from agent_platform.knowledge import KnowledgeService
 from agent_platform.observability.logging_config import setup_logging
 from agent_platform.observability.metrics import MetricsCollector
+from agent_platform.persistence.memory import InMemoryWebhookDeliveryRepository
 from agent_platform.policy import PolicyEngine
 from agent_platform.registry.artifact import ArtifactStore
 from agent_platform.registry.deployment import DeploymentAuditLog
@@ -50,6 +51,9 @@ from agent_platform.registry.registry import AgentNotFoundError, AgentRegistry
 from agent_platform.router import AgentRouter
 from agent_platform.router_semantic import SemanticRouter
 from agent_platform.runtime.manager import RuntimeManager
+from agent_platform.runtime.model_gateway import ModelGateway
+from agent_platform.tools.executor import ToolExecutor
+from agent_platform.tools.registry import create_default_tool_registry
 
 logger = logging.getLogger(__name__)
 
@@ -169,14 +173,42 @@ def create_app() -> FastAPI:
     app_hook_registry = HookRegistry()
     app_metrics = MetricsCollector()
 
-    runtime_manager = RuntimeManager(
+    model_gateway = ModelGateway.create_default()
+    tool_registry = create_default_tool_registry()
+    tool_executor = ToolExecutor(
+        registry=tool_registry,
         policy_engine=app_policy_engine,
         hook_registry=app_hook_registry,
         metrics_collector=app_metrics,
     )
+
+    runtime_manager = RuntimeManager(
+        policy_engine=app_policy_engine,
+        hook_registry=app_hook_registry,
+        metrics_collector=app_metrics,
+        model_gateway=model_gateway,
+        tool_executor=tool_executor,
+    )
     eval_runner = EvalRunner(runtime_manager)
     task_pack_generator = TaskPackGenerator()
-    webhook_deliveries: set[str] = set()
+
+    # -- persistence repositories (InMemory by default) ----------------------
+    webhook_repo = InMemoryWebhookDeliveryRepository()
+
+    # If DATABASE_URL is set to something other than the default sqlite path,
+    # a SQL session factory could be created here for opt-in SQL persistence.
+    # For now, all repositories default to their InMemory implementations.
+    db_session_factory = None
+    _default_db_url = "sqlite+aiosqlite:///./agent_platform.db"
+    if settings.database_url and settings.database_url != _default_db_url:
+        try:
+            from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+            engine = create_async_engine(settings.database_url, echo=False)
+            db_session_factory = async_sessionmaker(engine, expire_on_commit=False)
+            logger.info("SQL session factory created for %s", settings.database_url)
+        except Exception:
+            logger.exception("Failed to create SQL engine; falling back to InMemory repos")
 
     requirement_parser = RequirementParser()
     issue_generator = IssueGenerator()
@@ -193,6 +225,8 @@ def create_app() -> FastAPI:
     app.state.hook_registry = app_hook_registry
     app.state.semantic_router = app_semantic_router
     app.state.metrics = app_metrics
+    app.state.webhook_repo = webhook_repo
+    app.state.db_session_factory = db_session_factory
 
     if settings.api_key:
         app.add_middleware(AuthMiddleware, api_key=settings.api_key)
@@ -469,10 +503,11 @@ def create_app() -> FastAPI:
         data = artifact_store.get_data(artifact_id)
         if not data:
             raise HTTPException(status_code=404, detail=f"artifact not found: {artifact_id}")
+        filename = f"{artifact_id.replace('@', '_')}.tar.gz"
         return Response(
             content=data,
             media_type="application/gzip",
-            headers={"Content-Disposition": f"attachment; filename={artifact_id.replace('@', '_')}.tar.gz"},
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
 
     @app.websocket("/ws/agent/chat")
@@ -560,14 +595,19 @@ def create_app() -> FastAPI:
             except PlaneWebhookError as exc:
                 raise HTTPException(status_code=401, detail=str(exc)) from exc
 
-        if x_plane_delivery and x_plane_delivery in webhook_deliveries:
+        if x_plane_delivery and await webhook_repo.exists(x_plane_delivery):
             return {
                 "status": "duplicate",
                 "delivery_id": x_plane_delivery,
                 "event": x_plane_event,
             }
         if x_plane_delivery:
-            webhook_deliveries.add(x_plane_delivery)
+            await webhook_repo.record(
+                delivery_id=x_plane_delivery,
+                source="plane",
+                event_type=x_plane_event,
+                status="accepted",
+            )
 
         result: dict[str, str | None] = {
             "status": "accepted",

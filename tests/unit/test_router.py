@@ -36,7 +36,7 @@ def test_router_uses_retailer_id():
     route = router.route(request)
 
     assert route.agent_spec.agent_id == "myj"
-    assert route.reason == "tenant.retailer_id"
+    assert route.reason == "tenant.org_id"
     assert route.deployment_id == "dep_myj_dev_default"
 
 

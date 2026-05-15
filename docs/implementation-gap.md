@@ -1,6 +1,6 @@
 # 实现与设计差距分析
 
-> Last verified against code: 2026-05-15
+> Last verified against code: 2026-05-15 (Updated: Phase 1-3 全部完成 — pipeline wiring ✅, Domain Model ✅, 持久化层全量完成 ✅, 动态工具加载 ✅, Hermes 真接入 ✅, ArtifactStore ✅)
 
 本文档对齐以下两份设计文档和当前代码实现：
 
@@ -21,9 +21,9 @@
 | 入口路由 | `AgentRouter` 支持 `agent_id`、`app_id`、`retailer_id`、`channel_id`、默认 Agent | 基本完成 |
 | 灰度路由 | 基于稳定 hash bucket 的 canary 选择 | 部分完成 |
 | Runtime 抽象 | `NativeRuntimeBackend`、`HermesRuntimeBackend`、`LangGraphRuntimeBackend` | 部分完成 |
-| 工具注册和执行 | `ToolRegistry`、`ToolExecutor`、MYJ/Promo demo tools | 部分完成 |
-| 会话 | `InMemorySessionStore`、`AgentSession` | 部分完成 |
-| Trace / metrics | `InMemoryRunStore`、`MetricsCollector`、`/metrics` | 部分完成 |
+| 工具注册和执行 | `ToolRegistry`（✅ 已去业务化 + 动态加载）、`ToolExecutor`（✅ hook/metrics 已接入）、agent-scoped tools | 基本完成 |
+| 会话 | `InMemorySessionStore`、`AgentSession`、✅ `AgentSessionRepository` Protocol + InMemory/SQL 实现 | 部分完成 |
+| Trace / metrics | `InMemoryRunStore`、`MetricsCollector`（✅ 已串联 runtime/tool）、✅ `AgentRunRepository` Protocol + InMemory/SQL、`/metrics` 待实现 | 部分完成 |
 | Eval | `EvalRunner`、golden case、CI callback API | 部分完成 |
 | DevFlow | 需求解析、issue 生成、task pack、agent 脚手架、设计分析、测试计划 API | 部分完成 |
 | Plane 集成 | `PlaneAdapter`、webhook 校验、幂等处理、DevFlow 触发 | 部分完成 |
@@ -37,16 +37,16 @@
 
 ```text
 .venv/bin/python -m pytest
-373 passed
+437 passed
 
-.venv/bin/ruff check src tests scripts
+.venv/bin/ruff check src tests scripts alembic
 All checks passed
 
 .venv/bin/python scripts/validate_manifest.py
 3 个内置 agent manifest 全部通过
 ```
 
-已消除 pytest collection warning，当前不应存在已知测试 warning。
+已消除 pytest collection warning，当前存在 DeprecationWarning（旧字段名 `store_id`/`retailer_id`/`store` 的向后兼容告警，符合预期）。Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参数化，62 个测试覆盖 7 个 Repository 的 InMemory 和 SQL 实现。
 
 ## 2. 与 `agent-platform-design.md` 的差距
 
@@ -57,16 +57,19 @@ All checks passed
 | 设计模块 | 当前实现 | 差距 |
 | --- | --- | --- |
 | API Gateway / 协议适配 | FastAPI `/api/v1/agent/chat`、SSE、WebSocket、request id header 回写 | 缺少版本协商、前端能力协商、复杂渠道协议适配 |
-| Auth / 租户识别 | API key、request context、`x-tenant-id` 注入 | 缺少 RBAC、租户隔离、细粒度权限、服务间鉴权；header tenant 目前只注入 `tenant_id`，不等同于业务 `retailer_id` |
+| Auth / 租户识别 | API key、request context、`x-tenant-id` 注入 | 缺少 RBAC、租户隔离、细粒度权限、服务间鉴权；header tenant 目前只注入 `tenant_id`，不等同于业务 `org_id` |
 | Agent Registry | 文件发现 + 内存 cache | 缺少 DB 持久化、版本索引、artifact registry、并发一致性 |
-| 版本/灰度/回滚 | deploy API、canary bucket、rollback API、staging/prod 自动 eval gate、内存 audit | 缺少持久化发布历史、真实环境控制、审批、保护环境 |
-| Policy | `PolicyEngine` 存在 | 未深度接入 runtime/tool/output 全链路 |
+| 版本/灰度/回滚 | deploy API、canary bucket、rollback API、staging/prod 自动 eval gate、**ArtifactStore 产物绑定**、✅ `AgentDeploymentRepository` + `DeploymentAuditRepository` Protocol + 双实现 | 缺少持久化发布历史切换、manifest_sha256 绑定、真实环境控制、审批、保护环境 |
+| Policy | ✅ `PolicyEngine` 已深度接入 runtime/tool 链路（check_input/check_output 在 RuntimeManager，pre_tool/post_tool hooks 在 ToolExecutor） | 策略规则仍需从外置配置或 DB 加载；`check_tool_allowed` 未在 ToolExecutor 中调用 |
 | Eval | EvalRunner 存在 | 缺少大规模评测集、质量评分、线上反馈闭环、CI artifact |
 | Session / Memory | 内存 SessionStore | 缺少 Redis/Postgres、压缩、长期记忆、跨实例共享 |
-| Tool Executor | 工具执行、allowlist、timeout | 缺少重试、熔断、审计持久化、secret 注入、租户级工具权限 |
+| Tool Executor | 工具执行、allowlist、timeout、✅ hook emit、✅ metrics recording | 缺少重试、熔断、审计持久化、secret 注入、租户级工具权限 |
 | Knowledge Service | 基础服务和 sources 配置 | 缺少真实 vector db、RAG pipeline、同步任务、数据权限 |
-| Model Gateway | 有模型网关抽象 | 缺少真实 provider、token/cost 统计、限流、fallback、多模型路由 |
-| Observability | run store、metrics、logging | 缺少 OpenTelemetry/Langfuse、dashboard、trace 持久化、告警 |
+| Model Gateway | ✅ 有网关抽象与 `OpenAICompatibleProvider`（httpx.AsyncClient） | 缺少 token/cost 统计、限流、fallback、多模型路由 |
+| Observability | ✅ run store、metrics 已串联至 RuntimeManager 和 ToolExecutor、HookRegistry 已串联、logging | 缺少 OpenTelemetry/Langfuse、dashboard、trace 持久化、告警 |
+| Domain Model | ✅ 泛化完成：LocationContext、org_id、locale=en、timezone=UTC | 旧字段通过 alias 保持向后兼容 |
+| 持久化骨架 | ✅ SQLAlchemy 2.0 + Alembic + persistence/ 包（7 ORM 表 + 7 Protocol + 7 InMemory + 7 SQL + AuditMixin + Alembic migration） | DI 已就绪；RuntimeManager 内部 store 待切换到 Repository |
+| Artifact 管理 | ✅ ArtifactStore（tar.gz + SHA256 + 部署绑定） | 仅 in-memory；缺 manifest_sha256 绑定和远程存储 |
 
 ### 2.2 多 Agent 路由
 
@@ -74,7 +77,7 @@ All checks passed
 
 1. 显式 `agent_id`
 2. `metadata.app_id`
-3. `context.tenant.retailer_id`
+3. `context.tenant.org_id`（旧 `retailer_id`，向后兼容）
 4. `context.channel.channel_id`
 5. 默认 Agent
 
@@ -105,9 +108,10 @@ All checks passed
 
 剩余差距：
 
-- package artifact 的 build、签名、校验、发布和回滚还没有真实落地。
-- package registry 仍是本地目录扫描，不适合多环境、多实例部署。
-- manifest 与 package artifact 的不可变快照还没有绑定 deployment。
+- ArtifactStore 已引入并生成 `.tar.gz` 绑定部署，但缺少 `manifest_sha256`、`package_sha256` 字段绑定。
+- ArtifactStore 当前为 in-memory 实现，设计要求 ABC Protocol（upload/download/exists）+ 多后端（Local/S3/GitLab Registry）。
+- package registry 仍是本地目录扫描，尚未完全切换到 artifact registry 驱动。
+- DB 持久化的 Deployment 记录还未完全替代内存 Audit Log。
 
 建议下一步：
 
@@ -130,6 +134,11 @@ All checks passed
 - SessionBridge 可以映射 session。
 - ResponseMapper 可以把 Hermes result 转成平台 `AgentResponse`。
 - ConversationEngine 在没有 `model_gateway` 时返回 stub。
+- **✅ `model_gateway` 和 `tool_executor` 已注入到 `HermesRuntimeBackend`**，通过 `RuntimeManager` 传递。
+- **✅ `ConversationEngine.converse()` 接口已修复**：添加 `provider_name` 参数、dict→attribute access 修复、ToolCall 属性访问修复、`list[ModelMessage]` 类型对齐。
+- **✅ `hermes_echo` agent 已创建**：完整 agent package（manifest + prompts + evals），集成测试验证非 stub 响应。
+- **`OpenAICompatibleProvider` 已实现**（`runtime/model_gateway.py`），使用 httpx.AsyncClient 调用 OpenAI-compatible API。
+- **`ModelGateway` 已重构**：`__init__()` 不再自动注册 stub，`create_default()` 工厂方法提供含 stub 的实例。
 
 主要差距：
 
@@ -139,6 +148,8 @@ All checks passed
 - Hermes 的 stream event 没有映射成平台 SSE/WebSocket event。
 - Hermes memory provider 只是配置字段，没有真实持久化后端。
 - Hermes 错误、重试、中断、human-in-the-loop 事件没有规范映射。
+
+最新进展：已完成 Hermes 源码真实对比，修正了 Spike B 设计中对 `AIAgent` 初始化参数和全局 Registry 的不合理假设（见 `docs/03-runtime/hermes-backend-spike.md` 第 10-11 节）。
 
 建议下一步：
 
@@ -258,7 +269,7 @@ All checks passed
 
 1. 增加 Plane bootstrap 脚本，创建标准 states、labels、properties。
 2. 建立 `DevFlowStateSync`，专门负责 Plane/GitLab 双向状态同步。
-3. Webhook delivery idempotency 从内存 set 改为 DB 表。
+3. ✅ Webhook delivery idempotency 已改用 `InMemoryWebhookDeliveryRepository`（可切换 SQL 实现）。
 4. 失败事件进入 DB-backed retry queue。
 
 ### 3.4 AI + 人治理
@@ -301,9 +312,19 @@ All checks passed
 - 回滚和灰度结果不可追溯。
 - Webhook 幂等失效。
 
+最新进展：
+
+- ✅ 已引入 `sqlalchemy[asyncio]`、`aiosqlite` 和 `alembic`，持久化层完整实现。
+- ✅ ArtifactStore 已实现本地产物保存（in-memory tar.gz + SHA256）。
+- ✅ `persistence/` 包已创建（tables.py 7 ORM Row + AuditMixin、repositories.py 7 Protocol、memory.py 7 InMemory、sql.py 7 SQL、context.py AuditContext）。
+- ✅ Alembic 配置和初始 migration 已完成，`alembic upgrade head` 验证通过。
+- ✅ DI 注入已就绪：`create_app()` 按 `DATABASE_URL` 选择 InMemory 或 SQL。
+- ✅ 62 个 Repository contract tests 验证 InMemory 和 SQL 行为一致。
+- 🔶 RuntimeManager 内部仍使用 `InMemoryRunStore` 和 `InMemorySessionStore`，待切换到新 Repository 接口。
+
 重构方向：
 
-- 引入 Postgres/SQLite 作为第一阶段持久化。
+- 完成核心 Repository 到 SQLAlchemy 的最终迁移。
 - 本地开发可用 SQLite，生产用 Postgres。
 - 使用 repository interface 隔离 storage 实现。
 - 所有写操作增加 `created_at`、`updated_at`、`actor`、`request_id`。
@@ -350,7 +371,7 @@ All checks passed
 重构方向：
 
 - 引入 AuthN/AuthZ 抽象。
-- 工具执行前调用 PolicyEngine。
+- ✅ PolicyEngine 已接入 runtime（check_input/check_output）；check_tool_allowed 待接入 ToolExecutor。
 - 所有外部 API token 进入 secret manager。
 - request/response/logging 增加脱敏层。
 
@@ -394,9 +415,9 @@ All checks passed
 
 目标：本地和测试环境能稳定保存状态，重启不丢数据。
 
-主要任务：
+主要任务（**部分完成**：依赖与 migration 骨架已引入）：
 
-1. 引入 DB 层和 migrations。
+1. ~~引入 DB 层和 migrations。~~
 2. 实现 `AgentRepository`、`DeploymentRepository`、`RunRepository`、`SessionRepository`、`WebhookDeliveryRepository`。
 3. FastAPI app 支持依赖注入 storage backend。
 4. 所有当前内存 store 保留为测试实现。

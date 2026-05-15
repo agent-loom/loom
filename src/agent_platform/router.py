@@ -37,10 +37,10 @@ class AgentRouter:
             except LookupError:
                 pass
 
-        retailer_id = request.context.tenant.retailer_id
+        retailer_id = request.context.tenant.org_id
         if retailer_id:
             try:
-                return self._route_agent(retailer_id, request, "tenant.retailer_id")
+                return self._route_agent(retailer_id, request, "tenant.org_id")
             except LookupError:
                 pass
 
@@ -63,6 +63,8 @@ class AgentRouter:
                 except LookupError:
                     pass
 
+        if not self.settings.default_agent_id:
+            raise LookupError("no agent matched and no default_agent_id configured")
         return self._route_agent(self.settings.default_agent_id, request, "default_agent")
 
     def _route_agent(self, agent_id: str, request: AgentRequest, reason: str) -> RouteResult:

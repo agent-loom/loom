@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 
 
 class ModelMessage(BaseModel):
+    tool_calls: list[Any] | None = None
+    tool_call_id: str | None = None
     role: str
     content: str
 

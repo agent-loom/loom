@@ -16,8 +16,8 @@
 | --- | --- | --- | --- |
 | S0 | 架构基线 | 冻结平台边界、MVP、核心契约 | 已完成，持续维护 |
 | S1 | MVP 骨架 | 跑通多 Agent、统一 API、manifest、runtime、eval、DevFlow 骨架 | 已基本实现 |
-| S2 | 生产化底座 | 持久化、artifact、发布审计、回滚、权限、观测 | 下一阶段重点 |
-| S3 | Hermes 真接入 | 从 stub/adapter 原型变成真实 Hermes runtime 能力 | 下一阶段 spike |
+| S2 | 生产化底座 | 持久化、artifact、发布审计、回滚、权限、观测 | Phase 1-3 完成（pipeline ✅, 持久化 ✅, 动态工具 ✅, Hermes 真接入 ✅, Artifact ✅）；Phase 4 安全+DevFlow 待实现 |
+| S3 | Hermes 真接入 | 从 stub/adapter 原型变成真实 Hermes runtime 能力 | ✅ 基本完成（OpenAICompatibleProvider ✅, ConversationEngine 修复 ✅, model_gateway 注入 ✅, hermes_echo 集成测试 ✅） |
 | S4 | AI 研发闭环 | CodingAgentRunner、workspace、path guard、Plane/GitLab 状态同步 | 下一阶段重点 |
 | S5 | 多 Agent 规模化 | semantic routing、model gateway、knowledge/RAG、admin UI、MCP | 后续扩展 |
 
@@ -51,7 +51,7 @@
 | `01-contracts/agent-manifest-v1.md` | Baseline | Agent package manifest 契约 |
 | `01-contracts/devflow-task-pack.md` | Baseline | AI coding agent 的结构化任务输入 |
 | `02-architecture/agent-platform-design.md` | Partially Implemented | 生产平台总体设计 |
-| `02-architecture/agent-platform-core-design.md` | Draft | 平台核心能力去业务化、动态工具加载、hook/policy 管线设计 |
+| `02-architecture/agent-platform-core-design.md` | Partially Implemented | 平台核心能力去业务化、动态工具加载、hook/policy 管线设计 |
 | `02-architecture/ai-human-vibecoding-rd-platform.md` | Partially Implemented | 生产 + 研发一体化总体设计 |
 | `implementation-gap.md` | Baseline | 当前实现和设计差距事实来源（持续更新） |
 
@@ -59,18 +59,19 @@
 
 | 文档 | 状态 | 用途 |
 | --- | --- | --- |
-| `next-stage-design-plan.md` | Planned | 下一阶段设计清单和顺序 |
-| `05-production/persistence-storage-design.md` | Draft | 持久化、repository、migration 设计 |
-| `05-production/package-artifact-release-design.md` | Draft | agent artifact、manifest snapshot、发布回滚设计 |
-| `05-production/security-tenant-policy-design.md` | Draft | 鉴权、租户、tool policy、secret、脱敏设计 |
+| `next-stage-design-plan.md` | Baseline | 下一阶段设计清单和顺序 |
+| `development-plan-s2.md` | Phase 1-3 Complete | S2-S4 开发计划和任务跟踪（Phase 1-3 全部完成） |
+| `05-production/persistence-storage-design.md` | Implemented | 持久化、repository、migration 设计（persistence/ 全量实现 + Alembic migration + DI） |
+| `05-production/package-artifact-release-design.md` | Partially Implemented | agent artifact、manifest snapshot、发布回滚设计（ArtifactStore in-memory 已完成） |
+| `05-production/security-tenant-policy-design.md` | Partially Implemented | 鉴权、租户、tool policy、secret、脱敏设计（PolicyEngine 管线已接入，Domain Model 已泛化） |
 | `05-production/observability-eval-feedback-design.md` | Planned | trace、metrics、eval report、反馈闭环设计 |
 
 ### S3. Hermes 真接入
 
 | 文档 | 状态 | 用途 |
 | --- | --- | --- |
-| `03-runtime/hermes-runtime.md` | Partially Implemented | Hermes 接入边界和能力映射 |
-| `03-runtime/hermes-backend-spike.md` | Draft | 官方 Hermes runtime spike 设计和验收 |
+| `03-runtime/hermes-runtime.md` | Implemented | Hermes 接入边界和能力映射 |
+| `03-runtime/hermes-backend-spike.md` | Implemented | 官方 Hermes runtime spike 设计和验收（Spike A 完成） |
 
 ### S4. AI 研发闭环
 
