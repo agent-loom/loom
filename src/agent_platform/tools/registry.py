@@ -99,6 +99,7 @@ def create_default_tool_registry() -> ToolRegistry:
             handler=_promo_search,
             handler_ref="agents.promo_recommendation.tools.promotion_search:promotion_search",
             owner="retail-ai",
+            keywords=["饮料", "推荐", "优惠", "促销", "打折"],
         )
     )
     registry.register(

@@ -32,7 +32,7 @@ class DirectReplyWorker:
         if prompt_path:
             from pathlib import Path
             p = Path(prompt_path)
-            if p.exists():
+            if p.is_file():
                 template = p.read_text(encoding="utf-8")
                 display = f"{template[:200]}..."
             else:
@@ -179,8 +179,11 @@ class WorkerOrchestrator:
         if result.status == "handoff_required":
             status = OutputStatus.HANDOFF_REQUIRED
 
+        command_allowlist = spec.manifest.output.command_allowlist
         commands = []
         for cmd in (result.commands or []):
+            if command_allowlist and cmd.get("name") not in command_allowlist:
+                continue
             commands.append(ResponseCommand(**cmd))
 
         tool_traces = result.tool_traces or []

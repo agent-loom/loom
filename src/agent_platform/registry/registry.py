@@ -61,8 +61,12 @@ class AgentRegistry:
         if agent_id not in self._cache:
             self.get(agent_id)
 
+        deployment_id = self._deployment_id(agent_id, channel, tenant_id)
+        if status == AgentDeploymentStatus.PROD_CANARY:
+            deployment_id = self._deployment_id(agent_id, channel, tenant_id, slot="canary")
+
         deployment = AgentDeployment(
-            deployment_id=self._deployment_id(agent_id, channel, tenant_id),
+            deployment_id=deployment_id,
             agent_id=agent_id,
             version=version,
             channel=channel,
@@ -93,7 +97,32 @@ class AgentRegistry:
             return tenant_deployment
         return self._deployments.get(self._deployment_id(agent_id, channel, None))
 
+    def resolve_canary_deployment(
+        self,
+        *,
+        agent_id: str,
+        channel: str = "prod",
+        tenant_id: str | None = None,
+    ) -> AgentDeployment | None:
+        if not self._cache:
+            self.discover()
+
+        tenant_deployment = self._deployments.get(
+            self._deployment_id(agent_id, channel, tenant_id, slot="canary")
+        )
+        if tenant_deployment:
+            return tenant_deployment
+        return self._deployments.get(self._deployment_id(agent_id, channel, None, slot="canary"))
+
     @staticmethod
-    def _deployment_id(agent_id: str, channel: str, tenant_id: str | None) -> str:
+    def _deployment_id(
+        agent_id: str,
+        channel: str,
+        tenant_id: str | None,
+        *,
+        slot: str | None = None,
+    ) -> str:
         tenant_suffix = tenant_id or "default"
+        if slot:
+            return f"dep_{agent_id}_{channel}_{slot}_{tenant_suffix}"
         return f"dep_{agent_id}_{channel}_{tenant_suffix}"

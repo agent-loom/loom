@@ -2,7 +2,7 @@
 import sys
 from pathlib import Path
 
-from agent_platform.registry.loader import ManifestLoader
+from agent_platform.registry.loader import ManifestError, ManifestLoader
 
 
 def main() -> int:
@@ -11,12 +11,17 @@ def main() -> int:
     if not paths:
         paths = sorted(Path("agents").glob("*/manifest.yaml"))
 
+    failed = False
     for path in paths:
-        spec = loader.load_file(path)
+        try:
+            spec = loader.load_file(path)
+        except ManifestError as exc:
+            failed = True
+            print(f"error {path}: {exc}", file=sys.stderr)
+            continue
         print(f"ok {path}: {spec.agent_id}@{spec.version}")
-    return 0
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

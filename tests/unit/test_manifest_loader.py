@@ -34,6 +34,63 @@ def test_manifest_rejects_unsatisfied_runtime_compat(tmp_path):
         ManifestLoader().load_file(manifest)
 
 
+def test_manifest_rejects_unknown_runtime_backend(tmp_path):
+    manifest = _write_manifest(tmp_path, runtime_backend="unknown")
+
+    with pytest.raises(ManifestError, match="unsupported runtime backend"):
+        ManifestLoader().load_file(manifest)
+
+
+def test_manifest_rejects_invalid_entrypoint(tmp_path):
+    manifest = _write_manifest(tmp_path, runtime_entrypoint="not-a-python-entrypoint")
+
+    with pytest.raises(ManifestError, match="runtime.entrypoint"):
+        ManifestLoader().load_file(manifest)
+
+
+def test_manifest_rejects_invalid_output_protocol(tmp_path):
+    manifest = _write_manifest(tmp_path, output_protocol="agent-chat/v9")
+
+    with pytest.raises(ManifestError, match="unsupported output protocol"):
+        ManifestLoader().load_file(manifest)
+
+
+def test_manifest_rejects_unsupported_output_capability(tmp_path):
+    manifest = _write_manifest(tmp_path, output_supports=["text", "video"])
+
+    with pytest.raises(ManifestError, match="unsupported output capabilities"):
+        ManifestLoader().load_file(manifest)
+
+
+def test_manifest_rejects_invalid_command_name(tmp_path):
+    manifest = _write_manifest(
+        tmp_path,
+        output_supports=["text", "commands"],
+        command_allowlist=["Product.Recommend"],
+    )
+
+    with pytest.raises(ManifestError, match="invalid command name"):
+        ManifestLoader().load_file(manifest)
+
+
+def test_manifest_rejects_commands_without_command_output_support(tmp_path):
+    manifest = _write_manifest(
+        tmp_path,
+        output_supports=["text"],
+        command_allowlist=["product.recommend"],
+    )
+
+    with pytest.raises(ManifestError, match="requires output.supports"):
+        ManifestLoader().load_file(manifest)
+
+
+def test_manifest_rejects_invalid_context_path(tmp_path):
+    manifest = _write_manifest(tmp_path, required_context=["tenant.retailer_id"])
+
+    with pytest.raises(ManifestError, match="context paths"):
+        ManifestLoader().load_file(manifest)
+
+
 def test_manifest_rejects_allow_and_deny_overlap(tmp_path):
     manifest = _write_manifest(
         tmp_path,
@@ -86,9 +143,15 @@ def _write_manifest(
     metadata_id: str = "demo_agent",
     package_version: str = "0.1.0",
     runtime_compat: str = ">=0.1.0 <0.2.0",
+    runtime_backend: str = "native",
+    runtime_entrypoint: str | None = None,
     tools_allow: list[str] | None = None,
     tools_deny: list[str] | None = None,
     knowledge_sources: list[str] | None = None,
+    output_protocol: str = "agent-chat/v1",
+    output_supports: list[str] | None = None,
+    command_allowlist: list[str] | None = None,
+    required_context: list[str] | None = None,
 ):
     prompt_dir = tmp_path / "prompts"
     prompt_dir.mkdir(exist_ok=True)
@@ -99,6 +162,10 @@ def _write_manifest(
     allow = tools_allow if tools_allow is not None else ["myj.goods_search"]
     deny = tools_deny if tools_deny is not None else []
     sources = "\n".join(knowledge_sources or [])
+    entrypoint_line = f"  entrypoint: {runtime_entrypoint}\n" if runtime_entrypoint else ""
+    supports = output_supports if output_supports is not None else ["text"]
+    commands = command_allowlist if command_allowlist is not None else []
+    required = required_context if required_context is not None else []
     manifest = tmp_path / "manifest.yaml"
     manifest.write_text(
         f"""
@@ -111,7 +178,10 @@ version:
   package_version: {package_version}
   runtime_compat: "{runtime_compat}"
 runtime:
-  backend: native
+  backend: {runtime_backend}
+{entrypoint_line}context:
+  required:
+{_yaml_list(required)}
 prompts:
   orchestrator: prompts/orchestrator.md
 tools:
@@ -123,7 +193,11 @@ knowledge:
   sources:
 {sources or "    []"}
 output:
-  protocol: agent-chat/v1
+  protocol: {output_protocol}
+  supports:
+{_yaml_list(supports)}
+  command_allowlist:
+{_yaml_list(commands)}
 evals:
   suites:
     - evals/golden.yaml

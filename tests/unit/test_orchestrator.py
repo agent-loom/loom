@@ -42,6 +42,7 @@ def _make_task(query: str = "hello", **metadata) -> AgentTask:
 def _make_runtime_request(
     query: str = "hello",
     tools_allow: list[str] | None = None,
+    command_allowlist: list[str] | None = None,
 ) -> RuntimeRequest:
     return RuntimeRequest(
         request=AgentRequest(
@@ -56,7 +57,7 @@ def _make_runtime_request(
                 metadata=ManifestMetadata(id="test-agent", name="Test"),
                 version=ManifestVersion(package_version="0.1.0"),
                 tools=ManifestTools(allow=tools_allow or []),
-                output=ManifestOutput(),
+                output=ManifestOutput(command_allowlist=command_allowlist or []),
             ),
             package_path=Path("/tmp/test-agent"),
         ),
@@ -334,3 +335,17 @@ class TestWorkerOrchestrator:
         assert result.response.agent.agent_version == "0.1.0"
         assert result.response.request_id == "req-1"
         assert result.response.session_id == "sess-1"
+
+    @pytest.mark.asyncio
+    async def test_filters_commands_by_manifest_allowlist(self):
+        orch = WorkerOrchestrator()
+        orch.register(HandoffWorker())
+
+        req = _make_runtime_request(
+            query="我要转人工",
+            command_allowlist=["product.locate"],
+        )
+        result = await orch.route_and_run(req)
+
+        assert result.response.output.status == OutputStatus.HANDOFF_REQUIRED
+        assert result.response.output.commands == []

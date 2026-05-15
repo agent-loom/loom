@@ -65,7 +65,7 @@ class DeployAgentRequest(BaseModel):
     channel: str = "staging"
     tenant_id: str | None = None
     traffic_percent: int = 100
-    eval_passed: bool = True
+    eval_passed: bool | None = None
     auto_eval: bool = False
 
 
@@ -196,7 +196,12 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     devflow: DevFlowOrchestrator | None = None
-    if settings.plane_base_url and settings.plane_api_key and settings.gitlab_base_url:
+    if (
+        settings.plane_base_url
+        and settings.plane_api_key
+        and settings.gitlab_base_url
+        and settings.gitlab_project_id
+    ):
         plane_adapter = PlaneAdapter(
             base_url=settings.plane_base_url,
             api_key=settings.plane_api_key,
@@ -209,7 +214,7 @@ def create_app() -> FastAPI:
         devflow = DevFlowOrchestrator(
             plane=plane_adapter,
             gitlab=gitlab_adapter,
-            gitlab_project_id=settings.plane_workspace_slug,
+            gitlab_project_id=settings.gitlab_project_id,
         )
 
     @app.get("/health")
@@ -273,7 +278,11 @@ def create_app() -> FastAPI:
                 detail=f"agent version not found: {agent_id}@{version}",
             )
 
-        if payload.auto_eval and payload.channel in {"staging", "prod"}:
+        if payload.channel in {"staging", "prod"} and payload.eval_passed is False:
+            raise HTTPException(status_code=409, detail="eval gate must pass before deployment")
+
+        eval_report: EvalReport | None = None
+        if payload.channel in {"staging", "prod"}:
             report = await eval_runner.run_agent(spec)
             if not report.gate_passed:
                 raise HTTPException(
@@ -283,12 +292,14 @@ def create_app() -> FastAPI:
                         f"required={report.required_pass_rate:.1%}"
                     ),
                 )
-            payload.eval_passed = True
-
-        if payload.channel in {"staging", "prod"} and not payload.eval_passed:
-            raise HTTPException(status_code=409, detail="eval gate must pass before deployment")
+            eval_report = report
 
         status = _deployment_status(payload.channel, payload.traffic_percent)
+        previous_deployment = registry.resolve_deployment(
+            agent_id=agent_id,
+            channel=payload.channel,
+            tenant_id=payload.tenant_id,
+        )
         deployment = registry.deploy(
             agent_id=agent_id,
             version=version,
@@ -297,7 +308,14 @@ def create_app() -> FastAPI:
             tenant_id=payload.tenant_id,
             traffic_percent=payload.traffic_percent,
         )
-        return deployment.model_dump(mode="json")
+        audit_log.record_deploy(
+            deployment,
+            previous_version=previous_deployment.version if previous_deployment else None,
+        )
+        result = deployment.model_dump(mode="json")
+        if eval_report:
+            result["eval"] = eval_report.model_dump(mode="json")
+        return result
 
     @app.post("/api/v1/evals/run", response_model=EvalReport)
     async def run_eval(payload: RunEvalRequest) -> EvalReport:
@@ -382,10 +400,11 @@ def create_app() -> FastAPI:
                 status_code=404,
                 detail=f"no rollback target for {payload.agent_id}:{payload.channel}",
             )
-        try:
-            spec = registry.get(payload.agent_id)
-        except AgentNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        current_deployment = registry.resolve_deployment(
+            agent_id=payload.agent_id,
+            channel=payload.channel,
+        )
+        current_version = current_deployment.version if current_deployment else None
 
         deployment = registry.deploy(
             agent_id=payload.agent_id,
@@ -396,7 +415,7 @@ def create_app() -> FastAPI:
         audit_log.record_rollback(
             payload.agent_id,
             payload.channel,
-            spec.version,
+            current_version or "unknown",
             target_version,
             payload.actor,
         )

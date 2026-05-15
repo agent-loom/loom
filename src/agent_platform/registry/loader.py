@@ -16,7 +16,14 @@ class ManifestError(ValueError):
 _AGENT_ID_PATTERN = re.compile(r"^[a-z0-9_-]+$")
 _SEMVER_PATTERN = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 _RUNTIME_COMPAT_PATTERN = re.compile(r"^(>=\d+\.\d+\.\d+)( <\d+\.\d+\.\d+)?$")
+_ENTRYPOINT_PATTERN = re.compile(
+    r"^[a-zA-Z_][\w]*(\.[a-zA-Z_][\w]*)*:[a-zA-Z_][\w]*(\.[a-zA-Z_][\w]*)*$"
+)
+_COMMAND_PATTERN = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$")
 _PLATFORM_VERSION = "0.1.0"
+_SUPPORTED_RUNTIME_BACKENDS = {"native", "hermes", "langgraph"}
+_SUPPORTED_OUTPUT_PROTOCOLS = {"agent-chat/v1"}
+_SUPPORTED_OUTPUT_CAPABILITIES = {"text", "tts", "cards", "commands", "debug"}
 
 
 class ManifestLoader:
@@ -61,6 +68,39 @@ class ManifestLoader:
                 f"version.runtime_compat is not satisfied by platform {_PLATFORM_VERSION}: "
                 f"{runtime_compat}"
             )
+
+        if manifest.runtime.backend not in _SUPPORTED_RUNTIME_BACKENDS:
+            raise ManifestError(f"unsupported runtime backend: {manifest.runtime.backend}")
+
+        if manifest.runtime.entrypoint and not _ENTRYPOINT_PATTERN.fullmatch(
+            manifest.runtime.entrypoint
+        ):
+            raise ManifestError(
+                "runtime.entrypoint must use 'python.module:Symbol' format"
+            )
+
+        if manifest.output.protocol not in _SUPPORTED_OUTPUT_PROTOCOLS:
+            raise ManifestError(f"unsupported output protocol: {manifest.output.protocol}")
+
+        unsupported_outputs = set(manifest.output.supports) - _SUPPORTED_OUTPUT_CAPABILITIES
+        if unsupported_outputs:
+            raise ManifestError(f"unsupported output capabilities: {sorted(unsupported_outputs)}")
+
+        for command in manifest.output.command_allowlist:
+            if not _COMMAND_PATTERN.fullmatch(command):
+                raise ManifestError(
+                    f"output.command_allowlist contains invalid command name: {command}"
+                )
+            if "commands" not in manifest.output.supports:
+                raise ManifestError(
+                    "output.command_allowlist requires output.supports to include commands"
+                )
+
+        for context_path in [*manifest.context.required, *manifest.context.optional]:
+            if not context_path.startswith("context."):
+                raise ManifestError(
+                    f"context paths must start with 'context.': {context_path}"
+                )
 
         duplicate_tools = set(manifest.tools.allow).intersection(manifest.tools.deny)
         if duplicate_tools:

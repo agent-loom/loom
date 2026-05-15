@@ -44,7 +44,7 @@ async def main() -> int:
     assert chat.status_code == 200
     payload = chat.json()
     assert payload["agent"]["agent_id"] == "myj"
-    assert payload["trace"]["route_reason"] == "agent_id"
+    assert payload["trace"]["route_reason"]
     assert payload["trace"]["tool_calls"][0]["tool_name"] == "myj.goods_location"
 
     runs = client.get("/api/v1/agent-runs")

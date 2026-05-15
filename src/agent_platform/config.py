@@ -18,6 +18,7 @@ class Settings(BaseModel):
 
     gitlab_base_url: str | None = None
     gitlab_token: str | None = None
+    gitlab_project_id: str | None = None
 
 
 @lru_cache
@@ -33,4 +34,5 @@ def get_settings() -> Settings:
         plane_webhook_secret=os.getenv("PLANE_WEBHOOK_SECRET"),
         gitlab_base_url=os.getenv("GITLAB_BASE_URL"),
         gitlab_token=os.getenv("GITLAB_TOKEN"),
+        gitlab_project_id=os.getenv("GITLAB_PROJECT_ID"),
     )

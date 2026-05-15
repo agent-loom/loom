@@ -159,3 +159,10 @@ def test_deploy_agent_and_route_staging_profile():
 
     assert chat.status_code == 200
     assert chat.json()["agent"]["deployment_id"] == "dep_myj_staging_default"
+
+    audit = client.get(
+        "/api/v1/deployments/audit",
+        params={"agent_id": "myj", "channel": "staging"},
+    )
+    assert audit.status_code == 200
+    assert any(event["event_type"] == "deploy" for event in audit.json())

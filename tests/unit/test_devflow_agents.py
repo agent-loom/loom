@@ -7,8 +7,8 @@ import pytest
 from agent_platform.devflow.agents import (
     ArchitectureDesignAgent,
     DesignBrief,
+    GeneratedTestPlan,
     TestGenerationAgent,
-    TestPlan,
 )
 
 # ---------------------------------------------------------------------------
@@ -119,7 +119,7 @@ def test_analyze_multiple_keyword_matches(architect: ArchitectureDesignAgent):
 
 def test_generate_plan_returns_test_plan(test_agent: TestGenerationAgent):
     plan = test_agent.generate_plan(agent_id="myj", change_type="agent:new")
-    assert isinstance(plan, TestPlan)
+    assert isinstance(plan, GeneratedTestPlan)
     assert plan.agent_id == "myj"
 
 
@@ -184,12 +184,12 @@ def test_generate_plan_with_changed_files(test_agent: TestGenerationAgent):
         change_type="agent:change",
         changed_files=["agents/myj/adapter.py", "agents/myj/prompts/orchestrator.md"],
     )
-    assert isinstance(plan, TestPlan)
+    assert isinstance(plan, GeneratedTestPlan)
     assert plan.agent_id == "myj"
 
 
 def test_generate_plan_empty_agent_id(test_agent: TestGenerationAgent):
     """Empty agent_id should not crash."""
     plan = test_agent.generate_plan(agent_id="", change_type="agent:new")
-    assert isinstance(plan, TestPlan)
+    assert isinstance(plan, GeneratedTestPlan)
     assert plan.agent_id == ""

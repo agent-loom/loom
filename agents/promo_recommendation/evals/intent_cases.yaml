@@ -1,20 +1,26 @@
 - id: promo_intent_search
   input:
-    query: "有什么打折的饮料推荐"
+    agent_id: promo_recommendation
     context:
       tenant:
         retailer_id: myj
+    input:
+      query: "有什么打折的饮料推荐"
   expected:
-    intent: promotion_recommendation
+    intent: promo.promotion_search
+    must_call_tools:
+      - promo.promotion_search
     output_contains:
       - "推荐"
 
 - id: promo_no_match
   input:
-    query: "你好"
+    agent_id: promo_recommendation
     context:
       tenant:
         retailer_id: myj
+    input:
+      query: "你好"
   expected:
     output_contains:
-      - "促销推荐"
+      - "你好"

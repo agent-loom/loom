@@ -24,9 +24,16 @@ def detect_changed_agents() -> list[str]:
     return sorted(agents)
 
 
-def deploy_agent(base_url: str, agent_id: str, version: str, env: str) -> dict:
+def deploy_agent(
+    base_url: str,
+    agent_id: str,
+    version: str,
+    env: str,
+    *,
+    auto_eval: bool = False,
+) -> dict:
     url = f"{base_url}/api/v1/agent-packages/{agent_id}/versions/{version}/deploy"
-    payload = {"channel": env, "eval_passed": True}
+    payload = {"channel": env, "auto_eval": auto_eval}
     resp = httpx.post(url, json=payload, timeout=30)
     resp.raise_for_status()
     return resp.json()
@@ -34,10 +41,17 @@ def deploy_agent(base_url: str, agent_id: str, version: str, env: str) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description="Deploy agent to environment")
-    parser.add_argument("--env", required=True, choices=["staging", "prod"])
+    parser.add_argument(
+        "--env",
+        "--channel",
+        dest="env",
+        required=True,
+        choices=["staging", "prod"],
+    )
     parser.add_argument("--agent", required=True, help="Agent ID or 'changed' for auto-detect")
     parser.add_argument("--version", default="0.1.0")
     parser.add_argument("--base-url", default="http://localhost:8000")
+    parser.add_argument("--auto-eval", action="store_true")
     args = parser.parse_args()
 
     if args.agent == "changed":
@@ -52,7 +66,13 @@ def main():
     for agent_id in agents:
         print(f"Deploying {agent_id}@{args.version} to {args.env}...")
         try:
-            result = deploy_agent(args.base_url, agent_id, args.version, args.env)
+            result = deploy_agent(
+                args.base_url,
+                agent_id,
+                args.version,
+                args.env,
+                auto_eval=args.auto_eval,
+            )
             print(f"  ok: {result.get('deployment_id', 'deployed')}")
             results.append({"agent_id": agent_id, "status": "deployed", "detail": result})
         except httpx.HTTPStatusError as exc:

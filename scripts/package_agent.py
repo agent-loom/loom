@@ -57,7 +57,12 @@ def main():
 
     output_dir = Path(args.output)
 
-    if args.agent:
+    if args.agent == "changed":
+        agents = detect_changed_agents()
+        if not agents:
+            print("No changed agents to package.")
+            return
+    elif args.agent:
         agents = [args.agent]
     elif args.changed_only:
         agents = detect_changed_agents()

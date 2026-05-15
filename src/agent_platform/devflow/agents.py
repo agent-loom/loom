@@ -16,7 +16,7 @@ class DesignBrief(BaseModel):
     landing_type: str = "agent:new"
 
 
-class TestPlan(BaseModel):
+class GeneratedTestPlan(BaseModel):
     agent_id: str
     test_files: list[str] = Field(default_factory=list)
     eval_cases: list[dict[str, Any]] = Field(default_factory=list)
@@ -107,7 +107,7 @@ class TestGenerationAgent:
         agent_id: str,
         change_type: str,
         changed_files: list[str] | None = None,
-    ) -> TestPlan:
+    ) -> GeneratedTestPlan:
         test_files: list[str] = []
         eval_cases: list[dict[str, Any]] = []
 
@@ -139,7 +139,7 @@ class TestGenerationAgent:
             f"Generated {len(test_files)} test file(s) and {len(eval_cases)} eval case(s)."
         )
 
-        return TestPlan(
+        return GeneratedTestPlan(
             agent_id=agent_id,
             test_files=test_files,
             eval_cases=eval_cases,

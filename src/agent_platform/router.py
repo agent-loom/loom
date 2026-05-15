@@ -48,6 +48,13 @@ class AgentRouter:
 
     def _route_agent(self, agent_id: str, request: AgentRequest, reason: str) -> RouteResult:
         spec = self.registry.get(agent_id)
+        canary = None
+        if request.options.runtime_profile == "prod":
+            canary = self.registry.resolve_canary_deployment(
+                agent_id=agent_id,
+                channel="prod",
+                tenant_id=request.context.tenant.tenant_id,
+            )
         deployment = self.registry.resolve_deployment(
             agent_id=agent_id,
             channel=request.options.runtime_profile,
@@ -55,14 +62,11 @@ class AgentRouter:
         )
 
         traffic_bucket = None
-        if deployment and deployment.traffic_percent < 100:
+        if canary:
             stable_key = self._stable_user_key(request)
             traffic_bucket = self._compute_bucket(stable_key)
-            if traffic_bucket >= deployment.traffic_percent:
-                raise LookupError(
-                    f"request outside canary bucket: bucket={traffic_bucket} "
-                    f"traffic_percent={deployment.traffic_percent}"
-                )
+            if traffic_bucket < canary.traffic_percent:
+                deployment = canary
 
         return RouteResult(
             agent_spec=spec,
