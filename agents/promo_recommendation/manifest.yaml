@@ -1,0 +1,99 @@
+api_version: agent.platform/v1
+kind: AgentPackage
+
+metadata:
+  id: promo_recommendation
+  name: 促销推荐 Agent
+  description: 根据门店商品、促销活动、用户偏好生成商品推荐
+  owner: retail-ai
+  domain: retail
+  tags:
+    - promotion
+    - recommendation
+    - retail
+
+version:
+  package_version: 0.1.0
+  runtime_compat: ">=0.1.0 <0.2.0"
+  release_channel: dev
+
+entry:
+  mode: orchestrator_workers
+  orchestrator: main
+  default_worker: direct_reply
+
+runtime:
+  backend: native
+  entrypoint: agents.promo_recommendation.adapter:PromoRecommendationAdapter
+  max_iterations: 4
+  timeout_ms: 5000
+
+models:
+  default:
+    provider: demo
+    model: native-demo
+    temperature: 0.2
+    max_tokens: 1024
+
+prompts:
+  orchestrator: prompts/orchestrator.md
+  reply_style: prompts/reply_style.md
+
+tools:
+  allow:
+    - promo.promotion_search
+    - promo.product_rank
+  deny:
+    - terminal
+    - code_execution
+  timeout_ms: 3000
+  max_parallel: 2
+
+knowledge:
+  sources:
+    - id: promo_products
+      type: vector_collection
+      backend: weaviate
+      collection: PromoProduct
+      filters:
+        tenant_field: retailer_id
+        store_field: store_code
+
+routing:
+  strategy: single
+  fallback_worker: direct_reply
+
+session:
+  scope: tenant_store_user
+  history_window: 20
+  memory_enabled: false
+
+context:
+  required:
+    - context.tenant.retailer_id
+  optional:
+    - context.store.store_id
+    - context.user.member_id
+
+output:
+  protocol: agent-chat/v1
+  supports:
+    - text
+    - cards
+    - commands
+  command_allowlist:
+    - product.recommend
+    - product.locate
+    - cart.add
+
+safety:
+  policy: policies/safety.yaml
+  moderation:
+    input: true
+    output: true
+
+evals:
+  suites:
+    - evals/golden.yaml
+    - evals/intent_cases.yaml
+  required_pass_rate: 0.9

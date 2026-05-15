@@ -1,0 +1,11 @@
+- id: promo_demo_001
+  input:
+    query: "今天有什么饮料优惠"
+    context:
+      tenant:
+        retailer_id: myj
+      store:
+        store_id: V01031
+  expected:
+    output_contains:
+      - "促销推荐"

@@ -3,16 +3,22 @@ import logging
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi import FastAPI, Header, HTTPException, Request, Response, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import StreamingResponse
 
+from agent_platform.api.rate_limiter import RateLimiterMiddleware
 from agent_platform.api.streaming import stream_agent_response
+from agent_platform.api.websocket import AgentWebSocketManager
 from agent_platform.config import get_settings
+from agent_platform.devflow.agents import ArchitectureDesignAgent, TestGenerationAgent
+from agent_platform.devflow.issue_generator import IssueGenerator
 from agent_platform.devflow.orchestrator import DevFlowOrchestrator
+from agent_platform.devflow.requirement_parser import RequirementParser
+from agent_platform.devflow.scaffolder import AgentScaffolder
 from agent_platform.devflow.task_pack import TaskPackGenerator
 from agent_platform.domain.models import (
     AgentDeploymentStatus,
@@ -27,11 +33,21 @@ from agent_platform.domain.models import (
     RuntimeRequest,
 )
 from agent_platform.evals.runner import EvalReport, EvalRunner
+from agent_platform.hooks import HookRegistry
 from agent_platform.integrations.gitlab.adapter import GitLabAdapter
 from agent_platform.integrations.plane.adapter import PlaneAdapter
-from agent_platform.integrations.plane.webhook import PlaneWebhookError, PlaneWebhookVerifier
+from agent_platform.integrations.plane.webhook import (
+    PlaneWebhookError,
+    PlaneWebhookVerifier,
+)
+from agent_platform.knowledge import KnowledgeService
+from agent_platform.observability.logging_config import setup_logging
+from agent_platform.observability.metrics import MetricsCollector
+from agent_platform.policy import PolicyEngine
+from agent_platform.registry.deployment import DeploymentAuditLog
 from agent_platform.registry.registry import AgentNotFoundError, AgentRegistry
 from agent_platform.router import AgentRouter
+from agent_platform.router_semantic import SemanticRouter
 from agent_platform.runtime.manager import RuntimeManager
 
 logger = logging.getLogger(__name__)
@@ -60,6 +76,42 @@ class CreateTaskPackRequest(BaseModel):
     project_id: str
     background: str
     agent_id: str | None = None
+
+
+class ParseRequirementRequest(BaseModel):
+    text: str
+    context: dict | None = None
+
+
+class GenerateIssuesRequest(BaseModel):
+    text: str
+    project_context: dict | None = None
+
+
+class ScaffoldAgentRequest(BaseModel):
+    agent_id: str
+    name: str
+    description: str = ""
+    owner: str = "platform"
+    domain: str = "general"
+    mode: str = "single_worker"
+
+
+class DesignAnalysisRequest(BaseModel):
+    requirement_text: str
+    context: dict | None = None
+
+
+class TestPlanRequest(BaseModel):
+    agent_id: str
+    change_type: str
+    changed_files: list[str] | None = None
+
+
+class RollbackRequest(BaseModel):
+    agent_id: str
+    channel: str = "prod"
+    actor: str = "system"
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
@@ -103,6 +155,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 
 def create_app() -> FastAPI:
+    setup_logging()
+
     settings = get_settings()
     registry = AgentRegistry(Path(settings.registry_root))
     router = AgentRouter(registry, settings)
@@ -111,10 +165,29 @@ def create_app() -> FastAPI:
     task_pack_generator = TaskPackGenerator()
     webhook_deliveries: set[str] = set()
 
-    app = FastAPI(title="Agent Platform", version="0.1.0")
+    requirement_parser = RequirementParser()
+    issue_generator = IssueGenerator()
+    scaffolder = AgentScaffolder(settings.registry_root)
+    architect_agent = ArchitectureDesignAgent()
+    test_agent = TestGenerationAgent()
+    app_policy_engine = PolicyEngine()
+    app_knowledge_service = KnowledgeService()
+    app_hook_registry = HookRegistry()
+    app_semantic_router = SemanticRouter()
+    audit_log = DeploymentAuditLog()
+    ws_manager = AgentWebSocketManager(router, runtime_manager)
+
+    app = FastAPI(title="Agent Platform", version="0.2.0")
+    app.state.policy_engine = app_policy_engine
+    app.state.knowledge_service = app_knowledge_service
+    app.state.hook_registry = app_hook_registry
+    app.state.semantic_router = app_semantic_router
+    app.state.metrics = MetricsCollector()
 
     if settings.api_key:
         app.add_middleware(AuthMiddleware, api_key=settings.api_key)
+
+    app.add_middleware(RateLimiterMiddleware, requests_per_minute=120, burst=20)
 
     app.add_middleware(
         CORSMiddleware,
@@ -142,6 +215,13 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/metrics")
+    async def metrics() -> Response:
+        return Response(
+            content=app.state.metrics.format_prometheus(),
+            media_type="text/plain; version=0.0.4; charset=utf-8",
+        )
 
     @app.get("/api/v1/agents")
     async def list_agents() -> list[dict[str, str]]:
@@ -254,6 +334,86 @@ def create_app() -> FastAPI:
     @app.post("/api/v1/devflow/task-packs")
     async def create_task_pack(payload: CreateTaskPackRequest):
         return task_pack_generator.from_requirement(**payload.model_dump())
+
+    @app.post("/api/v1/devflow/parse-requirement")
+    async def parse_requirement(payload: ParseRequirementRequest):
+        return requirement_parser.parse(
+            payload.text, payload.context or {},
+        ).model_dump()
+
+    @app.post("/api/v1/devflow/generate-issues")
+    async def generate_issues(payload: GenerateIssuesRequest):
+        parsed = requirement_parser.parse(
+            payload.text, payload.project_context or {},
+        )
+        issues = issue_generator.generate(
+            parsed, payload.project_context or {},
+        )
+        return [i.model_dump() for i in issues]
+
+    @app.post("/api/v1/devflow/scaffold-agent")
+    async def scaffold_agent(payload: ScaffoldAgentRequest):
+        path = scaffolder.create(**payload.model_dump())
+        return {"agent_id": payload.agent_id, "path": str(path)}
+
+    @app.post("/api/v1/devflow/design-analysis")
+    async def design_analysis(payload: DesignAnalysisRequest):
+        brief = architect_agent.analyze(
+            payload.requirement_text, payload.context,
+        )
+        return brief.model_dump()
+
+    @app.post("/api/v1/devflow/test-plan")
+    async def test_plan(payload: TestPlanRequest):
+        plan = test_agent.generate_plan(
+            payload.agent_id,
+            payload.change_type,
+            payload.changed_files,
+        )
+        return plan.model_dump()
+
+    @app.post("/api/v1/deployments/rollback")
+    async def rollback_deployment(payload: RollbackRequest):
+        target_version = audit_log.get_rollback_version(
+            payload.agent_id, payload.channel,
+        )
+        if not target_version:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no rollback target for {payload.agent_id}:{payload.channel}",
+            )
+        try:
+            spec = registry.get(payload.agent_id)
+        except AgentNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        deployment = registry.deploy(
+            agent_id=payload.agent_id,
+            version=target_version,
+            channel=payload.channel,
+            status=AgentDeploymentStatus.ROLLED_BACK,
+        )
+        audit_log.record_rollback(
+            payload.agent_id,
+            payload.channel,
+            spec.version,
+            target_version,
+            payload.actor,
+        )
+        return deployment.model_dump(mode="json")
+
+    @app.get("/api/v1/deployments/audit")
+    async def deployment_audit(
+        agent_id: str | None = None,
+        channel: str | None = None,
+        limit: int = 50,
+    ):
+        events = audit_log.list_events(agent_id, channel, limit)
+        return [e.model_dump(mode="json") for e in events]
+
+    @app.websocket("/ws/agent/chat")
+    async def websocket_chat(websocket: WebSocket, session_id: str | None = None):
+        await ws_manager.handle(websocket, session_id)
 
     @app.post("/api/v1/agent/chat", response_model=AgentResponse)
     async def chat(request: AgentRequest, raw_request: Request) -> AgentResponse:

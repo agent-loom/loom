@@ -1,0 +1,11 @@
+sources:
+  - id: promo_products
+    type: vector_collection
+    backend: weaviate
+    collection: PromoProduct
+    filters:
+      tenant_field: retailer_id
+      store_field: store_code
+    sync:
+      schedule: "0 2 * * *"
+      source: business_api

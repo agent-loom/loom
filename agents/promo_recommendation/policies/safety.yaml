@@ -1,0 +1,18 @@
+rules:
+  - id: deny_high_risk_tools
+    type: deny_tools
+    description: 禁止高风险工具
+    tools:
+      - terminal
+      - code_execution
+      - browser
+
+  - id: deny_secrets_output
+    type: deny_output_pattern
+    description: 禁止输出敏感信息
+    pattern: "(api_key|password|secret|token)\\s*[:=]"
+
+  - id: pii_phone
+    type: pii_guard
+    description: 手机号检测
+    pattern: "1[3-9]\\d{9}"

@@ -1,0 +1,20 @@
+- id: promo_intent_search
+  input:
+    query: "有什么打折的饮料推荐"
+    context:
+      tenant:
+        retailer_id: myj
+  expected:
+    intent: promotion_recommendation
+    output_contains:
+      - "推荐"
+
+- id: promo_no_match
+  input:
+    query: "你好"
+    context:
+      tenant:
+        retailer_id: myj
+  expected:
+    output_contains:
+      - "促销推荐"

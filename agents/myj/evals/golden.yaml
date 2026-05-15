@@ -16,5 +16,5 @@
         - text
   expected:
     output_contains:
-      - MYJ demo agent 已收到
+      - 低糖
 

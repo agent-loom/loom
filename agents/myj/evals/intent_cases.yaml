@@ -36,7 +36,7 @@
     must_call_tools:
       - myj.goods_location
     output_contains:
-      - MYJ demo agent 已收到
+      - 冷柜
 
 - id: intent_direct_reply
   input:
@@ -52,4 +52,4 @@
       query: 你好
   expected:
     output_contains:
-      - MYJ demo agent 已收到
+      - 美宜佳

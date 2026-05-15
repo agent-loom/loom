@@ -145,16 +145,148 @@ class PolicyEnforcer:
         return violations
 
 
+class ConversationEngine:
+    """Lightweight conversation engine that calls a model gateway and executes tools.
+
+    When *model_gateway* is ``None`` the engine falls back to a canned stub
+    response so the rest of the pipeline can still be exercised without a live
+    LLM connection.
+    """
+
+    def __init__(
+        self,
+        model_gateway: Any | None = None,
+        tool_executor: Any | None = None,
+    ):
+        self.model_gateway = model_gateway
+        self.tool_executor = tool_executor
+
+    async def converse(
+        self,
+        system_prompt: str,
+        user_query: str,
+        *,
+        model_config: dict[str, Any],
+        tools: list[dict[str, Any]],
+        max_iterations: int = 4,
+        session_config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Run a multi-turn tool-use loop and return a result dict.
+
+        Returns a dict with keys: text, tool_calls, run_id, iterations,
+        model_calls.
+        """
+        if self.model_gateway is None:
+            return self._stub_response(system_prompt, user_query, model_config)
+
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_query},
+        ]
+        tool_call_traces: list[dict[str, Any]] = []
+        total_model_calls = 0
+
+        for iteration in range(max_iterations):
+            total_model_calls += 1
+            model_response = await self.model_gateway.chat(
+                messages=messages,
+                model=model_config.get("model", "native-demo"),
+                temperature=model_config.get("temperature", 0.2),
+                max_tokens=model_config.get("max_tokens", 1024),
+                tools=tools,
+            )
+
+            # If the model did not request a tool call, we are done.
+            requested_tools = model_response.get("tool_calls", [])
+            if not requested_tools:
+                return {
+                    "text": model_response.get("content", ""),
+                    "tool_calls": tool_call_traces,
+                    "run_id": model_response.get("run_id"),
+                    "iterations": iteration + 1,
+                    "model_calls": total_model_calls,
+                }
+
+            # Execute each requested tool and feed results back.
+            for tc in requested_tools:
+                tool_name = tc.get("name", "")
+                tool_input = tc.get("input", {})
+                if self.tool_executor:
+                    tool_result = await self.tool_executor.execute(
+                        tool_name,
+                        tool_input,
+                        allowed_tools=[t["name"] for t in tools],
+                        timeout_ms=3000,
+                    )
+                    tool_output = tool_result.output
+                    tool_call_traces.append({
+                        "name": tool_name,
+                        "status": tool_result.trace.status,
+                        "latency_ms": tool_result.trace.latency_ms,
+                    })
+                else:
+                    tool_output = {"result": f"[stub] {tool_name} not executed"}
+                    tool_call_traces.append({
+                        "name": tool_name,
+                        "status": "skipped",
+                    })
+
+                messages.append({"role": "assistant", "content": "", "tool_calls": [tc]})
+                messages.append({
+                    "role": "tool",
+                    "content": str(tool_output),
+                    "tool_call_id": tc.get("id", ""),
+                })
+
+        # Exhausted iterations -- make one final call to get a closing answer.
+        total_model_calls += 1
+        final = await self.model_gateway.chat(
+            messages=messages,
+            model=model_config.get("model", "native-demo"),
+            temperature=model_config.get("temperature", 0.2),
+            max_tokens=model_config.get("max_tokens", 1024),
+        )
+        return {
+            "text": final.get("content", ""),
+            "tool_calls": tool_call_traces,
+            "run_id": final.get("run_id"),
+            "iterations": max_iterations,
+            "model_calls": total_model_calls,
+        }
+
+    @staticmethod
+    def _stub_response(
+        system_prompt: str, user_query: str, model_config: dict[str, Any]
+    ) -> dict[str, Any]:
+        return {
+            "text": f"[Hermes-stub] Received: {user_query}",
+            "tool_calls": [],
+            "run_id": None,
+            "iterations": 0,
+            "model_calls": 0,
+        }
+
+
 class HermesRuntimeBackend:
     name = "hermes"
 
-    def __init__(self):
+    def __init__(
+        self,
+        model_gateway: Any | None = None,
+        tool_executor: Any | None = None,
+    ):
         self.manifest_mapper = ManifestMapper()
         self.tool_bridge = ToolBridge()
         self.session_bridge = SessionBridge()
         self.response_mapper = ResponseMapper()
         self.trace_bridge = TraceBridge()
         self.policy_enforcer = PolicyEnforcer()
+        self.model_gateway = model_gateway
+        self.tool_executor = tool_executor
+        self.conversation_engine = ConversationEngine(
+            model_gateway=model_gateway,
+            tool_executor=tool_executor,
+        )
 
     async def run(self, request: RuntimeRequest) -> RuntimeResponse:
         violations = self.policy_enforcer.check_pre_run(request.agent_spec)
@@ -166,32 +298,23 @@ class HermesRuntimeBackend:
             request.request.session_id, hermes_config
         )
 
-        hermes_result = await self._execute_hermes(
-            hermes_config, request, session_config
+        # Build tool definitions for the conversation engine
+        tools: list[dict[str, Any]] = []
+        if self.tool_executor:
+            tools = self.tool_bridge.wrap_platform_tools(
+                hermes_config.get("tools", []), self.tool_executor
+            )
+
+        hermes_result = await self.conversation_engine.converse(
+            system_prompt=hermes_config.get("system_prompt", ""),
+            user_query=request.request.input.query,
+            model_config=hermes_config.get("model", {}),
+            tools=tools,
+            max_iterations=hermes_config.get("max_iterations", 4),
+            session_config=session_config,
         )
 
         return self.response_mapper.to_platform_response(hermes_result, request)
-
-    async def _execute_hermes(
-        self,
-        config: dict[str, Any],
-        request: RuntimeRequest,
-        session_config: dict[str, Any],
-    ) -> dict[str, Any]:
-        logger.info(
-            "Hermes execution requested for %s (not yet connected to real Hermes runtime)",
-            config.get("agent_id"),
-        )
-        return {
-            "text": (
-                f"[Hermes] Agent {config['agent_id']} received: "
-                f"{request.request.input.query}"
-            ),
-            "tool_calls": [],
-            "run_id": None,
-            "iterations": 0,
-            "model_calls": 0,
-        }
 
     @staticmethod
     def _policy_error(request: RuntimeRequest, violations: list[str]) -> RuntimeResponse:

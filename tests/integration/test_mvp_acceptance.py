@@ -33,11 +33,11 @@ class TestProductionPipeline:
 
         assert data["agent"]["agent_id"] == "myj"
         assert data["output"]["status"] == "completed"
-        assert "MYJ demo agent 已收到" in data["output"]["text"]["display"]
+        assert "低糖" in data["output"]["text"]["display"]
 
         assert data["trace"] is not None
         assert data["trace"]["run_id"] is not None
-        assert data["trace"]["route_reason"] == "agent_id"
+        assert "worker:" in data["trace"]["route_reason"]
         assert len(data["trace"]["tool_calls"]) > 0
         assert data["trace"]["tool_calls"][0]["tool_name"] == "myj.goods_search"
 
@@ -60,7 +60,8 @@ class TestProductionPipeline:
         )
         assert chat.status_code == 200
         assert chat.json()["agent"]["agent_id"] == "myj"
-        assert chat.json()["trace"]["route_reason"] == "tenant.retailer_id"
+        # In orchestrator_workers mode, route_reason reflects the worker selection
+        assert "worker:" in chat.json()["trace"]["route_reason"]
 
     def test_unknown_agent_returns_standard_error(self):
         chat = self.client.post(

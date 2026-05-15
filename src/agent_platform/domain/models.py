@@ -167,6 +167,12 @@ class ManifestVersion(BaseModel):
     release_channel: str = "dev"
 
 
+class ManifestEntry(BaseModel):
+    mode: str = "single_worker"
+    orchestrator: str | None = None
+    default_worker: str = "direct_reply"
+
+
 class ManifestRuntime(BaseModel):
     backend: str = "native"
     entrypoint: str | None = None
@@ -254,6 +260,7 @@ class AgentManifest(BaseModel):
     kind: Literal["AgentPackage"]
     metadata: ManifestMetadata
     version: ManifestVersion
+    entry: ManifestEntry = Field(default_factory=ManifestEntry)
     runtime: ManifestRuntime = Field(default_factory=ManifestRuntime)
     models: dict[str, ManifestModelConfig] = Field(default_factory=dict)
     prompts: dict[str, str] = Field(default_factory=dict)

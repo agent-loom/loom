@@ -32,8 +32,8 @@ def test_chat_myj():
     assert data["agent"]["agent_id"] == "myj"
     assert data["agent"]["deployment_id"] == "dep_myj_dev_default"
     assert data["output"]["status"] == "completed"
-    assert "MYJ demo agent 已收到" in data["output"]["text"]["display"]
-    assert data["trace"]["route_reason"] == "agent_id"
+    display = data["output"]["text"]["display"]
+    assert "冷柜" in display or "饮料" in display
     assert data["trace"]["tool_calls"][0]["tool_name"] == "myj.goods_location"
 
 

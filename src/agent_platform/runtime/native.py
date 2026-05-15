@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import logging
 from typing import Any
 
 from agent_platform.domain.models import (
@@ -13,7 +14,15 @@ from agent_platform.domain.models import (
     RuntimeRequest,
     RuntimeResponse,
 )
+from agent_platform.runtime.orchestrator import (
+    DirectReplyWorker,
+    HandoffWorker,
+    ToolWorker,
+    WorkerOrchestrator,
+)
 from agent_platform.tools import ToolExecutor, create_default_tool_registry
+
+logger = logging.getLogger(__name__)
 
 
 class NativeRuntimeBackend:
@@ -22,12 +31,53 @@ class NativeRuntimeBackend:
     def __init__(self, tool_executor: ToolExecutor | None = None):
         self.tool_executor = tool_executor or ToolExecutor(create_default_tool_registry())
         self._adapters: dict[str, Any] = {}
+        self._orchestrator: WorkerOrchestrator | None = None
 
     async def run(self, request: RuntimeRequest) -> RuntimeResponse:
+        entry_mode = request.agent_spec.manifest.entry.mode
+
+        if entry_mode == "orchestrator_workers":
+            return await self._run_orchestrator(request)
+
         adapter = self._resolve_adapter(request.agent_spec)
         if adapter is not None:
             return await adapter.run(request)
         return self._generic_response(request)
+
+    async def _run_orchestrator(self, request: RuntimeRequest) -> RuntimeResponse:
+        if self._orchestrator is None:
+            default_worker = request.agent_spec.manifest.entry.default_worker
+            self._orchestrator = WorkerOrchestrator(default_worker_name=default_worker)
+
+            self._orchestrator.register(DirectReplyWorker())
+            handoff_intents = (
+                request.agent_spec.manifest.routing.human_handoff_intents
+                or ["转人工"]
+            )
+            self._orchestrator.register(
+                HandoffWorker(handoff_intents=handoff_intents),
+            )
+
+            for tool_name in request.agent_spec.manifest.tools.allow:
+                try:
+                    defn = self.tool_executor.registry.get(tool_name)
+                    if defn.keywords:
+                        self._orchestrator.register(ToolWorker(
+                            name=tool_name,
+                            tool_name=tool_name,
+                            keywords=defn.keywords,
+                            tool_executor=self.tool_executor,
+                        ))
+                except LookupError:
+                    pass
+
+            logger.info(
+                "Initialized WorkerOrchestrator for agent %s with default_worker=%s",
+                request.agent_spec.agent_id,
+                default_worker,
+            )
+
+        return await self._orchestrator.route_and_run(request)
 
     def _resolve_adapter(self, spec: AgentSpec):
         agent_id = spec.agent_id

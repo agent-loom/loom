@@ -17,6 +17,11 @@ version:
   runtime_compat: ">=0.1.0 <0.2.0"
   release_channel: dev
 
+entry:
+  mode: orchestrator_workers
+  orchestrator: main
+  default_worker: direct_reply
+
 runtime:
   backend: native
   entrypoint: agents.myj.adapter:MyjAdapter
@@ -39,6 +44,8 @@ tools:
   allow:
     - myj.goods_search
     - myj.goods_location
+    - myj.promotion_lookup
+    - myj.store_consult
   deny:
     - terminal
     - code_execution

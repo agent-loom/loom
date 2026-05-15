@@ -46,6 +46,6 @@ evals:
     )
 
     assert result.response.output.status == "completed"
-    assert result.response.output.text.display.startswith("[Hermes]")
+    assert result.response.output.text.display.startswith("[Hermes-stub]")
     assert result.response.debug["runtime_backend"] == "hermes"
 
