@@ -1,8 +1,8 @@
-# Agent Platform 开工前文档索引
+# Agent Platform 文档索引
 
-本文档索引用于约束正式开发前必须确认的设计、契约和工程边界。进入编码前，至少需要读完并确认“开工必读”部分。
+本文档索引用于约束设计、契约、实现差距和工程边界。继续开发或重构前，至少需要读完并确认“必读”部分。
 
-## 开工必读
+## 必读
 
 - [MVP 范围与验收标准](mvp.md)
 - [Agent Request / Response 契约](contracts/agent-request-response.md)
@@ -24,9 +24,9 @@
 
 ## 使用方式
 
-1. 先确认 `mvp.md`，冻结第一阶段做什么、不做什么。
+1. 先确认 `implementation-gap.md`，明确当前实现和目标设计之间的真实差距。
 2. 再确认两个核心契约：`AgentRequest / AgentResponse` 和 `AgentManifest v1`。
 3. 再确认 `DevFlow Task Pack`，约束 Codex / Claude Code / OpenHands 这类 coding agent 如何接入。
-4. 最后确认 ADR 和开工检查清单。
+4. 最后确认 ADR、MVP 边界和开工检查清单中的剩余治理项。
 
 正式开发开始后，新增重大技术决策必须追加 ADR；修改接口、manifest 或 task pack 必须同步更新对应契约文档。

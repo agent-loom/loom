@@ -66,7 +66,6 @@ class DeployAgentRequest(BaseModel):
     tenant_id: str | None = None
     traffic_percent: int = 100
     eval_passed: bool | None = None
-    auto_eval: bool = False
 
 
 class CreateTaskPackRequest(BaseModel):
@@ -159,7 +158,8 @@ def create_app() -> FastAPI:
 
     settings = get_settings()
     registry = AgentRegistry(Path(settings.registry_root))
-    router = AgentRouter(registry, settings)
+    app_semantic_router = SemanticRouter()
+    router = AgentRouter(registry, settings, semantic_router=app_semantic_router)
     runtime_manager = RuntimeManager()
     eval_runner = EvalRunner(runtime_manager)
     task_pack_generator = TaskPackGenerator()
@@ -173,7 +173,6 @@ def create_app() -> FastAPI:
     app_policy_engine = PolicyEngine()
     app_knowledge_service = KnowledgeService()
     app_hook_registry = HookRegistry()
-    app_semantic_router = SemanticRouter()
     audit_log = DeploymentAuditLog()
     ws_manager = AgentWebSocketManager(router, runtime_manager)
 
@@ -195,11 +194,13 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(RequestContextMiddleware)
     devflow: DevFlowOrchestrator | None = None
     if (
         settings.plane_base_url
         and settings.plane_api_key
         and settings.gitlab_base_url
+        and settings.gitlab_token
         and settings.gitlab_project_id
     ):
         plane_adapter = PlaneAdapter(
@@ -216,6 +217,7 @@ def create_app() -> FastAPI:
             gitlab=gitlab_adapter,
             gitlab_project_id=settings.gitlab_project_id,
         )
+    app.state.devflow_enabled = devflow is not None
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -478,6 +480,7 @@ def create_app() -> FastAPI:
             agent_spec=route.agent_spec,
             route_reason=route.reason,
             deployment_id=route.deployment_id,
+            traffic_bucket=route.traffic_bucket,
         )
 
         if request.options.stream:

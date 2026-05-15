@@ -52,7 +52,10 @@ class ResponseBuilder:
                 cards=[ResponseCard(**c) for c in (cards or [])],
                 commands=[ResponseCommand(**c) for c in filtered_commands],
             ),
-            trace=trace or ResponseTrace(route_reason=request.route_reason),
+            trace=trace or ResponseTrace(
+                route_reason=request.route_reason,
+                traffic_bucket=request.traffic_bucket,
+            ),
             debug=debug if request.request.options.debug else None,
         )
 

@@ -102,6 +102,13 @@ X-Request-ID: <request_id>
 | `options.debug` | 否 | 是否返回 debug 信息 |
 | `metadata` | 否 | 调用来源、trace 等扩展信息 |
 
+请求头处理：
+
+| Header | 当前语义 |
+| --- | --- |
+| `X-Request-ID` | 当 body `request_id` 为空时，平台使用该 header；响应会回写 `X-Request-ID` |
+| `X-Tenant-ID` | 当 body `context.tenant.tenant_id` 为空时，平台写入该字段 |
+
 ## 5. AgentResponse
 
 ```json
@@ -155,6 +162,7 @@ X-Request-ID: <request_id>
   "trace": {
     "run_id": "run_001",
     "route_reason": "agent_id",
+    "traffic_bucket": 37,
     "model": "default-chat",
     "tool_calls": [
       {
@@ -167,6 +175,18 @@ X-Request-ID: <request_id>
   "error": null
 }
 ```
+
+### 5.1 Trace 字段
+
+| 字段 | 说明 |
+| --- | --- |
+| `run_id` | 平台运行 ID |
+| `route_reason` | 路由命中原因，例如 `agent_id`、`tenant.retailer_id`、`semantic:*` |
+| `traffic_bucket` | 灰度路由 bucket；未进入灰度判断时为空 |
+| `model` | 运行时使用的模型标识 |
+| `tool_calls` | 工具调用摘要 |
+| `latency_ms` | 平台侧运行耗时 |
+| `error` | trace 级错误码 |
 
 ## 6. 输出状态
 
@@ -233,5 +253,5 @@ data: {"request_id":"req_001","delta":"推荐"}
 1. 新增字段必须向后兼容。
 2. 删除字段必须升级 `protocol_version`。
 3. 前端能力通过 `input.capabilities` 声明，Agent 不能返回前端不支持的 command。
-4. `debug` 和 `trace` 默认只在 debug 或内部调用时返回。
+4. `trace` 默认返回最小可观测字段；`debug` 默认只在 debug 或内部调用时返回。
 5. 生产环境错误信息不能泄露密钥、SQL、内部栈。

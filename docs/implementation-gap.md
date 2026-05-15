@@ -35,10 +35,13 @@
 
 ```text
 .venv/bin/python -m pytest
-357 passed, 1 warning
+367 passed
 
 .venv/bin/ruff check src tests scripts
 All checks passed
+
+.venv/bin/python scripts/validate_manifest.py
+3 个内置 agent manifest 全部通过
 ```
 
 已消除 pytest collection warning，当前不应存在已知测试 warning。
@@ -51,10 +54,10 @@ All checks passed
 
 | 设计模块 | 当前实现 | 差距 |
 | --- | --- | --- |
-| API Gateway / 协议适配 | FastAPI `/api/v1/agent/chat`、SSE、WebSocket | 缺少版本协商、前端能力协商、复杂渠道协议适配 |
-| Auth / 租户识别 | API key、`x-tenant-id`、request context | 缺少 RBAC、租户隔离、细粒度权限、服务间鉴权 |
+| API Gateway / 协议适配 | FastAPI `/api/v1/agent/chat`、SSE、WebSocket、request id header 回写 | 缺少版本协商、前端能力协商、复杂渠道协议适配 |
+| Auth / 租户识别 | API key、request context、`x-tenant-id` 注入 | 缺少 RBAC、租户隔离、细粒度权限、服务间鉴权；header tenant 目前只注入 `tenant_id`，不等同于业务 `retailer_id` |
 | Agent Registry | 文件发现 + 内存 cache | 缺少 DB 持久化、版本索引、artifact registry、并发一致性 |
-| 版本/灰度/回滚 | deploy API、canary bucket、rollback API | 缺少持久化发布历史、真实环境控制、审批、保护环境 |
+| 版本/灰度/回滚 | deploy API、canary bucket、rollback API、staging/prod 自动 eval gate、内存 audit | 缺少持久化发布历史、真实环境控制、审批、保护环境 |
 | Policy | `PolicyEngine` 存在 | 未深度接入 runtime/tool/output 全链路 |
 | Eval | EvalRunner 存在 | 缺少大规模评测集、质量评分、线上反馈闭环、CI artifact |
 | Session / Memory | 内存 SessionStore | 缺少 Redis/Postgres、压缩、长期记忆、跨实例共享 |
@@ -75,16 +78,15 @@ All checks passed
 
 差距：
 
-- `SemanticRouter` 已实现但没有进入主路由链路，当前主路由仍以显式字段为主。
+- `SemanticRouter` 已作为默认 Agent 前的可选 fallback 接入主路由链路；但规则仍未从 manifest/policy 自动加载。
 - Package 内部任务路由主要依赖 native backend 和 demo 规则，尚未形成统一的 worker/router manifest 配置加载。
 - `myj` 内部的商品、位置、店务、优惠 worker 只是轻量实现，尚未迁移真实业务系统里的复杂编排。
 - 路由结果没有持久化到可检索 trace 系统，只存在 response trace / run store。
 
 建议下一步：
 
-1. 把 `SemanticRouter` 接入 `AgentRouter` 的可选阶段，优先级放在显式字段之后、默认 Agent 之前。
-2. 在 manifest 中明确 `routing.rules` 的 schema，并让 `SemanticRouter` 从 package policy 文件加载规则。
-3. 将 route decision 作为结构化 trace event 持久化。
+1. 在 manifest 中明确 `routing.rules` 的 schema，并让 `SemanticRouter` 从 package policy 文件加载规则。
+2. 将 route decision 作为结构化 trace event 持久化。
 
 ### 2.3 Agent Package 与 Manifest
 
@@ -153,15 +155,27 @@ All checks passed
 - `/api/v1/deployments/rollback`
 - `/api/v1/deployments/audit`
 - canary traffic bucket
+- staging/prod 发布强制执行 eval gate
+- deploy 事件写入内存 audit log
+
+已实现或已补强：
+
+- staging/prod 发布不再信任客户端传入的 `eval_passed=true`，会由服务端执行 `EvalRunner`。
+- `eval_passed=false` 会直接阻断 staging/prod 发布。
+- deploy API 已移除失效的 `auto_eval` 客户端开关，避免契约和实际行为不一致。
+- canary deployment 使用独立 deployment slot，避免覆盖 stable prod deployment。
+- router 会按稳定 hash bucket 在 prod stable/canary deployment 间选择。
+- deploy API 会返回 eval report，便于 CI/CD 读取。
 
 差距：
 
 - deployment 和 audit log 是内存态，服务重启后丢失。
 - rollback target 依赖内存 audit，不能作为生产回滚依据。
-- 没有 GitLab protected environment / manual approval 绑定。
+- 没有 GitLab protected environment / manual approval 绑定，prod 发布仍缺少人工审批和 MR approval 校验。
 - 没有蓝绿/灰度发布的真实流量层控制。
 - 没有部署前后的健康检查、自动回滚、SLO 门禁。
 - 没有 per-tenant / per-channel 的发布策略 UI 或配置中心。
+- canary 命中结果已写入 `AgentResponse.trace.traffic_bucket`，但还没有落到持久化 trace / dashboard。
 
 建议下一步：
 
@@ -189,6 +203,7 @@ All checks passed
 - response commands 没有按 channel/device capability 做过滤。
 - 还没有生产级 SLA 控制：全链路 timeout budget、降级策略、限流策略持久化。
 - WebSocket 鉴权、取消、背压、断线恢复较弱。
+- header request id / tenant id 已可注入请求；但还缺少 channel/device/user 等更完整的协议适配。
 
 ### 3.2 研发侧 DevFlow
 
@@ -224,13 +239,18 @@ All checks passed
 
 当前 Plane 和 GitLab adapter 都存在，且 Plane OpenAPI 文档已归档到 `docs/vendor/plane`。
 
+已实现或已补强：
+
+- `DevFlowOrchestrator` 的 `gitlab_project_id` 已改为来自 `GITLAB_PROJECT_ID`，不再复用 Plane workspace slug。
+- DevFlow 启用条件已包含 `GITLAB_TOKEN`，避免创建缺 token 的 GitLab adapter。
+
 差距：
 
 - Plane project、state、label、custom property 初始化还没有自动化。
 - 当前只处理部分 webhook event 和字段，真实 Plane payload 兼容性还需要压测。
 - 没有 dead-letter queue，webhook 失败后不易恢复。
 - 没有把 GitLab pipeline/eval 状态稳定同步回 Plane。
-- GitLab 项目 ID 当前配置存在简化，`DevFlowOrchestrator` 中 `gitlab_project_id` 的来源需要与真实配置解耦。
+- DevFlow 只有在 Plane base url、Plane key、GitLab base url、GitLab token、GitLab project id 都存在时才启用；缺少启动时配置诊断。
 
 建议下一步：
 
@@ -341,7 +361,7 @@ All checks passed
 | P0 | 持久化 AgentDeployment、AgentRun、Session、Audit、WebhookDelivery | 生产可追溯、多实例一致性、回滚基础 |
 | P0 | 真实 HermesBackend 集成或明确继续使用 Native runtime | 当前 Hermes 只是 stub，不能宣称用上 Hermes runtime |
 | P0 | manifest 强校验 | 已完成基础补强；下一步需要和 package artifact / deployment gate 绑定 |
-| P0 | deploy gate 强化 | 防止未评测、未审批版本进入 staging/prod |
+| P0 | deploy gate 强化 | eval gate 已补强；仍需人工审批、MR approval、release artifact 绑定 |
 | P0 | Plane/GitLab 状态闭环 | 研发流程要能追踪任务、MR、测试、验收 |
 | P0 | Tool 权限和 secret 管理 | 外部业务 API 调用必须可控可审计 |
 
@@ -350,7 +370,7 @@ All checks passed
 | 优先级 | 工作项 | 原因 |
 | --- | --- | --- |
 | P1 | package artifact registry | 多 agent、多版本、跨环境发布需要稳定产物 |
-| P1 | SemanticRouter 接入主链路 | 新 agent 增多后不能只靠显式 agent_id |
+| P1 | SemanticRouter manifest 规则加载 | 新 agent 增多后不能依赖手工注册 semantic rule |
 | P1 | CodingAgentRunner | 新增业务 agent 的降本核心能力 |
 | P1 | Eval 数据集扩展和自动报告 | 业务质量回归需要量化 |
 | P1 | Knowledge/RAG 真实接入 | MYJ 等业务 agent 离不开业务知识 |
@@ -428,7 +448,7 @@ All checks passed
 | 实现真实 HermesBackend spike | platform:runtime | P0 | 一个 echo agent 能通过 Hermes backend 完成真实 run，并返回平台响应 |
 | DevFlow 状态同步设计和实现 | platform:devflow | P0 | Plane Work Item、GitLab MR、eval result 可双向回写 |
 | CodingAgentRunner 接口设计 | platform:devflow | P1 | 定义 runner、workspace、path guard、result schema，并完成一个 mock runner |
-| SemanticRouter 接入主路由 | platform:routing | P1 | manifest routing rule 可影响 agent 选择，trace 记录命中原因 |
+| SemanticRouter manifest 规则加载 | platform:routing | P1 | manifest routing rule 可自动注册到 semantic router，trace 记录命中原因 |
 | Tool 权限和 secret 管理 | platform:security | P1 | 工具执行前校验 tenant/agent policy，secret 不出现在日志和 trace |
 | Eval report artifact | platform:quality | P1 | CI callback 生成可追溯 eval report，并可回写 GitLab/Plane |
 

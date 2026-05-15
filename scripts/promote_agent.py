@@ -26,7 +26,7 @@ def detect_changed_agents() -> list[str]:
 
 def promote_agent(base_url: str, agent_id: str, version: str, traffic: int) -> dict:
     url = f"{base_url}/api/v1/agent-packages/{agent_id}/versions/{version}/deploy"
-    payload = {"channel": "prod", "traffic_percent": traffic, "auto_eval": True}
+    payload = {"channel": "prod", "traffic_percent": traffic}
     resp = httpx.post(url, json=payload, timeout=30)
     resp.raise_for_status()
     return resp.json()

@@ -48,7 +48,7 @@ version:
 
 runtime:
   backend: native
-  entrypoint: myj.main
+  entrypoint: agents.myj.adapter:MyjAdapter
   max_iterations: 4
   timeout_ms: 5000
 
@@ -65,8 +65,8 @@ prompts:
 
 tools:
   allow:
-    - goods_search
-    - goods_location
+    - myj.goods_search
+    - myj.goods_location
   deny:
     - terminal
     - browser
@@ -170,13 +170,18 @@ CI 和注册接口必须校验：
 1. `metadata.id` 只能包含小写字母、数字、`-`、`_`。
 2. `version.package_version` 必须符合 SemVer。
 3. `version.runtime_compat` 必须能被当前平台版本满足。
-4. 所有文件引用必须存在，且不能越过 Agent Package 根目录。
-5. `tools.allow` 中的工具必须已注册或声明为 package-local tool。
-6. `tools.deny` 优先级高于 `tools.allow`。
-7. `knowledge.sources` 的 backend、collection、filter 字段必须合法。
-8. `context.required` 缺失时，运行时必须返回明确错误或 clarification。
-9. `output.command_allowlist` 必须约束 Agent 返回的 commands。
-10. 发布到 staging / prod 前必须满足 `evals.required_pass_rate`。
+4. `runtime.backend` 必须是平台支持的 backend，例如 `native`、`hermes`、`langgraph`。
+5. `runtime.entrypoint` 必须使用 `python.module:Symbol` 格式。
+6. 所有文件引用必须存在，且不能越过 Agent Package 根目录。
+7. `tools.allow` 中的工具必须已注册或声明为 package-local tool。
+8. `tools.deny` 优先级高于 `tools.allow`。
+9. `knowledge.sources` 的 backend、collection、filter 字段必须合法。
+10. `context.required` 和 `context.optional` 必须使用 `context.*` 路径。
+11. `context.required` 缺失时，运行时必须返回明确错误或 clarification。
+12. `output.protocol` 必须是平台支持的协议版本。
+13. `output.supports` 必须是平台支持的输出能力集合。
+14. `output.command_allowlist` 的命名必须符合 `domain.action` 风格，且必须约束 Agent 返回的 commands。
+15. 发布到 staging / prod 前必须满足 `evals.required_pass_rate`。
 
 ## 7. Extension 设计
 
@@ -205,7 +210,7 @@ extensions:
 2. 平台核心不能依赖某个业务 namespace。
 3. Hermes、LangGraph 等 runtime 专属配置只能由对应 adapter 消费。
 
-## 8. 注册流程
+## 8. 注册和发布流程
 
 ```mermaid
 sequenceDiagram
@@ -220,12 +225,20 @@ sequenceDiagram
     API->>Loader: load manifest
     Loader->>Loader: schema + file ref + tool ref validate
     Loader-->>API: AgentSpec
-    API->>Registry: create AgentVersion
-    API->>Eval: run required eval suites
+    API->>Registry: register AgentSpec
+    API-->>CI: registered
+    CI->>API: POST /agent-packages/{agent_id}/versions/{version}/deploy
+    API->>Eval: run required eval suites for staging/prod
     Eval-->>API: eval report
-    API->>Registry: mark registered / eval_passed
-    API-->>CI: registration result
+    API->>Registry: create AgentDeployment
+    API-->>CI: deployment + eval report
 ```
+
+当前约束：
+
+1. `register` 只负责加载、校验和注册本地 AgentSpec。
+2. `deploy` 负责 staging / prod 的 eval gate 和 deployment 记录。
+3. 客户端不能通过传入 `eval_passed=true` 绕过服务端 eval gate。
 
 ## 9. 版本策略
 

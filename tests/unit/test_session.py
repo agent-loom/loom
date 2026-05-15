@@ -6,6 +6,13 @@ from agent_platform.runtime.manager import RuntimeManager
 from agent_platform.session.store import InMemorySessionStore
 
 
+class FailingRuntimeBackend:
+    name = "failing"
+
+    async def run(self, request):
+        raise RuntimeError("boom")
+
+
 @pytest.mark.asyncio
 async def test_session_store_save_and_load():
     store = InMemorySessionStore()
@@ -61,6 +68,35 @@ async def test_runtime_manager_creates_session():
     assert session is not None
     assert session.agent_id == "myj"
     assert len(session.history) == 2
+
+
+@pytest.mark.asyncio
+async def test_runtime_manager_preserves_traffic_bucket_on_error():
+    from pathlib import Path
+
+    spec = ManifestLoader().load_file(Path("agents/myj/manifest.yaml"))
+    spec.manifest.runtime.backend = "failing"
+    manager = RuntimeManager()
+    manager.register(FailingRuntimeBackend())
+
+    response = await manager.run(
+        RuntimeRequest(
+            request=AgentRequest(
+                agent_id="myj",
+                context={"tenant": {"retailer_id": "myj"}},
+                input=AgentInput(query="hello"),
+            ),
+            agent_spec=spec,
+            route_reason="agent_id",
+            traffic_bucket=7,
+        )
+    )
+
+    assert response.response.output.status == "failed"
+    assert response.response.error is not None
+    assert response.response.error.code == "RUNTIME_ERROR"
+    assert response.response.trace is not None
+    assert response.response.trace.traffic_bucket == 7
 
 
 @pytest.mark.asyncio

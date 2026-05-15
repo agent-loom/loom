@@ -29,11 +29,9 @@ def deploy_agent(
     agent_id: str,
     version: str,
     env: str,
-    *,
-    auto_eval: bool = False,
 ) -> dict:
     url = f"{base_url}/api/v1/agent-packages/{agent_id}/versions/{version}/deploy"
-    payload = {"channel": env, "auto_eval": auto_eval}
+    payload = {"channel": env}
     resp = httpx.post(url, json=payload, timeout=30)
     resp.raise_for_status()
     return resp.json()
@@ -51,7 +49,6 @@ def main():
     parser.add_argument("--agent", required=True, help="Agent ID or 'changed' for auto-detect")
     parser.add_argument("--version", default="0.1.0")
     parser.add_argument("--base-url", default="http://localhost:8000")
-    parser.add_argument("--auto-eval", action="store_true")
     args = parser.parse_args()
 
     if args.agent == "changed":
@@ -71,7 +68,6 @@ def main():
                 agent_id,
                 args.version,
                 args.env,
-                auto_eval=args.auto_eval,
             )
             print(f"  ok: {result.get('deployment_id', 'deployed')}")
             results.append({"agent_id": agent_id, "status": "deployed", "detail": result})

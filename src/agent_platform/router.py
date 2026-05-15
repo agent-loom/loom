@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from agent_platform.config import Settings
 from agent_platform.domain.models import AgentRequest, AgentSpec
 from agent_platform.registry.registry import AgentRegistry
+from agent_platform.router_semantic import SemanticRouter
 
 
 @dataclass(frozen=True)
@@ -15,9 +16,15 @@ class RouteResult:
 
 
 class AgentRouter:
-    def __init__(self, registry: AgentRegistry, settings: Settings):
+    def __init__(
+        self,
+        registry: AgentRegistry,
+        settings: Settings,
+        semantic_router: SemanticRouter | None = None,
+    ):
         self.registry = registry
         self.settings = settings
+        self.semantic_router = semantic_router
 
     def route(self, request: AgentRequest) -> RouteResult:
         if request.agent_id:
@@ -43,6 +50,18 @@ class AgentRouter:
                 return self._route_agent(channel_id, request, "channel.channel_id")
             except LookupError:
                 pass
+
+        if self.semantic_router:
+            semantic_match = self.semantic_router.match(request.input.query)
+            if semantic_match:
+                try:
+                    return self._route_agent(
+                        semantic_match.agent_id,
+                        request,
+                        semantic_match.reason,
+                    )
+                except LookupError:
+                    pass
 
         return self._route_agent(self.settings.default_agent_id, request, "default_agent")
 

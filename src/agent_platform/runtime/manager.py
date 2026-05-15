@@ -79,6 +79,8 @@ class RuntimeManager:
         trace = response.response.trace or ResponseTrace()
         trace.run_id = trace.run_id or run_id
         trace.route_reason = trace.route_reason or request.route_reason
+        if trace.traffic_bucket is None:
+            trace.traffic_bucket = request.traffic_bucket
         trace.latency_ms = latency_ms
         response.response.trace = trace
 
@@ -137,6 +139,7 @@ class RuntimeManager:
             trace=ResponseTrace(
                 run_id=run_id,
                 route_reason=request.route_reason,
+                traffic_bucket=request.traffic_bucket,
                 latency_ms=latency_ms,
                 error=error.code,
             ),

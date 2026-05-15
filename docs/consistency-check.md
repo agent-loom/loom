@@ -21,6 +21,7 @@ docs/devflow-task-pack.md
 docs/pre-development-checklist.md
 docs/contracts/agent-request-response.md
 docs/contracts/agent-manifest-v1.md
+docs/implementation-gap.md
 docs/adr/0001-architecture-baseline.md
 docs/vendor/plane/README.md
 docs/vendor/plane/endpoints.md
@@ -159,6 +160,10 @@ TaskPack
 | Plane JSON 文档获取方式不准确 | 明确当前实例需使用 `Accept: application/json` |
 | GitLab 文档中的 Plane 看板节点名不统一 | 改为 `Work Item / Kanban` |
 | 开工检查清单没有 Plane P0 项 | 增加 Plane project、states、API key、webhook secret |
+| `AgentManifest` entrypoint 示例不符合当前 loader 校验 | 改为 `python.module:Symbol` 格式 |
+| `AgentRequest / AgentResponse` 契约缺少灰度 bucket trace | 增加 `trace.traffic_bucket` 字段说明 |
+| `AgentManifest` 注册流程和当前 deploy eval gate 不一致 | 改为“注册只校验，发布执行 eval gate” |
+| 文档索引仍以“开工前”为唯一语境 | 调整为当前实现阶段也适用的文档索引 |
 
 ## 4. 仍需注意
 
@@ -214,7 +219,8 @@ MYJ 主链路：后续评估
 3. 修改 DevFlow task pack 必须同步更新 `docs/devflow-task-pack.md`。
 4. 修改 Plane API 使用方式必须同步更新 `docs/plane.md`、`docs/plane-docs-acquisition.md` 和 `docs/vendor/plane/endpoints.md`。
 5. 修改 Hermes 接入策略必须同步更新 `docs/hermes-runtime.md` 和 ADR。
-6. 新增重大决策必须新增 ADR。
+6. 修改部署、路由、持久化或 DevFlow 实现状态必须同步更新 `docs/implementation-gap.md`。
+7. 新增重大决策必须新增 ADR。
 
 ## 6. 当前状态
 

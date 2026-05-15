@@ -10,6 +10,7 @@ from agent_platform.domain.models import (
 )
 from agent_platform.registry.registry import AgentRegistry
 from agent_platform.router import AgentRouter
+from agent_platform.router_semantic import SemanticRouter, SemanticRule
 
 
 def test_router_uses_explicit_agent_id():
@@ -100,3 +101,26 @@ def test_router_canary_hit_uses_canary_deployment(monkeypatch):
 
     assert route.deployment_id == "dep_myj_prod_canary_default"
     assert route.traffic_bucket == 3
+
+
+def test_router_uses_semantic_route_before_default_agent():
+    registry = AgentRegistry(Path("agents"))
+    semantic_router = SemanticRouter(confidence_threshold=0.5)
+    semantic_router.add_rule(
+        SemanticRule(
+            agent_id="echo",
+            keywords=["echo"],
+            description="echo fallback",
+        )
+    )
+    router = AgentRouter(
+        registry,
+        Settings(default_agent_id="myj"),
+        semantic_router=semantic_router,
+    )
+    request = AgentRequest(input=AgentInput(query="please echo this"))
+
+    route = router.route(request)
+
+    assert route.agent_spec.agent_id == "echo"
+    assert route.reason == "semantic:echo fallback"

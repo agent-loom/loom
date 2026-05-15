@@ -135,6 +135,7 @@ class ToolCallTrace(BaseModel):
 class ResponseTrace(BaseModel):
     run_id: str | None = None
     route_reason: str | None = None
+    traffic_bucket: int | None = None
     model: str | None = None
     tool_calls: list[ToolCallTrace] = Field(default_factory=list)
     latency_ms: int | None = None
@@ -293,6 +294,7 @@ class RuntimeRequest(BaseModel):
     agent_spec: AgentSpec
     route_reason: str | None = None
     deployment_id: str | None = None
+    traffic_bucket: int | None = None
 
     model_config = {"arbitrary_types_allowed": True}
 
