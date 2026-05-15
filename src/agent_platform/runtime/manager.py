@@ -18,12 +18,18 @@ from agent_platform.domain.models import (
     RuntimeRequest,
     RuntimeResponse,
 )
-from agent_platform.observability.trace import InMemoryRunStore, RunStore
+from agent_platform.persistence.memory import (
+    InMemoryAgentRunRepository,
+    InMemoryAgentSessionRepository,
+)
+from agent_platform.persistence.repositories import (
+    AgentRunRepository,
+    AgentSessionRepository,
+)
 from agent_platform.runtime.hermes import HermesRuntimeBackend
 from agent_platform.runtime.langgraph import LangGraphRuntimeBackend
 from agent_platform.runtime.model_gateway import ModelGateway
 from agent_platform.runtime.native import NativeRuntimeBackend
-from agent_platform.session.store import InMemorySessionStore, SessionStore
 from agent_platform.tools.executor import ToolExecutor
 
 logger = logging.getLogger(__name__)
@@ -32,8 +38,8 @@ logger = logging.getLogger(__name__)
 class RuntimeManager:
     def __init__(
         self,
-        run_store: RunStore | None = None,
-        session_store: SessionStore | None = None,
+        run_store: AgentRunRepository | None = None,
+        session_store: AgentSessionRepository | None = None,
         policy_engine: Any | None = None,
         hook_registry: Any | None = None,
         metrics_collector: Any | None = None,
@@ -48,8 +54,10 @@ class RuntimeManager:
             ),
             LangGraphRuntimeBackend.name: LangGraphRuntimeBackend(tool_executor=tool_executor),
         }
-        self.run_store = run_store or InMemoryRunStore()
-        self.session_store: SessionStore = session_store or InMemorySessionStore()
+        self.run_store = run_store or InMemoryAgentRunRepository()
+        self.session_store: AgentSessionRepository = (
+            session_store or InMemoryAgentSessionRepository()
+        )
         self.policy_engine = policy_engine
         self.hook_registry = hook_registry
         self.metrics_collector = metrics_collector
@@ -79,7 +87,9 @@ class RuntimeManager:
                     retryable=False,
                 )
                 latency_ms = self._latency_ms(started)
-                return self._build_error_response(request, run_id, backend_name, latency_ms, error)
+                return await self._build_error_response(
+                    request, run_id, backend_name, latency_ms, error,
+                )
 
         # Hook: on_route
         if self.hook_registry:
@@ -97,7 +107,7 @@ class RuntimeManager:
             except Exception:
                 logger.exception("hook pre_run failed")
 
-        session = self._load_session(request)
+        session = await self._load_session(request)
         if session:
             session.add_message("user", request.request.input.query)
 
@@ -123,7 +133,9 @@ class RuntimeManager:
                     self.metrics_collector.record_request(request.agent_spec.agent_id, "failed")
                 except Exception:
                     logger.exception("metrics record_request failed")
-            return self._build_error_response(request, run_id, backend_name, latency_ms, error)
+            return await self._build_error_response(
+                request, run_id, backend_name, latency_ms, error,
+            )
         except Exception as exc:
             latency_ms = self._latency_ms(started)
             error = AgentError(
@@ -141,7 +153,9 @@ class RuntimeManager:
                     self.metrics_collector.record_request(request.agent_spec.agent_id, "failed")
                 except Exception:
                     logger.exception("metrics record_request failed")
-            return self._build_error_response(request, run_id, backend_name, latency_ms, error)
+            return await self._build_error_response(
+                request, run_id, backend_name, latency_ms, error,
+            )
 
         latency_ms = self._latency_ms(started)
         trace = response.response.trace or ResponseTrace()
@@ -164,10 +178,11 @@ class RuntimeManager:
         if session:
             display = response.response.output.text.display
             session.add_message("assistant", display)
-            self.session_store.save(session)
+            await self.session_store.save(session)
             if self.metrics_collector:
                 try:
-                    self.metrics_collector.set_active_sessions(len(self.session_store.list_sessions()))
+                    sessions = await self.session_store.list_sessions()
+                    self.metrics_collector.set_active_sessions(len(sessions))
                 except Exception:
                     logger.exception("metrics set_active_sessions failed")
 
@@ -187,7 +202,7 @@ class RuntimeManager:
             except Exception:
                 logger.exception("metrics recording failed")
 
-        self._record_run(
+        await self._record_run(
             request=request,
             run_id=trace.run_id,
             backend_name=backend_name,
@@ -197,11 +212,11 @@ class RuntimeManager:
         )
         return response
 
-    def _load_session(self, request: RuntimeRequest) -> AgentSession | None:
+    async def _load_session(self, request: RuntimeRequest) -> AgentSession | None:
         session_id = request.request.session_id
         if not session_id:
             return None
-        session = self.session_store.load(session_id)
+        session = await self.session_store.load(session_id)
         if session is None:
             session = AgentSession(
                 session_id=session_id,
@@ -213,7 +228,7 @@ class RuntimeManager:
             )
         return session
 
-    def _build_error_response(
+    async def _build_error_response(
         self,
         request: RuntimeRequest,
         run_id: str,
@@ -243,7 +258,7 @@ class RuntimeManager:
             ),
             error=error,
         )
-        self._record_run(
+        await self._record_run(
             request=request,
             run_id=run_id,
             backend_name=backend_name,
@@ -257,7 +272,7 @@ class RuntimeManager:
     def _latency_ms(started: float) -> int:
         return max(0, round((perf_counter() - started) * 1000))
 
-    def _record_run(
+    async def _record_run(
         self,
         *,
         request: RuntimeRequest,
@@ -268,7 +283,7 @@ class RuntimeManager:
         response: AgentResponse,
     ) -> None:
         trace = response.trace or ResponseTrace()
-        self.run_store.record(
+        await self.run_store.record(
             AgentRun(
                 run_id=run_id,
                 request_id=response.request_id,

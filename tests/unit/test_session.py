@@ -1,6 +1,7 @@
 import pytest
 
 from agent_platform.domain.models import AgentInput, AgentRequest, AgentSession, RuntimeRequest
+from agent_platform.persistence.memory import InMemoryAgentSessionRepository
 from agent_platform.registry.loader import ManifestLoader
 from agent_platform.runtime.manager import RuntimeManager
 from agent_platform.session.store import InMemorySessionStore
@@ -53,7 +54,7 @@ async def test_session_store_list_by_agent():
 async def test_runtime_manager_creates_session():
     from pathlib import Path
     spec = ManifestLoader().load_file(Path("agents/myj/manifest.yaml"))
-    session_store = InMemorySessionStore()
+    session_store = InMemoryAgentSessionRepository()
     manager = RuntimeManager(session_store=session_store)
 
     request = AgentRequest(
@@ -64,7 +65,7 @@ async def test_runtime_manager_creates_session():
     )
     await manager.run(RuntimeRequest(request=request, agent_spec=spec))
 
-    session = session_store.load("test_sess")
+    session = await session_store.load("test_sess")
     assert session is not None
     assert session.agent_id == "myj"
     assert len(session.history) == 2

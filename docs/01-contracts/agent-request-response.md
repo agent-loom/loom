@@ -7,7 +7,7 @@
 1. 对前端稳定，不暴露具体 Agent 内部实现。
 2. 支持多个业务 Agent 共享同一入口。
 3. 支持文本、卡片、命令、debug、trace。
-4. 支持多租户、门店、渠道、设备和用户上下文。
+4. 支持多租户、地点（location）、渠道、设备和用户上下文。
 5. 支持灰度、回放、评测和审计。
 
 ## 2. HTTP 入口
@@ -35,11 +35,11 @@ X-Request-ID: <request_id>
   "context": {
     "tenant": {
       "tenant_id": "tenant_myj",
-      "retailer_id": "myj"
+      "org_id": "myj"
     },
-    "store": {
-      "store_id": "V01031",
-      "store_name": "美宜佳测试门店"
+    "location": {
+      "location_id": "V01031",
+      "location_name": "美宜佳测试门店"
     },
     "channel": {
       "channel_id": "store_screen",
@@ -53,8 +53,8 @@ X-Request-ID: <request_id>
       "user_id": "anonymous",
       "member_id": null
     },
-    "locale": "zh-CN",
-    "timezone": "Asia/Shanghai"
+    "locale": "en",
+    "timezone": "UTC"
   },
   "input": {
     "type": "text",
@@ -90,8 +90,8 @@ X-Request-ID: <request_id>
 | `request_id` | 否 | 调用方传入；为空则平台生成 |
 | `agent_id` | 否 | 显式指定 Agent；为空则走路由 |
 | `session_id` | 否 | 多轮会话 ID；为空则平台生成 |
-| `context.tenant` | 是 | 租户和业务方识别 |
-| `context.store` | 否 | 门店上下文 |
+| `context.tenant` | 是 | 租户和组织（organization）识别。`org_id` 为组织标识（向后兼容别名 `retailer_id`） |
+| `context.location` | 否 | 地点上下文（向后兼容别名 `store`）。`location_id`（别名 `store_id`）、`location_name`（别名 `store_name`） |
 | `context.channel` | 否 | 调用渠道 |
 | `context.device` | 否 | 设备上下文 |
 | `context.user` | 否 | 用户或会员上下文 |
@@ -181,7 +181,7 @@ X-Request-ID: <request_id>
 | 字段 | 说明 |
 | --- | --- |
 | `run_id` | 平台运行 ID |
-| `route_reason` | 路由命中原因，例如 `agent_id`、`tenant.retailer_id`、`semantic:*` |
+| `route_reason` | 路由命中原因，例如 `agent_id`、`tenant.org_id`、`semantic:*` |
 | `traffic_bucket` | 灰度路由 bucket；未进入灰度判断时为空 |
 | `model` | 运行时使用的模型标识 |
 | `tool_calls` | 工具调用摘要 |

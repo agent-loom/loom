@@ -43,7 +43,11 @@ from agent_platform.integrations.plane.webhook import (
 from agent_platform.knowledge import KnowledgeService
 from agent_platform.observability.logging_config import setup_logging
 from agent_platform.observability.metrics import MetricsCollector
-from agent_platform.persistence.memory import InMemoryWebhookDeliveryRepository
+from agent_platform.persistence.memory import (
+    InMemoryAgentRunRepository,
+    InMemoryAgentSessionRepository,
+    InMemoryWebhookDeliveryRepository,
+)
 from agent_platform.policy import PolicyEngine
 from agent_platform.registry.artifact import ArtifactStore
 from agent_platform.registry.deployment import DeploymentAuditLog
@@ -182,7 +186,12 @@ def create_app() -> FastAPI:
         metrics_collector=app_metrics,
     )
 
+    run_repo = InMemoryAgentRunRepository()
+    session_repo = InMemoryAgentSessionRepository()
+
     runtime_manager = RuntimeManager(
+        run_store=run_repo,
+        session_store=session_repo,
         policy_engine=app_policy_engine,
         hook_registry=app_hook_registry,
         metrics_collector=app_metrics,
@@ -295,7 +304,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/v1/agent-runs")
     async def list_agent_runs() -> list[dict]:
-        return [run.model_dump(mode="json") for run in runtime_manager.run_store.list_runs()]
+        return [run.model_dump(mode="json") for run in await runtime_manager.run_store.list_runs()]
 
     @app.get("/api/v1/agent-deployments")
     async def list_agent_deployments() -> list[dict]:
@@ -303,12 +312,12 @@ def create_app() -> FastAPI:
 
     @app.get("/api/v1/sessions")
     async def list_sessions(agent_id: str | None = None) -> list[dict]:
-        sessions = runtime_manager.session_store.list_sessions(agent_id)
+        sessions = await runtime_manager.session_store.list_sessions(agent_id=agent_id)
         return [s.model_dump(mode="json") for s in sessions]
 
     @app.get("/api/v1/sessions/{session_id}")
     async def get_session(session_id: str) -> dict:
-        session = runtime_manager.session_store.load(session_id)
+        session = await runtime_manager.session_store.load(session_id)
         if session is None:
             raise HTTPException(status_code=404, detail=f"session not found: {session_id}")
         return session.model_dump(mode="json")
