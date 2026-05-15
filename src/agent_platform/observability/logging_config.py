@@ -7,6 +7,8 @@ import logging
 import sys
 from datetime import UTC, datetime
 
+from agent_platform.observability.sanitizer import LogSanitizer
+
 
 class JSONFormatter(logging.Formatter):
     """Formats log records as single-line JSON objects."""
@@ -57,7 +59,8 @@ class JSONFormatter(logging.Formatter):
             }:
                 log_entry[key] = value
 
-        return json.dumps(log_entry, default=str)
+        serialized = json.dumps(log_entry, default=str)
+        return LogSanitizer.sanitize(serialized)
 
 
 def setup_logging(log_level: int = logging.INFO) -> None:

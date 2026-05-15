@@ -5,7 +5,7 @@ import logging
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -26,6 +26,7 @@ class ToolDefinition(BaseModel):
     handler_ref: str | None = None
     owner: str | None = None
     max_retries: int = 0
+    risk_level: Literal["low", "medium", "high", "critical"] = "low"
     keywords: list[str] = Field(default_factory=list)
 
     model_config = {"arbitrary_types_allowed": True}

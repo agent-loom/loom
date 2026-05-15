@@ -6,6 +6,7 @@ import yaml
 from pydantic import ValidationError
 
 from agent_platform.domain.models import AgentManifest, AgentSpec
+from agent_platform.policy.secret import validate_secret_refs
 from agent_platform.tools import create_default_tool_registry, load_agent_tools
 
 
@@ -142,6 +143,10 @@ class ManifestLoader:
                 raise ManifestError(
                     f"knowledge source requires collection for type {source.type}: {source.id}"
                 )
+
+        secret_errors = validate_secret_refs(manifest.model_dump())
+        if secret_errors:
+            raise ManifestError(secret_errors[0])
 
     def _validate_file_refs(self, package_path: Path, raw: dict[str, Any]) -> None:
         refs: list[str] = []

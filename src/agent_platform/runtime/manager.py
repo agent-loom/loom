@@ -18,6 +18,7 @@ from agent_platform.domain.models import (
     RuntimeRequest,
     RuntimeResponse,
 )
+from agent_platform.observability.sanitizer import TraceSanitizer
 from agent_platform.persistence.memory import (
     InMemoryAgentRunRepository,
     InMemoryAgentSessionRepository,
@@ -283,8 +284,7 @@ class RuntimeManager:
         response: AgentResponse,
     ) -> None:
         trace = response.trace or ResponseTrace()
-        await self.run_store.record(
-            AgentRun(
+        run = AgentRun(
                 run_id=run_id,
                 request_id=response.request_id,
                 session_id=response.session_id,
@@ -298,4 +298,5 @@ class RuntimeManager:
                 error=response.error,
                 metadata={"debug": request.request.options.debug},
             )
-        )
+        TraceSanitizer.sanitize_run(run)
+        await self.run_store.record(run)
