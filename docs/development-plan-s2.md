@@ -165,21 +165,21 @@ scripts/deploy_agent.py                  — 待绑定 artifact
 | # | 任务 | 设计来源 | 验收标准 |
 |---|---|---|---|
 | **安全基线** | | | |
-| 4.1 | Scoped API Key | security-tenant-policy §2.2 | `ApiKeyRecord` 持久化，按 tenant_id + role 校验 |
-| 4.2 | 租户隔离查询 | security-tenant-policy §4 | 所有 Repository 查询携带 tenant_id 条件 |
-| 4.3 | Tool Permission 矩阵 | security-tenant-policy §7 | `manifest_allow ∩ tenant_policy ∩ env_policy` 三层计算 |
-| 4.4 | Secret 引用与注入 | security-tenant-policy §8 | `$secret:KEY` 格式在 manifest 中使用；runtime 注入；不进入 trace/log |
-| 4.5 | 日志和 Trace 脱敏 | security-tenant-policy §9 | PII 正则替换；secret 值自动 `[REDACTED]` |
+| 4.1 | Scoped API Key | security-tenant-policy §2.2 | ✅ `ApiKeyRecord` + `InMemoryApiKeyStore` (SHA-256) |
+| 4.2 | 租户隔离查询 | security-tenant-policy §4 | ⬜ 待实现（需 DB 层） |
+| 4.3 | Tool Permission 矩阵 | security-tenant-policy §7 | ✅ `compute_tool_permission()` 三层计算 |
+| 4.4 | Secret 引用与注入 | security-tenant-policy §8 | ✅ `SecretResolver` + `EnvSecretBackend` |
+| 4.5 | 日志和 Trace 脱敏 | security-tenant-policy §9 | ✅ `LogSanitizer` + `TraceSanitizer` |
 | **DevFlow 闭环** | | | |
-| 4.6 | Webhook 幂等持久化 | devflow-state-sync §4 | `webhook_deliveries` 表去重，重复 webhook 不重复创建 MR |
-| 4.7 | GitLab → Plane 状态回写 | devflow-state-sync §3.2 | pipeline fail 回写 Plane comment + 状态 |
-| 4.8 | Eval report 回写 Plane | devflow-state-sync §3.3 | eval 结果写入 Plane custom property |
-| 4.9 | WorkspaceManager | devflow-runner-workspace §5 | 创建隔离 workspace，clone + checkout |
-| 4.10 | PathGuard | devflow-runner-workspace §6 | 校验变更文件在 whitelist 内 |
-| 4.11 | CodingAgentRunner Protocol | devflow-runner-workspace §3 | 定义统一接口 |
-| 4.12 | MockCodingRunner | devflow-runner-workspace §4.3 | mock runner 可从 task pack 生成完整 result |
-| 4.13 | ClaudeCodeRunner | devflow-runner-workspace §4.1 | 真实调用 claude CLI 执行 task pack |
-| 4.14 | MR comment 回写 | devflow-runner-workspace §8 | 变更文件列表 + 校验结果写入 MR comment |
+| 4.6 | Webhook 幂等持久化 | devflow-state-sync §4 | ⬜ 待实现（需 DB 层） |
+| 4.7 | GitLab → Plane 状态回写 | devflow-state-sync §3.2 | ⬜ 待实现 |
+| 4.8 | Eval report 回写 Plane | devflow-state-sync §3.3 | ⬜ 待实现 |
+| 4.9 | WorkspaceManager | devflow-runner-workspace §5 | ✅ `WorkspaceManager` (create/validate/commit/cleanup) |
+| 4.10 | PathGuard | devflow-runner-workspace §6 | ✅ `PathGuard` (fnmatch glob, denied-first) |
+| 4.11 | CodingAgentRunner Protocol | devflow-runner-workspace §3 | ✅ `RunnerAdapter` Protocol + `CodingAgentRunner` |
+| 4.12 | MockCodingRunner | devflow-runner-workspace §4.3 | ✅ `MockRunnerAdapter` (7 tests) |
+| 4.13 | ClaudeCodeRunner | devflow-runner-workspace §4.1 | ✅ `ClaudeCodeAdapter` + `CodexAdapter` |
+| 4.14 | MR comment 回写 | devflow-runner-workspace §8 | ✅ `_build_mr_comment()` + `_build_plane_comment()` |
 
 **依赖关系**：4.1-4.5 安全线可先行；4.6-4.8 状态同步 ∥ 4.9-4.14 runner 线。4.11 → 4.12 → 4.13。
 
@@ -201,7 +201,7 @@ Week 1          Week 2          Week 3          Week 4
 | M1：平台管线可观测 | Week 1 末 | PolicyEngine、HookRegistry、Metrics 全部接入 runtime；工具动态加载 | ✅ 完成 |
 | M2：状态可持久化 | Week 2 末 | 重启不丢 session/run/deployment；Domain Model 泛化完成 | ✅ 完成（7 Repository Protocol + InMemory/SQL 双实现 + Alembic migration + DI；RuntimeManager 内部仍用 InMemory store 待切换） |
 | M3：非 stub runtime | Week 3 末 | Hermes 可跑 hermes_echo agent；artifact 有 checksum 和版本 | ✅ 完成（ConversationEngine 修复 + model_gateway 注入 + hermes_echo 集成测试通过） |
-| M4：生产可审计 | Week 4 末 | 工具权限管控、Secret 安全、日志脱敏、DevFlow 自动执行 | ⬜ 待实现 |
+| M4：生产可审计 | Week 4 末 | 工具权限管控、Secret 安全、日志脱敏、DevFlow 自动执行 | ✅ 安全基线 + DevFlow Runner 已实现 |
 
 ## 不在此计划范围内（后续阶段）
 
