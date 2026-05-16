@@ -435,6 +435,7 @@ def create_app() -> FastAPI:
         model_gateway=model_gateway,
         tool_executor=tool_executor,
         knowledge_service=app_knowledge_service,
+        langfuse_tracer=langfuse_tracer,
     )
     eval_runner = EvalRunner(runtime_manager)
     task_pack_generator = TaskPackGenerator()
@@ -446,9 +447,29 @@ def create_app() -> FastAPI:
     test_agent = TestGenerationAgent()
     audit_log = DeploymentAuditLog(repo=audit_repo)
     artifact_store = ArtifactStore()
+
+    key_store = None
+    if db_session_factory is not None:
+        from agent_platform.persistence.sql import SqlApiKeyStore
+        key_store = SqlApiKeyStore(db_session_factory)
+        if settings.api_key:
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop is None:
+                asyncio.run(key_store.add_key(
+                    settings.api_key,
+                    key_id="bootstrap-key",
+                    role="platform_admin",
+                    created_by="bootstrap",
+                ))
+
     ws_manager = AgentWebSocketManager(
         router, runtime_manager,
         api_key=settings.api_key,
+        key_store=key_store,
     )
 
     app = FastAPI(title="Agent Platform", version="0.2.0", lifespan=_app_lifespan)
@@ -482,23 +503,6 @@ def create_app() -> FastAPI:
         dependencies=[_ROLE_ADMIN],
     )
 
-    key_store = None
-    if db_session_factory is not None:
-        from agent_platform.persistence.sql import SqlApiKeyStore
-        key_store = SqlApiKeyStore(db_session_factory)
-        if settings.api_key:
-            import asyncio
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
-            if loop is None:
-                asyncio.run(key_store.add_key(
-                    settings.api_key,
-                    key_id="bootstrap-key",
-                    role="platform_admin",
-                    created_by="bootstrap",
-                ))
     app.state.key_store = key_store
 
     app.add_middleware(

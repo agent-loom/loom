@@ -55,6 +55,7 @@ class RuntimeManager:
         model_gateway: ModelGateway | None = None,
         tool_executor: ToolExecutor | None = None,
         knowledge_service: Any | None = None,
+        langfuse_tracer: Any | None = None,
     ):
         self._backends = {
             NativeRuntimeBackend.name: NativeRuntimeBackend(tool_executor=tool_executor),
@@ -72,6 +73,7 @@ class RuntimeManager:
         self.hook_registry = hook_registry
         self.metrics_collector = metrics_collector
         self.knowledge_service = knowledge_service
+        self.langfuse_tracer = langfuse_tracer
 
     def register(self, backend) -> None:
         """注册一个新的运行时后端。"""
@@ -91,6 +93,20 @@ class RuntimeManager:
         started = perf_counter()
         backend_name = request.agent_spec.manifest.runtime.backend
         agent_id = request.agent_spec.agent_id
+
+        lf_trace = None
+        if self.langfuse_tracer:
+            lf_trace = self.langfuse_tracer.trace(
+                name=f"agent_run:{agent_id}",
+                session_id=request.request.session_id,
+                user_id=request.request.context.user.user_id,
+                metadata={
+                    "agent_version": request.agent_spec.version,
+                    "backend": backend_name,
+                    "deployment_id": request.deployment_id,
+                },
+                tags=[agent_id, backend_name],
+            )
 
         with tracer.start_as_current_span("agent_run") as span:
             instrument_agent_run(span, agent_id, run_id, backend_name)
@@ -159,6 +175,13 @@ class RuntimeManager:
             timeout_sec = timeout_ms / 1000.0
 
             span.add_event("backend_run")
+            if self.langfuse_tracer and lf_trace:
+                self.langfuse_tracer.span(
+                    lf_trace,
+                    name="backend_execution",
+                    input=request.request.input.query,
+                    metadata={"backend": backend_name, "timeout_ms": timeout_ms},
+                )
             try:
                 response = await asyncio.wait_for(backend.run(request), timeout=timeout_sec)
             except TimeoutError:
@@ -263,6 +286,24 @@ class RuntimeManager:
                 latency_ms=latency_ms,
                 response=response.response,
             )
+
+            if self.langfuse_tracer and lf_trace:
+                self.langfuse_tracer.generation(
+                    lf_trace,
+                    name="agent_response",
+                    model=backend_name,
+                    input=request.request.input.query,
+                    output=response.response.output.text.display,
+                    latency_ms=latency_ms,
+                    metadata={"run_id": trace.run_id},
+                )
+                self.langfuse_tracer.score(
+                    lf_trace,
+                    name="run_success",
+                    value=1.0,
+                    comment=f"latency={latency_ms}ms",
+                )
+
             return response
 
     async def _load_session(self, request: RuntimeRequest) -> AgentSession | None:
