@@ -1,19 +1,27 @@
-"""基于令牌桶的 API 限流中间件。"""
+"""基于令牌桶的 API 限流中间件，支持按角色差异化限流。"""
 
 from __future__ import annotations
 
 import time
-from collections import defaultdict
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+ROLE_RATE_LIMITS: dict[str, tuple[int, int]] = {
+    "platform_admin": (300, 50),
+    "agent_developer": (120, 20),
+    "agent_operator": (120, 20),
+    "readonly": (60, 10),
+}
+
+_SKIP_PATHS = {"/health", "/health/ready", "/metrics", "/docs", "/openapi.json", "/redoc"}
+
 
 class RateLimiterMiddleware(BaseHTTPMiddleware):
-    """Simple in-memory token-bucket rate limiter.
+    """In-memory token-bucket rate limiter with per-role limits.
 
-    Limits are per-client (by IP or x-api-key header).
+    Falls back to global limits when auth identity is not available.
     """
 
     def __init__(
@@ -22,17 +30,24 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         requests_per_minute: int = 60,
         burst: int = 10,
     ):
-        """初始化限流中间件。"""
         super().__init__(app)
-        self.rate = requests_per_minute / 60.0
-        self.burst = burst
-        self._buckets: dict[str, _TokenBucket] = defaultdict(
-            lambda: _TokenBucket(self.rate, self.burst)
-        )
+        self.default_rate = requests_per_minute / 60.0
+        self.default_burst = burst
+        self._buckets: dict[str, _TokenBucket] = {}
+
+    def _get_bucket(self, key: str, role: str | None = None) -> _TokenBucket:
+        if key not in self._buckets:
+            if role and role in ROLE_RATE_LIMITS:
+                rpm, burst = ROLE_RATE_LIMITS[role]
+                self._buckets[key] = _TokenBucket(rpm / 60.0, burst)
+            else:
+                self._buckets[key] = _TokenBucket(
+                    self.default_rate, self.default_burst,
+                )
+        return self._buckets[key]
 
     async def dispatch(self, request: Request, call_next):
-        """拦截请求并执行令牌桶限流检查。"""
-        if request.url.path in {"/health", "/docs", "/openapi.json", "/redoc"}:
+        if request.url.path in _SKIP_PATHS:
             return await call_next(request)
 
         client_host = request.client.host if request.client else "unknown"
@@ -40,9 +55,12 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         client_key = self._get_client_key(request)
-        bucket = self._buckets[client_key]
+        auth = getattr(request.state, "auth", None)
+        role = auth.role if auth else None
+        bucket = self._get_bucket(client_key, role)
 
         if not bucket.consume():
+            retry_after = max(1, int(1.0 / bucket.rate))
             return JSONResponse(
                 status_code=429,
                 content={
@@ -51,13 +69,16 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
                         "message": "too many requests, please retry later",
                     }
                 },
-                headers={"Retry-After": str(int(1.0 / self.rate))},
+                headers={"Retry-After": str(retry_after)},
             )
 
         return await call_next(request)
 
     @staticmethod
     def _get_client_key(request: Request) -> str:
+        auth = getattr(request.state, "auth", None)
+        if auth and auth.key_id:
+            return f"key:{auth.key_id}"
         api_key = request.headers.get("x-api-key")
         if api_key:
             return f"key:{api_key}"

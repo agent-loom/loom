@@ -8,14 +8,17 @@ from unittest.mock import MagicMock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agent_platform.api.rate_limiter import RateLimiterMiddleware, _TokenBucket
+from agent_platform.api.rate_limiter import (
+    ROLE_RATE_LIMITS,
+    RateLimiterMiddleware,
+    _TokenBucket,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 def _make_app(requests_per_minute: int = 60, burst: int = 3) -> FastAPI:
-    """Create a minimal FastAPI app with the rate limiter middleware."""
     app = FastAPI()
     app.add_middleware(
         RateLimiterMiddleware,
@@ -43,21 +46,16 @@ def _make_app(requests_per_minute: int = 60, burst: int = 3) -> FastAPI:
 # ---------------------------------------------------------------------------
 
 def test_health_endpoint_bypasses_rate_limiter():
-    """Health endpoint should never be rate-limited."""
     app = _make_app(burst=1)
     client = TestClient(app)
-
-    # Even with burst=1, health should always succeed
     for _ in range(20):
         resp = client.get("/health")
         assert resp.status_code == 200
 
 
 def test_docs_endpoint_bypasses_rate_limiter():
-    """/docs is in the bypass set."""
     app = _make_app(burst=1)
     client = TestClient(app)
-
     for _ in range(10):
         resp = client.get("/docs")
         assert resp.status_code == 200
@@ -68,12 +66,8 @@ def test_docs_endpoint_bypasses_rate_limiter():
 # ---------------------------------------------------------------------------
 
 def test_testclient_host_bypasses_rate_limiter():
-    """TestClient uses host='testclient', which the middleware skips."""
     app = _make_app(burst=1)
     client = TestClient(app)
-
-    # With burst=1 a real client would be rate-limited after 1 request.
-    # testclient host should bypass entirely.
     for _ in range(20):
         resp = client.get("/api/v1/test")
         assert resp.status_code == 200
@@ -84,120 +78,128 @@ def test_testclient_host_bypasses_rate_limiter():
 # ---------------------------------------------------------------------------
 
 def test_token_bucket_within_burst_succeeds():
-    """Requests within the burst limit should succeed."""
     bucket = _TokenBucket(rate=1.0, burst=5)
-
     results = [bucket.consume() for _ in range(5)]
-    assert all(results), "All requests within burst should succeed"
+    assert all(results)
 
 
 def test_token_bucket_exceeding_burst_fails():
-    """Requests beyond the burst should fail (without refill time)."""
     bucket = _TokenBucket(rate=1.0, burst=3)
-
-    # Drain all tokens
     for _ in range(3):
         assert bucket.consume() is True
-
-    # Next should fail
     assert bucket.consume() is False
 
 
 def test_token_bucket_refills_over_time():
-    """Tokens should refill based on elapsed time."""
     bucket = _TokenBucket(rate=10.0, burst=5)
-
-    # Drain all tokens
     for _ in range(5):
         bucket.consume()
-
     assert bucket.consume() is False
-
-    # Simulate time passing (0.5s at rate=10/s => 5 tokens refilled)
     bucket.last_refill = time.monotonic() - 0.5
     assert bucket.consume() is True
 
 
 # ---------------------------------------------------------------------------
-# Tests — Middleware integration with real client (non-testclient host)
+# Tests — Middleware bucket management
 # ---------------------------------------------------------------------------
 
-def test_requests_exceeding_burst_return_429():
-    """When bucket is exhausted, subsequent requests should get 429."""
+def test_requests_exceeding_burst_via_get_bucket():
     app = _make_app(burst=2)
-
-    # We need to simulate a real client host, not "testclient"
-    # Directly test via the _TokenBucket + middleware logic
     middleware = RateLimiterMiddleware(app, requests_per_minute=60, burst=2)
-
-    # Use the internal bucket for a specific key to verify 429 behavior
-    bucket = middleware._buckets["ip:192.168.1.1"]
-
-    # Consume all tokens
+    bucket = middleware._get_bucket("ip:192.168.1.1")
     assert bucket.consume() is True
     assert bucket.consume() is True
     assert bucket.consume() is False
 
 
-def test_retry_after_header_present_on_429():
-    """429 response should include a Retry-After header."""
+def test_retry_after_value():
     app = _make_app(burst=2)
     middleware = RateLimiterMiddleware(app, requests_per_minute=60, burst=2)
-
-    # Verify the Retry-After value is computed correctly
-    # rate = 60/60 = 1.0  =>  Retry-After = int(1/1.0) = 1
-    expected_retry_after = str(int(1.0 / middleware.rate))
+    expected_retry_after = str(max(1, int(1.0 / middleware.default_rate)))
     assert expected_retry_after == "1"
 
 
 def test_different_clients_have_separate_buckets():
-    """Each client key should have its own independent bucket."""
     app = _make_app(burst=2)
     middleware = RateLimiterMiddleware(app, requests_per_minute=60, burst=2)
-
-    bucket_a = middleware._buckets["ip:10.0.0.1"]
-    bucket_b = middleware._buckets["ip:10.0.0.2"]
-
-    # Drain client A
+    bucket_a = middleware._get_bucket("ip:10.0.0.1")
+    bucket_b = middleware._get_bucket("ip:10.0.0.2")
     bucket_a.consume()
     bucket_a.consume()
     assert bucket_a.consume() is False
-
-    # Client B should still have tokens
-    assert bucket_b.consume() is True
     assert bucket_b.consume() is True
 
 
-def test_api_key_used_as_client_key():
-    """When x-api-key header is present, it should be used as the client key."""
-    _make_app(burst=2)
+# ---------------------------------------------------------------------------
+# Tests — Client key extraction
+# ---------------------------------------------------------------------------
 
-    # Create a mock request with x-api-key header
-    mock_request = MagicMock()
-    mock_request.headers = {"x-api-key": "test-key-123"}
-    mock_request.client = MagicMock()
-    mock_request.client.host = "1.2.3.4"
+def _mock_request(auth=None, headers=None, client_host="1.2.3.4"):
+    mock = MagicMock()
+    mock.headers = headers or {}
+    if client_host:
+        mock.client = MagicMock()
+        mock.client.host = client_host
+    else:
+        mock.client = None
+    mock.state = MagicMock()
+    mock.state.auth = auth
+    return mock
 
-    key = RateLimiterMiddleware._get_client_key(mock_request)
+
+def test_auth_key_id_used_as_client_key():
+    auth = MagicMock()
+    auth.key_id = "k-123"
+    req = _mock_request(auth=auth)
+    key = RateLimiterMiddleware._get_client_key(req)
+    assert key == "key:k-123"
+
+
+def test_api_key_header_used_when_no_auth():
+    req = _mock_request(auth=None, headers={"x-api-key": "test-key-123"})
+    key = RateLimiterMiddleware._get_client_key(req)
     assert key == "key:test-key-123"
 
 
-def test_ip_used_as_client_key_when_no_api_key():
-    """When no x-api-key header, client IP should be used."""
-    mock_request = MagicMock()
-    mock_request.headers = {}
-    mock_request.client = MagicMock()
-    mock_request.client.host = "192.168.1.100"
-
-    key = RateLimiterMiddleware._get_client_key(mock_request)
+def test_ip_used_when_no_auth_no_api_key():
+    req = _mock_request(auth=None, headers={}, client_host="192.168.1.100")
+    key = RateLimiterMiddleware._get_client_key(req)
     assert key == "ip:192.168.1.100"
 
 
 def test_unknown_client_key_when_no_client():
-    """When request.client is None, key should use 'unknown'."""
-    mock_request = MagicMock()
-    mock_request.headers = {}
-    mock_request.client = None
-
-    key = RateLimiterMiddleware._get_client_key(mock_request)
+    req = _mock_request(auth=None, headers={}, client_host=None)
+    key = RateLimiterMiddleware._get_client_key(req)
     assert key == "ip:unknown"
+
+
+# ---------------------------------------------------------------------------
+# Tests — Per-role rate limits
+# ---------------------------------------------------------------------------
+
+def test_role_rate_limits_platform_admin():
+    rpm, burst = ROLE_RATE_LIMITS["platform_admin"]
+    assert rpm == 300
+    assert burst == 50
+
+
+def test_role_rate_limits_readonly():
+    rpm, burst = ROLE_RATE_LIMITS["readonly"]
+    assert rpm == 60
+    assert burst == 10
+
+
+def test_get_bucket_with_role_uses_role_limits():
+    app = _make_app()
+    middleware = RateLimiterMiddleware(app, requests_per_minute=60, burst=10)
+    bucket = middleware._get_bucket("key:admin-key", role="platform_admin")
+    assert bucket.burst == 50
+    assert bucket.rate == 300 / 60.0
+
+
+def test_get_bucket_unknown_role_uses_default():
+    app = _make_app()
+    middleware = RateLimiterMiddleware(app, requests_per_minute=120, burst=20)
+    bucket = middleware._get_bucket("key:custom", role="custom_role")
+    assert bucket.burst == 20
+    assert bucket.rate == 120 / 60.0

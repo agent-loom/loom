@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import StreamingResponse
 
+from agent_platform.api.access_log import AccessLogMiddleware
 from agent_platform.api.admin import router as admin_router
 from agent_platform.api.admin_deps import AdminDeps
 from agent_platform.api.auth import AuthIdentity, require_role, require_scope
@@ -511,6 +512,7 @@ def create_app() -> FastAPI:
         AuthMiddleware, api_key=settings.api_key, key_store=key_store,
     )
     app.add_middleware(RateLimiterMiddleware, requests_per_minute=120, burst=20)
+    app.add_middleware(AccessLogMiddleware)
 
     cors_raw = settings.cors_allowed_origins
     if cors_raw and cors_raw != "*":
@@ -708,6 +710,43 @@ def create_app() -> FastAPI:
         await registry.register(spec)
         return {"agent_id": spec.agent_id, "version": spec.version, "status": "registered"}
 
+    @app.get("/api/v1/agents/{agent_id}/health")
+    async def agent_health(agent_id: str) -> dict:
+        """Per-agent health check: backend, recent runs, sessions."""
+        try:
+            spec = await registry.get(agent_id)
+        except AgentNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        backend_name = spec.manifest.runtime.backend
+        backend_ok = backend_name in runtime_manager._backends
+        recent_runs = await runtime_manager.list_runs(
+            agent_id=agent_id, limit=20,
+        )
+        sessions = await runtime_manager.list_sessions(agent_id=agent_id)
+
+        total = len(recent_runs)
+        succeeded = sum(
+            1 for r in recent_runs if r.status.value == "succeeded"
+        )
+        success_rate = succeeded / total if total else 1.0
+
+        health = "healthy"
+        if not backend_ok:
+            health = "unhealthy"
+        elif total > 0 and success_rate < 0.5:
+            health = "degraded"
+
+        return {
+            "agent_id": agent_id,
+            "health": health,
+            "backend": backend_name,
+            "backend_available": backend_ok,
+            "recent_runs": total,
+            "success_rate": round(success_rate, 3),
+            "active_sessions": len(sessions),
+        }
+
     @app.get("/api/v1/agent-runs")
     async def list_agent_runs() -> list[dict]:
         return [run.model_dump(mode="json") for run in await runtime_manager.run_store.list_runs()]
@@ -717,14 +756,56 @@ def create_app() -> FastAPI:
         deployments = await registry.list_deployments()
         return [deployment.model_dump(mode="json") for deployment in deployments]
 
+    @app.get("/api/v1/agent-deployments/{deployment_id}/metrics")
+    async def deployment_metrics(deployment_id: str) -> dict:
+        """Canary deployment metrics: error rate, latency, run count."""
+        deployment = await registry.get_deployment(deployment_id)
+        if deployment is None:
+            raise HTTPException(
+                status_code=404, detail=f"deployment not found: {deployment_id}",
+            )
+
+        runs = await runtime_manager.list_runs(
+            agent_id=deployment.agent_id, limit=100,
+        )
+        dep_runs = [
+            r for r in runs
+            if r.agent_version == deployment.version
+        ]
+        total = len(dep_runs)
+        failed = sum(
+            1 for r in dep_runs if r.status.value == "failed"
+        )
+        error_rate = failed / total if total else 0.0
+        latencies = [r.latency_ms for r in dep_runs if r.latency_ms]
+        avg_latency = sum(latencies) / len(latencies) if latencies else 0.0
+        p99_latency = (
+            sorted(latencies)[int(len(latencies) * 0.99)]
+            if latencies else 0.0
+        )
+
+        return {
+            "deployment_id": deployment_id,
+            "agent_id": deployment.agent_id,
+            "version": deployment.version,
+            "status": deployment.status.value,
+            "traffic_percent": deployment.traffic_percent,
+            "total_runs": total,
+            "failed_runs": failed,
+            "error_rate": round(error_rate, 4),
+            "avg_latency_ms": round(avg_latency, 1),
+            "p99_latency_ms": round(p99_latency, 1),
+            "needs_rollback": error_rate > 0.1 and total >= 10,
+        }
+
     @app.get("/api/v1/sessions")
     async def list_sessions(agent_id: str | None = None) -> list[dict]:
-        sessions = await runtime_manager.session_store.list_sessions(agent_id=agent_id)
+        sessions = await runtime_manager.list_sessions(agent_id=agent_id)
         return [s.model_dump(mode="json") for s in sessions]
 
     @app.get("/api/v1/sessions/{session_id}")
     async def get_session(session_id: str) -> dict:
-        session = await runtime_manager.session_store.load(session_id)
+        session = await runtime_manager.load_session(session_id)
         if session is None:
             raise HTTPException(status_code=404, detail=f"session not found: {session_id}")
         return session.model_dump(mode="json")

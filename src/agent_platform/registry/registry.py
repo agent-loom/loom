@@ -183,6 +183,10 @@ class AgentRegistry:
             await self.discover()
         return await self._deployment_repo.list_all()
 
+    async def get_deployment(self, deployment_id: str) -> AgentDeployment | None:
+        """按 deployment_id 获取部署记录。"""
+        return await self._deployment_repo.get(deployment_id)
+
     async def resolve_deployment(
         self,
         *,
