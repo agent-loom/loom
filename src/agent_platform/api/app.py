@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from pathlib import Path
 from uuid import uuid4
 
@@ -46,6 +47,8 @@ from agent_platform.observability.metrics import MetricsCollector
 from agent_platform.persistence.memory import (
     InMemoryAgentRunRepository,
     InMemoryAgentSessionRepository,
+    InMemoryDeploymentAuditRepository,
+    InMemoryEvalRunRepository,
     InMemoryWebhookDeliveryRepository,
 )
 from agent_platform.policy import PolicyEngine
@@ -186,8 +189,38 @@ def create_app() -> FastAPI:
         metrics_collector=app_metrics,
     )
 
-    run_repo = InMemoryAgentRunRepository()
-    session_repo = InMemoryAgentSessionRepository()
+    db_session_factory = None
+    _has_explicit_db = bool(os.getenv("DATABASE_URL"))
+    if _has_explicit_db and settings.database_url:
+        try:
+            from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+            engine = create_async_engine(settings.database_url, echo=False)
+            db_session_factory = async_sessionmaker(engine, expire_on_commit=False)
+            logger.info("SQL persistence enabled for %s", settings.database_url)
+        except Exception:
+            logger.exception("Failed to create SQL engine; falling back to InMemory repos")
+
+    if db_session_factory is not None:
+        from agent_platform.persistence.sql import (
+            SqlAgentRunRepository,
+            SqlAgentSessionRepository,
+            SqlDeploymentAuditRepository,
+            SqlEvalRunRepository,
+            SqlWebhookDeliveryRepository,
+        )
+
+        run_repo = SqlAgentRunRepository(db_session_factory)
+        session_repo = SqlAgentSessionRepository(db_session_factory)
+        webhook_repo = SqlWebhookDeliveryRepository(db_session_factory)
+        audit_repo = SqlDeploymentAuditRepository(db_session_factory)
+        eval_repo = SqlEvalRunRepository(db_session_factory)
+    else:
+        run_repo = InMemoryAgentRunRepository()
+        session_repo = InMemoryAgentSessionRepository()
+        webhook_repo = InMemoryWebhookDeliveryRepository()
+        audit_repo = InMemoryDeploymentAuditRepository()
+        eval_repo = InMemoryEvalRunRepository()
 
     runtime_manager = RuntimeManager(
         run_store=run_repo,
@@ -200,24 +233,6 @@ def create_app() -> FastAPI:
     )
     eval_runner = EvalRunner(runtime_manager)
     task_pack_generator = TaskPackGenerator()
-
-    # -- persistence repositories (InMemory by default) ----------------------
-    webhook_repo = InMemoryWebhookDeliveryRepository()
-
-    # If DATABASE_URL is set to something other than the default sqlite path,
-    # a SQL session factory could be created here for opt-in SQL persistence.
-    # For now, all repositories default to their InMemory implementations.
-    db_session_factory = None
-    _default_db_url = "sqlite+aiosqlite:///./agent_platform.db"
-    if settings.database_url and settings.database_url != _default_db_url:
-        try:
-            from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
-            engine = create_async_engine(settings.database_url, echo=False)
-            db_session_factory = async_sessionmaker(engine, expire_on_commit=False)
-            logger.info("SQL session factory created for %s", settings.database_url)
-        except Exception:
-            logger.exception("Failed to create SQL engine; falling back to InMemory repos")
 
     requirement_parser = RequirementParser()
     issue_generator = IssueGenerator()
@@ -235,6 +250,8 @@ def create_app() -> FastAPI:
     app.state.semantic_router = app_semantic_router
     app.state.metrics = app_metrics
     app.state.webhook_repo = webhook_repo
+    app.state.audit_repo = audit_repo
+    app.state.eval_repo = eval_repo
     app.state.db_session_factory = db_session_factory
 
     if settings.api_key:
@@ -270,6 +287,7 @@ def create_app() -> FastAPI:
             plane=plane_adapter,
             gitlab=gitlab_adapter,
             gitlab_project_id=settings.gitlab_project_id,
+            webhook_repo=webhook_repo,
         )
     app.state.devflow_enabled = devflow is not None
 
@@ -408,7 +426,7 @@ def create_app() -> FastAPI:
         if devflow and project_id and mr_iid:
             from agent_platform.evals.feedback import EvalFeedback
             gitlab_adapter = devflow.gitlab
-            feedback = EvalFeedback(gitlab=gitlab_adapter)
+            feedback = EvalFeedback(gitlab=gitlab_adapter, eval_repo=eval_repo)
             await feedback.post_to_gitlab(report, project_id, mr_iid)
             result["gitlab_comment_posted"] = True
 
