@@ -1,15 +1,15 @@
 # 实现与设计差距分析
 
-> Last verified against code: 2026-05-17 (S5 Phase 0–3 全部完成 + DevFlow 生产化)
+> Last verified against code: 2026-05-17 (S5 Phase 0–3 全部完成 + DevFlow 生产化 + API 生产化加固)
 >
-> S5 Phase 0–3 已全部完成并通过质量门禁。DevFlow 集成基础设施已生产化。753 tests passed, ruff clean。
+> S5 Phase 0–3 已全部完成并通过质量门禁。DevFlow 集成基础设施已生产化。API 层生产化加固完成（RBAC endpoint enforcement、graceful shutdown、deep health check、global error handler、CORS 配置化、startup config validation）。780 tests passed, ruff clean。
 
 本文档对齐以下两份设计文档和当前代码实现：
 
 - `docs/02-architecture/agent-platform-design.md`
 - `docs/02-architecture/ai-human-vibecoding-rd-platform.md`
 
-结论：当前实现已经覆盖了平台 MVP 的骨架，并完成 S5 Phase 0–3 全部任务 + DevFlow 集成生产化。具备”多 Agent Package + 统一请求响应契约 + 路由 + RuntimeBackend 抽象 + DevFlow API + Plane/GitLab Adapter（含 ScmAdapter 协议、HttpClient 连接池重试、GitLab webhook 反向同步）+ Eval + 持久化 + Hermes SDK 真接入 + MCP + OTel + HITL 审批 + Admin API + 完善测试”的能力。距离生产级 Agent Platform 的主要剩余差距集中在 RBAC endpoint enforcement、真实 vector backend、Langfuse 集成、分布式 Job Queue、真实 coding runner adapter 接入和 Admin UI。
+结论：当前实现已经覆盖了平台 MVP 的骨架，并完成 S5 Phase 0–3 全部任务 + DevFlow 集成生产化 + API 层生产化加固。具备”多 Agent Package + 统一请求响应契约 + 路由 + RuntimeBackend 抽象 + DevFlow API + Plane/GitLab Adapter（含 ScmAdapter 协议、HttpClient 连接池重试、GitLab webhook 反向同步）+ Eval + 持久化 + Hermes SDK 真接入 + MCP + OTel + HITL 审批 + Admin API + **RBAC endpoint enforcement** + **graceful shutdown** + **deep health check** + **global error handler** + 完善测试”的能力。距离生产级 Agent Platform 的主要剩余差距集中在真实 vector backend、Langfuse 集成、分布式 Job Queue、真实 coding runner adapter 接入和 Admin UI。
 
 ## 1. 当前实现总览
 
@@ -39,13 +39,13 @@
 
 ```text
 .venv/bin/python -m pytest
-753 passed, 1 skipped
+780 passed, 1 skipped
 
 .venv/bin/ruff check src tests scripts alembic
 All checks passed!
 ```
 
-Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参数化覆盖 7 个 Repository 的 InMemory 和 SQL 实现（含租户隔离测试）。S5 新增 111 个测试覆盖 MCP Server、OTel tracing、HITL approval、Admin API、Hermes fallback、semantic autoload、artifact store、webhook async、runtime knowledge 等模块。DevFlow 生产化新增 83 个测试覆盖 HttpClient 重试、集成错误层次、GitLab webhook、ScmAdapter 协议、CodingAgentRunner 生命周期、分支名清理、CodingJobRepository 等模块。
+Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参数化覆盖 7 个 Repository 的 InMemory 和 SQL 实现（含租户隔离测试）。S5 新增 111 个测试覆盖 MCP Server、OTel tracing、HITL approval、Admin API、Hermes fallback、semantic autoload、artifact store、webhook async、runtime knowledge 等模块。DevFlow 生产化新增 83 个测试覆盖 HttpClient 重试、集成错误层次、GitLab webhook、ScmAdapter 协议、CodingAgentRunner 生命周期、分支名清理、CodingJobRepository 等模块。API 生产化加固新增 27 个测试覆盖 RBAC scope enforcement、health/ready readiness probe、CORS 配置化、AuthMiddleware AuthIdentity 填充、全局异常处理等模块。
 
 ### 1.3 代码审查校准结论（2026-05-17）
 
@@ -56,12 +56,13 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 > - **Phase 1**：Hermes SDK 真接入（Spike B — `register_platform_tools_to_hermes()` + `_run_with_hermes()` + `normalize_hermes_result()` + Spike A fallback）、ModelGateway ChatResult + token/cost metrics
 > - **Phase 2**：MCP Server（6 tools, JSON-RPC 2.0 stdio transport）、OpenTelemetry 可选集成（NoOp fallback + span instrumentation）、SemanticRouter manifest routing rules 自动加载
 > - **Phase 3**：HITL ApprovalGate Protocol（InMemoryApprovalGate + AutoApproveGate + TTL 过期 + ToolExecutor 集成）、Admin API 9 端点、app.py DI 全量收尾
+> - **生产化加固**：RBAC endpoint enforcement（AuthMiddleware → AuthIdentity → require_scope/require_role）、FastAPI lifespan graceful shutdown、/health/ready readiness probe、全局异常处理（结构化 JSON + request_id）、CORS 配置化、startup config validation
 
 按成熟度粗略判断：
 
 | 层级 | 当前成熟度 | 主要缺口 |
 | --- | --- | --- |
-| API 层 | 80% | RBAC/scopes endpoint enforcement、WebSocket 鉴权/背压 |
+| API 层 | 90% | WebSocket 鉴权/背压 |
 | Agent Contract / Manifest | 80% | tool handler import、adapter entrypoint import |
 | Routing | 85% | ✅ semantic rules 自动加载已完成；route decision 持久化待补 |
 | Runtime 抽象 | 80% | ✅ Hermes Spike B 已完成；Hermes memory 持久化、stream event 映射待补 |
@@ -70,7 +71,7 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 | DevFlow | 75% | ✅ ScmAdapter 协议抽象、HttpClient 连接池+重试、GitLab webhook 反向同步、job 持久化+可观测性端点、分支名清理、git 超时保护已完成；真实 runner adapter (Claude Code / Codex) 待接入，异步 job queue 待补 |
 | Persistence | 80% | ✅ Registry/Deployment/Audit 主链路已接入持久化 |
 | Artifact / Release | 70% | ✅ LocalArtifactStore + Protocol 已完成；S3/远程后端、manifest_sha256 待补 |
-| Security / Tenant / Policy | 55% | ✅ HITL 审批已完成；endpoint RBAC/scopes enforcement 待补 |
+| Security / Tenant / Policy | 70% | ✅ HITL 审批 + RBAC endpoint enforcement 已完成；RBAC 持久化层、服务间鉴权待补 |
 | Hermes 真接入 | 75% | ✅ Spike B 完成（SDK 工具桥接 + fallback + result normalization）；memory 持久化待补 |
 | Observability | 70% | ✅ OTel 集成 + NoOp fallback 已完成；Langfuse、dashboard、alerting 待补 |
 | Knowledge / RAG | 55% | ✅ runtime 主链路接入已完成；真实 vector backend 待实现 |
@@ -114,7 +115,7 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 | 设计模块 | 当前实现 | 差距 |
 | --- | --- | --- |
 | API Gateway / 协议适配 | FastAPI `/api/v1/agent/chat`、SSE、WebSocket、request id header 回写 | 缺少版本协商、前端能力协商、复杂渠道协议适配 |
-| Auth / 租户识别 | API key、request context、`x-tenant-id` 注入、✅ `ApiKeyRecord` + scoped API key、✅ 所有 Repository list 查询支持 `tenant_id` 过滤 | 缺少 RBAC、细粒度权限、服务间鉴权 |
+| Auth / 租户识别 | API key、request context、`x-tenant-id` 注入、✅ `ApiKeyRecord` + scoped API key、✅ 所有 Repository list 查询支持 `tenant_id` 过滤、✅ AuthMiddleware → AuthIdentity → require_scope/require_role endpoint enforcement | 缺少多用户 RBAC 持久化、服务间鉴权 |
 | Agent Registry | 文件发现 + 内存 cache + ✅ `AgentDefinitionRepository`/`AgentDeploymentRepository` 持久化接入 | DB 持久化已接入 dev-only fallback；版本索引、并发一致性待补 |
 | 版本/灰度/回滚 | deploy API、canary bucket、rollback API、staging/prod 自动 eval gate、**ArtifactStore 产物绑定**、✅ `AgentDeploymentRepository` + `DeploymentAuditRepository` Protocol + 双实现 | 缺少 manifest_sha256 绑定、真实环境控制、审批、保护环境 |
 | Policy | ✅ `PolicyEngine` 已深度接入 runtime/tool 链路（check_input/check_output 在 RuntimeManager，check_tool_allowed 在 ToolExecutor，pre_tool/post_tool hooks 在 ToolExecutor） | 策略规则仍需从外置配置或 DB 加载 |
@@ -326,7 +327,7 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 - 当前只处理部分 webhook event 和字段，真实 Plane payload 兼容性还需要压测。
 - 没有 dead-letter queue，webhook 失败后不易恢复。
 - ~~没有把 GitLab pipeline/eval 状态稳定同步回 Plane。~~ ✅ 已完成（`GitLabEventHandler` 处理 pipeline running/failed/success 和 MR merged/closed 事件，幂等同步 Plane 状态）
-- DevFlow 只有在 Plane base url、Plane key、GitLab base url、GitLab token、GitLab project id 都存在时才启用；缺少启动时配置诊断。
+- ~~DevFlow 只有在 Plane base url、Plane key、GitLab base url、GitLab token、GitLab project id 都存在时才启用；缺少启动时配置诊断。~~ ✅ 已完成（`_validate_startup_config` 在启动时检查并报警）
 
 建议下一步：
 
@@ -428,7 +429,7 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 剩余差距：
 
 - runner 执行是同步的，缺少异步 job queue 和分布式执行
-- 真实 runner adapter (Claude Code CLI / Codex CLI) 尚未接入
+- 真实 runner adapter (Claude Code CLI / Codex CLI) 已实现（`devflow/runner/adapters/claude_code.py`、`codex.py`），默认为 mock，启动时有配置警告
 - 缺少 runner 执行日志持久化和回放
 - 缺少安全沙箱（Docker / Firecracker）隔离执行环境
 
@@ -436,8 +437,8 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 
 当前安全能力适合 MVP，不适合生产：
 
-- API key 是全局级别。✅ 已实现 `InMemoryApiKeyStore`（SHA-256 hash）、`AuthIdentity`、`require_role`/`require_scope` FastAPI 依赖。
-- 没有用户、角色、权限。⬜ 需要 RBAC 持久化层。
+- API key 是全局级别。✅ 已实现 `InMemoryApiKeyStore`（SHA-256 hash）、`AuthIdentity`、`require_role`/`require_scope` FastAPI 依赖。✅ AuthMiddleware 已升级为填充 `request.state.auth`，所有 mutating endpoint 已接入 scope enforcement。
+- 没有用户、角色、权限。✅ 基础 RBAC 已就位（API key → AuthIdentity → scope check）；需要多用户 RBAC 持久化层。
 - 没有 tenant-level secret。✅ 已实现 `SecretBackend` Protocol + `EnvSecretBackend`（tenant-scoped env var）+ `SecretResolver`（`$secret:KEY` 递归解析）。
 - 工具调用没有细粒度授权。✅ 已实现 `compute_tool_permission()`（manifest ∩ tenant ∩ environment 三层矩阵）+ `check_tool_allowed` 已接入 ToolExecutor。
 - trace 里没有 PII 脱敏策略。✅ 已实现 `LogSanitizer`（PII regex + secret pattern）+ `TraceSanitizer`（tool trace + run sanitization）。
@@ -466,11 +467,11 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 
 | 优先级 | 工作项 | 原因 | 状态 |
 | --- | --- | --- | --- |
-| P1 | RBAC/scoped API key 接入 API endpoint | register/deploy/rollback/eval/MCP/Admin 不能只靠全局 API key | ⬜ 待实施 |
+| P1 | RBAC/scoped API key 接入 API endpoint | register/deploy/rollback/eval/MCP/Admin 不能只靠全局 API key | ✅ 已完成（AuthMiddleware 填充 AuthIdentity + require_scope/require_role endpoint enforcement） |
 | P1 | ~~Tool permission matrix 接入高风险审批~~ | `RequiresApproval` 需要进入实际执行 gate | ✅ S5 P3 完成 |
 | P1 | EvalRunner 自动记录 EvalRun | deploy gate、CI callback、线上回归需要可追溯 eval_run_id | ⬜ 待实施 |
 | P1 | ~~ModelGateway provider 从配置注册~~ | 默认只有 stub 不足以支撑真实 Hermes/业务 agent | ✅ S5 P1 完成 |
-| P1 | DevFlow runner adapter 从配置选择 | 不能在生产入口 hardcode mock runner | ✅ 配置已就绪（`DEVFLOW_RUNNER_ADAPTER`），真实 adapter 待接入 |
+| P1 | DevFlow runner adapter 从配置选择 | 不能在生产入口 hardcode mock runner | ✅ 配置已就绪（`DEVFLOW_RUNNER_ADAPTER`），Claude Code/Codex adapter 已实现，startup 警告已添加 |
 | P1 | package artifact registry | 多 agent、多版本、跨环境发布需要稳定产物 | ⬜ 待实施 |
 | P1 | ~~SemanticRouter manifest 规则加载~~ | 新 agent 增多后不能依赖手工注册 semantic rule | ✅ S5 P2 完成 |
 | P1 | Eval 数据集扩展和自动报告 | 业务质量回归需要量化 | ⬜ 待实施 |
@@ -557,17 +558,18 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 
 ## 8. 总结
 
-当前项目已完成 S5 全部 4 个 Phase + DevFlow 集成生产化，从 MVP 骨架演进为具备生产化基础的多 Agent 平台。753 个测试通过，ruff clean。
+当前项目已完成 S5 全部 4 个 Phase + DevFlow 集成生产化 + API 层生产化加固，从 MVP 骨架演进为具备生产化基础的多 Agent 平台。780 个测试通过，ruff clean。
 
 S5 完成后的主要成果：Registry/Deployment 持久化、ArtifactStore Protocol 化、Hermes SDK 真接入（Spike B）、ModelGateway token/cost tracking、MCP Server、OpenTelemetry 集成、SemanticRouter 自动规则加载、HITL 审批门、Admin API。
 
 DevFlow 生产化成果：ScmAdapter 协议抽象、HttpClient 连接池+重试、集成错误层级、GitLab webhook 反向同步、CodingJobRepository + 可观测性端点、PathGuard glob 修复、分支名清理、git 超时保护、83 个新增测试。
 
+API 生产化加固成果：FastAPI lifespan graceful shutdown（自动关闭 httpx 客户端和 SQLAlchemy engine）、AuthMiddleware 升级（填充 AuthIdentity 到 request.state.auth）、require_scope()/require_role() endpoint enforcement（13 个 mutating endpoint + admin router）、/health/ready readiness probe（DB/DevFlow/auth 状态探测）、全局异常处理（结构化 JSON 错误 + request_id + production 模式隐藏堆栈）、CORS 配置化（CORS_ALLOWED_ORIGINS 环境变量）、startup config validation（mock runner 警告 + 生产环境检查）、27 个新增测试。
+
 下一阶段（S6）建议优先：
 1. **真实 coding runner adapter 接入** — Claude Code CLI 或 Codex CLI 替换 mock，端到端联调
 2. **Plane + GitLab 端到端联调** — 使用真实 Plane/GitLab 环境验证完整 DevFlow 管线
-3. RBAC/scopes endpoint enforcement — 所有写操作需要 scope 校验
-4. 真实 vector backend（Weaviate/pgvector）— Knowledge/RAG 从 stub 升级
-5. Langfuse 集成 — 补齐 OTel 之外的 LLM 专用观测
-6. 异步 job queue — runner 任务异步执行和分布式调度
-7. Admin UI — 管理 agent、版本、灰度、DevFlow jobs
+3. 真实 vector backend（Weaviate/pgvector）— Knowledge/RAG 从 stub 升级
+4. Langfuse 集成 — 补齐 OTel 之外的 LLM 专用观测
+5. 异步 job queue — runner 任务异步执行和分布式调度
+6. Admin UI — 管理 agent、版本、灰度、DevFlow jobs
