@@ -58,6 +58,16 @@ class GitLabAdapter:
             json=payload,
         )
 
+    async def get_merge_request(
+        self,
+        project_id: str,
+        mr_iid: int,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "GET",
+            f"/api/v4/projects/{project_id}/merge_requests/{mr_iid}",
+        )
+
     async def comment_merge_request(
         self,
         project_id: str,

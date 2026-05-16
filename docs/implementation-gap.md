@@ -1,6 +1,6 @@
 # 实现与设计差距分析
 
-> Last verified against code: 2026-05-15 (Updated: Phase 1-3 全部完成 — pipeline wiring ✅, Domain Model ✅, 持久化层全量完成 ✅, 动态工具加载 ✅, Hermes 真接入 ✅, ArtifactStore ✅)
+> Last verified against code: 2026-05-16 (Updated: Phase 1-4 全部完成 — pipeline wiring ✅, Domain Model ✅, 持久化层全量完成 ✅, 动态工具加载 ✅, Hermes 真接入 ✅, ArtifactStore ✅, 安全基线 ✅, 租户隔离 ✅, DevFlow Runner→Orchestrator ✅, Webhook 持久化 ✅, Eval 持久化+状态回写 ✅)
 
 本文档对齐以下两份设计文档和当前代码实现：
 
@@ -37,7 +37,7 @@
 
 ```text
 .venv/bin/python -m pytest
-437 passed
+516 passed
 
 .venv/bin/ruff check src tests scripts alembic
 All checks passed
@@ -46,7 +46,7 @@ All checks passed
 3 个内置 agent manifest 全部通过
 ```
 
-已消除 pytest collection warning，当前存在 DeprecationWarning（旧字段名 `store_id`/`retailer_id`/`store` 的向后兼容告警，符合预期）。Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参数化，62 个测试覆盖 7 个 Repository 的 InMemory 和 SQL 实现。
+已消除 pytest collection warning，当前存在 DeprecationWarning（旧字段名 `store_id`/`retailer_id`/`store` 的向后兼容告警，符合预期）。Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参数化，66 个测试覆盖 7 个 Repository 的 InMemory 和 SQL 实现（含 4 个租户隔离测试）。
 
 ## 2. 与 `agent-platform-design.md` 的差距
 
@@ -57,13 +57,13 @@ All checks passed
 | 设计模块 | 当前实现 | 差距 |
 | --- | --- | --- |
 | API Gateway / 协议适配 | FastAPI `/api/v1/agent/chat`、SSE、WebSocket、request id header 回写 | 缺少版本协商、前端能力协商、复杂渠道协议适配 |
-| Auth / 租户识别 | API key、request context、`x-tenant-id` 注入 | 缺少 RBAC、租户隔离、细粒度权限、服务间鉴权；header tenant 目前只注入 `tenant_id`，不等同于业务 `org_id` |
+| Auth / 租户识别 | API key、request context、`x-tenant-id` 注入、✅ `ApiKeyRecord` + scoped API key、✅ 所有 Repository list 查询支持 `tenant_id` 过滤 | 缺少 RBAC、细粒度权限、服务间鉴权 |
 | Agent Registry | 文件发现 + 内存 cache | 缺少 DB 持久化、版本索引、artifact registry、并发一致性 |
 | 版本/灰度/回滚 | deploy API、canary bucket、rollback API、staging/prod 自动 eval gate、**ArtifactStore 产物绑定**、✅ `AgentDeploymentRepository` + `DeploymentAuditRepository` Protocol + 双实现 | 缺少持久化发布历史切换、manifest_sha256 绑定、真实环境控制、审批、保护环境 |
 | Policy | ✅ `PolicyEngine` 已深度接入 runtime/tool 链路（check_input/check_output 在 RuntimeManager，check_tool_allowed 在 ToolExecutor，pre_tool/post_tool hooks 在 ToolExecutor） | 策略规则仍需从外置配置或 DB 加载 |
 | Eval | EvalRunner 存在 | 缺少大规模评测集、质量评分、线上反馈闭环、CI artifact |
 | Session / Memory | 内存 SessionStore | 缺少 Redis/Postgres、压缩、长期记忆、跨实例共享 |
-| Tool Executor | 工具执行、allowlist、timeout、✅ hook emit、✅ metrics recording | 缺少重试、熔断、审计持久化、secret 注入、租户级工具权限 |
+| Tool Executor | 工具执行、allowlist、timeout、✅ hook emit、✅ metrics recording、✅ `check_tool_allowed` 在执行前调用 | 缺少重试、熔断、审计持久化 |
 | Knowledge Service | 基础服务和 sources 配置 | 缺少真实 vector db、RAG pipeline、同步任务、数据权限 |
 | Model Gateway | ✅ 有网关抽象与 `OpenAICompatibleProvider`（httpx.AsyncClient） | 缺少 token/cost 统计、限流、fallback、多模型路由 |
 | Observability | ✅ run store、metrics 已串联至 RuntimeManager 和 ToolExecutor、HookRegistry 已串联、logging、✅ LogSanitizer（PII 脱敏）+ TraceSanitizer（tool trace / run 脱敏） | 缺少 OpenTelemetry/Langfuse、dashboard、trace 持久化、告警 |
@@ -243,10 +243,11 @@ All checks passed
 建议下一步：
 
 1. ✅ `CodingAgentRunner` 已实现（`devflow/runner/runner.py`），支持 Claude Code、Codex CLI、Mock adapter。
-2. DevFlow webhook 只负责生成 task pack 和创建 MR；实际编码交给 runner 异步执行。⬜ runner 尚未接入 orchestrator webhook 流程。
+2. ✅ `DevFlowOrchestrator` 在创建 MR 后可自动分发 `CodingAgentRunner.run()`，传入 `plane_project_id` / `plane_work_item_id`。
 3. ✅ runner 在隔离 workspace 中运行（`WorkspaceManager`），PathGuard 强制只允许修改 task pack 声明的路径。
 4. ✅ runner 输出包括 changed files、validation results，并回写 GitLab MR comment 和 Plane comment。
-5. 将 Plane state 设计为强状态机：Intake -> Ready for AI Dev -> AI Developing -> AI Review -> Human Review -> Ready for Merge -> Done。
+5. ✅ Webhook 幂等使用 `WebhookDeliveryRepository`（可切 SQL），替代了内存 set。
+6. 将 Plane state 设计为强状态机：Intake -> Ready for AI Dev -> AI Developing -> AI Review -> Human Review -> Ready for Merge -> Done。
 
 ### 3.3 Issue 看板与 GitLab
 
@@ -269,7 +270,7 @@ All checks passed
 
 1. 增加 Plane bootstrap 脚本，创建标准 states、labels、properties。
 2. 建立 `DevFlowStateSync`，专门负责 Plane/GitLab 双向状态同步。
-3. ✅ Webhook delivery idempotency 已改用 `InMemoryWebhookDeliveryRepository`（可切换 SQL 实现）。
+3. ✅ Webhook delivery idempotency 已改用 `WebhookDeliveryRepository`（InMemory/SQL 双实现），注入到 `DevFlowOrchestrator`，替代内存 set。
 4. 失败事件进入 DB-backed retry queue。
 
 ### 3.4 AI + 人治理
@@ -344,19 +345,23 @@ All checks passed
 - Native 保留为本地开发和简单 agent 后备 runtime。
 - LangGraph 作为可选 orchestration runtime，不应和 Hermes 混在同一层语义里。
 
-### 4.3 DevFlow 有流程骨架，但没有执行闭环
+### 4.3 DevFlow 执行闭环
 
-当前 DevFlow 可以从需求生成 task pack，也能创建 branch/MR，但不能自动完成“读代码、改代码、跑测试、提交、回写”的闭环。
+✅ DevFlow 已具备完整执行闭环：
 
-重构方向：
+- ✅ `CodingAgentRunner` 支持 Claude Code、Codex CLI、Mock adapter
+- ✅ `DevFlowOrchestrator` 在 MR 创建后自动分发 runner
+- ✅ `WorkspaceManager` 提供隔离工作区（create/validate/commit/cleanup）
+- ✅ `PathGuard` 限制变更文件路径（fnmatch glob, denied-first）
+- ✅ MR/Plane comment 回写 + Plane 状态流转
+- ✅ Webhook 幂等持久化（`WebhookDeliveryRepository`）
+- ✅ `EvalFeedback` 可持久化 eval 结果 + 设置 GitLab commit status
 
-- 增加异步 job 系统。
-- 增加 `CodingAgentRunner`。
-- 增加 workspace manager。
-- 增加 path guard。
-- 增加测试执行和结果解析。
-- 增加 GitLab commit/MR update。
-- 增加 Plane 状态回写。
+剩余差距：
+
+- runner 执行是同步的，缺少异步 job queue 和分布式执行
+- 缺少从 runner 失败到自动重试或人工介入的状态机
+- 缺少 runner 执行日志持久化和回放
 
 ### 4.4 安全和租户隔离不足
 
@@ -385,8 +390,8 @@ All checks passed
 | P0 | 真实 HermesBackend 集成或明确继续使用 Native runtime | 当前 Hermes 只是 stub，不能宣称用上 Hermes runtime |
 | P0 | manifest 强校验 | 已完成基础补强；下一步需要和 package artifact / deployment gate 绑定 |
 | P0 | deploy gate 强化 | eval gate 已补强；仍需人工审批、MR approval、release artifact 绑定 |
-| P0 | Plane/GitLab 状态闭环 | 研发流程要能追踪任务、MR、测试、验收 |
-| P0 | Tool 权限和 secret 管理 | 外部业务 API 调用必须可控可审计 |
+| P0 | Plane/GitLab 状态闭环 | ✅ 基础闭环已实现：Webhook→MR→Runner→Eval→Comment→状态回写 |
+| P0 | Tool 权限和 secret 管理 | ✅ 已实现：`compute_tool_permission()` + `check_tool_allowed` + `SecretResolver` |
 
 ### P1：平台扩展多个业务 Agent 前补齐
 
@@ -394,7 +399,7 @@ All checks passed
 | --- | --- | --- |
 | P1 | package artifact registry | 多 agent、多版本、跨环境发布需要稳定产物 |
 | P1 | SemanticRouter manifest 规则加载 | 新 agent 增多后不能依赖手工注册 semantic rule |
-| P1 | CodingAgentRunner | ✅ 已实现（Runner + Workspace + PathGuard + 3 adapters）；待接入 orchestrator webhook |
+| P1 | CodingAgentRunner | ✅ 已实现并接入 orchestrator（Runner + Workspace + PathGuard + 3 adapters + Webhook 持久化 + Eval 回写） |
 | P1 | Eval 数据集扩展和自动报告 | 业务质量回归需要量化 |
 | P1 | Knowledge/RAG 真实接入 | MYJ 等业务 agent 离不开业务知识 |
 | P1 | OpenTelemetry/Langfuse trace | 线上排障和质量分析必需 |

@@ -4,9 +4,11 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from agent_platform.devflow.runner.models import CodingJob
 from agent_platform.devflow.task_pack import DevelopmentTask, TaskPackGenerator
 from agent_platform.integrations.gitlab.adapter import GitLabAdapter
 from agent_platform.integrations.plane.adapter import PlaneAdapter
+from agent_platform.persistence.repositories import WebhookDeliveryRepository
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +22,7 @@ class DevFlowResult:
     branch: str
     mr_url: str | None = None
     mr_iid: int | None = None
+    coding_job: CodingJob | None = None
 
 
 class DevFlowOrchestrator:
@@ -29,11 +32,15 @@ class DevFlowOrchestrator:
         gitlab: GitLabAdapter,
         gitlab_project_id: str,
         *,
+        webhook_repo: WebhookDeliveryRepository | None = None,
+        coding_runner: Any | None = None,
         ai_developing_state_id: str | None = None,
     ):
         self.plane = plane
         self.gitlab = gitlab
         self.gitlab_project_id = gitlab_project_id
+        self.webhook_repo = webhook_repo
+        self.coding_runner = coding_runner
         self.ai_developing_state_id = ai_developing_state_id
         self.task_pack_generator = TaskPackGenerator()
         self._processed_items: set[str] = set()
@@ -56,10 +63,8 @@ class DevFlowOrchestrator:
         title = work_item.get("name") or work_item.get("title", "Untitled")
 
         idempotency_key = f"{work_item_id}:{new_state}"
-        if idempotency_key in self._processed_items:
-            logger.info("Skipping duplicate event: %s", idempotency_key)
+        if not await self._check_idempotency(idempotency_key, event, payload):
             return None
-        self._processed_items.add(idempotency_key)
 
         work_item_detail = await self._fetch_work_item_detail(project_id, work_item_id)
         agent_id = self._extract_agent_id(work_item_detail)
@@ -118,13 +123,70 @@ class DevFlowOrchestrator:
         except Exception:
             logger.warning("Failed to update custom properties for %s", work_item_id)
 
+        coding_job: CodingJob | None = None
+        if self.coding_runner is not None and mr_iid is not None:
+            coding_job = await self._dispatch_runner(
+                task_pack, mr_iid=mr_iid,
+                plane_project_id=project_id,
+                plane_work_item_id=work_item_id,
+            )
+
         logger.info("DevFlow: %s -> branch=%s mr=%s", work_item_id, branch, mr_url)
         return DevFlowResult(
             task_pack=task_pack,
             branch=branch,
             mr_url=mr_url,
             mr_iid=mr_iid,
+            coding_job=coding_job,
         )
+
+    async def _check_idempotency(
+        self,
+        key: str,
+        event: str,
+        payload: dict[str, Any],
+    ) -> bool:
+        """Return True if event should be processed, False if duplicate."""
+        if self.webhook_repo is not None:
+            if await self.webhook_repo.exists(key):
+                logger.info("Skipping duplicate event (persistent): %s", key)
+                return False
+            await self.webhook_repo.record(
+                delivery_id=key,
+                source="plane",
+                event_type=event,
+                status="processing",
+                payload=payload,
+            )
+            return True
+
+        if key in self._processed_items:
+            logger.info("Skipping duplicate event: %s", key)
+            return False
+        self._processed_items.add(key)
+        return True
+
+    async def _dispatch_runner(
+        self,
+        task_pack: DevelopmentTask,
+        *,
+        mr_iid: int,
+        plane_project_id: str,
+        plane_work_item_id: str,
+    ) -> CodingJob | None:
+        try:
+            job: CodingJob = await self.coding_runner.run(
+                task_pack,
+                mr_iid=mr_iid,
+                plane_project_id=plane_project_id,
+                plane_work_item_id=plane_work_item_id,
+            )
+            return job
+        except Exception:
+            logger.exception(
+                "CodingAgentRunner dispatch failed for MR !%s", mr_iid,
+            )
+            return None
 
     async def _fetch_work_item_detail(
         self, project_id: str, work_item_id: str

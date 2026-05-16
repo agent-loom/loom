@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
-import subprocess
 import tempfile
 import time
 import uuid
@@ -58,17 +57,29 @@ class WorkspaceManager:
         logger.info("Workspace created: %s (branch: %s)", workspace_dir, branch)
         return workspace_dir
 
-    def get_changed_files(self, workspace_dir: Path) -> list[str]:
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],
+    async def get_changed_files(self, workspace_dir: Path) -> list[str]:
+        proc = await asyncio.create_subprocess_exec(
+            "git", "status", "--porcelain=v1", "-z", "-uall",
             cwd=str(workspace_dir),
-            capture_output=True,
-            text=True,
+            stdout=asyncio.subprocess.PIPE,
         )
+        stdout_bytes, _ = await proc.communicate()
         files = []
-        for line in result.stdout.strip().splitlines():
-            if len(line) > 3:
-                files.append(line[3:].strip())
+        parts = stdout_bytes.split(b'\x00')
+        i = 0
+        while i < len(parts):
+            part = parts[i]
+            if not part:
+                i += 1
+                continue
+            status = part[:2].decode(errors='replace')
+            path = part[3:].decode(errors='replace')
+            if status.startswith("R") or status.startswith("C"):
+                files.append(parts[i+1].decode(errors='replace'))
+                i += 2
+            else:
+                files.append(path)
+                i += 1
         return files
 
     async def run_validation(
@@ -88,10 +99,15 @@ class WorkspaceManager:
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(workspace_dir),
             )
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                proc.communicate(),
-                timeout=120,
-            )
+            try:
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                    proc.communicate(),
+                    timeout=120,
+                )
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+                raise
             duration_ms = int((time.monotonic() - start) * 1000)
 
             cmd_result = CommandResult(
@@ -123,8 +139,12 @@ class WorkspaceManager:
         *,
         message: str,
         branch: str,
+        changed_files: list[str],
     ) -> str | None:
-        await self._run_git(workspace_dir, ["git", "add", "-A"])
+        if not changed_files:
+            return None
+        cmd = ["git", "add", "--"] + changed_files
+        await self._run_git(workspace_dir, cmd)
 
         proc = await asyncio.create_subprocess_exec(
             "git", "commit", "-m", message,
@@ -157,7 +177,7 @@ class WorkspaceManager:
             logger.info("Keeping workspace for debugging: %s", workspace_dir)
             return
         if workspace_dir.exists():
-            shutil.rmtree(workspace_dir, ignore_errors=True)
+            await asyncio.to_thread(shutil.rmtree, workspace_dir, ignore_errors=True)
             logger.info("Cleaned up workspace: %s", workspace_dir)
 
     async def _run_git(self, cwd: Path, cmd: list[str]) -> None:

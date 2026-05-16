@@ -22,6 +22,7 @@ class EvalCaseResult(BaseModel):
 
 class EvalReport(BaseModel):
     agent_id: str
+    agent_version: str = ""
     total: int
     passed: int
     pass_rate: float
@@ -52,6 +53,7 @@ class EvalRunner:
         required_pass_rate = spec.manifest.evals.required_pass_rate
         return EvalReport(
             agent_id=spec.agent_id,
+            agent_version=spec.manifest.version.package_version,
             total=total,
             passed=passed_count,
             pass_rate=pass_rate,

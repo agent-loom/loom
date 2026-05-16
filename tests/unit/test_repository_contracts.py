@@ -280,6 +280,18 @@ class TestAgentDeploymentContract:
     async def test_delete_nonexistent_is_noop(self, deployment_repo):
         await deployment_repo.delete("no-such")  # should not raise
 
+    @pytest.mark.asyncio
+    async def test_list_all_with_tenant_filter(self, deployment_repo):
+        await deployment_repo.save(
+            _make_deployment(deployment_id="d1", agent_id="a1", tenant_id="t1")
+        )
+        await deployment_repo.save(
+            _make_deployment(deployment_id="d2", agent_id="a1", tenant_id="t2")
+        )
+        results = await deployment_repo.list_all(tenant_id="t1")
+        assert len(results) == 1
+        assert results[0].tenant_id == "t1"
+
 
 # ===================================================================
 # 3. DeploymentAuditRepository
@@ -387,6 +399,18 @@ class TestAgentSessionContract:
         results = await session_repo.list_sessions(agent_id="a1")
         assert len(results) == 1
         assert results[0].agent_id == "a1"
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_with_tenant_filter(self, session_repo):
+        s1 = _make_session(session_id="s1", agent_id="a1")
+        s1.tenant_id = "t1"
+        s2 = _make_session(session_id="s2", agent_id="a1")
+        s2.tenant_id = "t2"
+        await session_repo.save(s1)
+        await session_repo.save(s2)
+        results = await session_repo.list_sessions(tenant_id="t1")
+        assert len(results) == 1
+        assert results[0].tenant_id == "t1"
 
 
 # ===================================================================

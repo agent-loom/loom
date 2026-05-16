@@ -33,6 +33,7 @@ class CodingAgentRunner:
         plane: PlaneAdapter | None = None,
         gitlab_project_id: str,
         repo_url: str | None = None,
+        testing_state_id: str | None = None,
     ):
         self.adapter = adapter
         self.workspace_manager = workspace_manager
@@ -40,9 +41,21 @@ class CodingAgentRunner:
         self.plane = plane
         self.gitlab_project_id = gitlab_project_id
         self._repo_url_override = repo_url
+        self._testing_state_id = testing_state_id
 
-    async def run(self, task: DevelopmentTask, *, mr_iid: int | None = None) -> CodingJob:
-        job = self._create_job(task, mr_iid=mr_iid)
+    async def run(
+        self,
+        task: DevelopmentTask,
+        *,
+        mr_iid: int | None = None,
+        plane_project_id: str | None = None,
+        plane_work_item_id: str | None = None,
+    ) -> CodingJob:
+        job = self._create_job(
+            task, mr_iid=mr_iid,
+            plane_project_id=plane_project_id,
+            plane_work_item_id=plane_work_item_id,
+        )
 
         try:
             job.state = JobState.WORKSPACE_CREATING
@@ -54,9 +67,19 @@ class CodingAgentRunner:
 
             job.state = JobState.RUNNING
             path_guard = PathGuard.from_task(task)
-            await self._execute_with_retry(job, task)
+            adapter_result = await self._execute_with_retry(job, task)
+            
+            if not adapter_result or not adapter_result.success:
+                job.state = JobState.FAILED
+                err = adapter_result.error_message if adapter_result else "Agent failed"
+                job.result = RunnerResult(
+                    status=ResultStatus.RUNNER_ERROR,
+                    error_message=err,
+                )
+                await self._report_failure(job)
+                return job
 
-            changed_files = self.workspace_manager.get_changed_files(workspace_dir)
+            changed_files = await self.workspace_manager.get_changed_files(workspace_dir)
             violations = path_guard.check(changed_files)
             if violations:
                 job.result = RunnerResult(
@@ -81,6 +104,7 @@ class CodingAgentRunner:
                     workspace_dir,
                     message=f"feat: {task.metadata.title}\n\nTask: {task.metadata.task_id}",
                     branch=task.repository.work_branch,
+                    changed_files=changed_files,
                 )
 
             status = (
@@ -111,19 +135,33 @@ class CodingAgentRunner:
         finally:
             job.updated_at = datetime.now(UTC)
             if job.workspace_dir:
-                await self.workspace_manager.cleanup(
+                wm = self.workspace_manager
+                keep = (
+                    (job.state == JobState.FAILED and not wm.cleanup_on_failure)
+                    or (job.state == JobState.SUCCEEDED and not wm.cleanup_on_success)
+                )
+                await wm.cleanup(
                     Path(job.workspace_dir),
-                    keep_on_failure=(job.state == JobState.FAILED),
+                    keep_on_failure=keep,
                 )
 
         return job
 
-    def _create_job(self, task: DevelopmentTask, *, mr_iid: int | None = None) -> CodingJob:
+    def _create_job(
+        self,
+        task: DevelopmentTask,
+        *,
+        mr_iid: int | None = None,
+        plane_project_id: str | None = None,
+        plane_work_item_id: str | None = None,
+    ) -> CodingJob:
         return CodingJob(
             job_id=f"job-{uuid.uuid4().hex[:12]}",
             task_id=task.metadata.task_id,
             branch=task.repository.work_branch,
             mr_iid=mr_iid,
+            plane_project_id=plane_project_id,
+            plane_work_item_id=plane_work_item_id,
         )
 
     async def _execute_with_retry(
@@ -185,17 +223,18 @@ class CodingAgentRunner:
                 logger.warning("Failed to comment on Plane work item %s", job.plane_work_item_id)
 
             if job.result and job.result.status == ResultStatus.SUCCESS:
-                try:
-                    await self.plane.update_work_item_state(
-                        job.plane_project_id,
-                        job.plane_work_item_id,
-                        "Testing / Eval",
-                    )
-                except Exception:
-                    logger.warning(
-                        "Failed to update Plane state for %s",
-                        job.plane_work_item_id,
-                    )
+                if self._testing_state_id:
+                    try:
+                        await self.plane.update_work_item_state(
+                            job.plane_project_id,
+                            job.plane_work_item_id,
+                            self._testing_state_id,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Failed to update Plane state for %s",
+                            job.plane_work_item_id,
+                        )
 
     async def _report_failure(self, job: CodingJob) -> None:
         await self._report_result(job)

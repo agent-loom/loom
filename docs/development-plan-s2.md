@@ -1,7 +1,7 @@
 # 下一阶段开发计划（S2-S4）
 
-> Status: Phase 1-3 Complete
-> Last updated: 2026-05-15
+> Status: Phase 1-4 Complete
+> Last updated: 2026-05-16
 
 本计划基于 6 份 P0 设计文档和代码审计结果，将下一阶段拆成 4 个 Phase，每个 Phase 内的任务按依赖关系排序。
 
@@ -166,14 +166,14 @@ scripts/deploy_agent.py                  — 待绑定 artifact
 |---|---|---|---|
 | **安全基线** | | | |
 | 4.1 | Scoped API Key | security-tenant-policy §2.2 | ✅ `ApiKeyRecord` + `InMemoryApiKeyStore` (SHA-256) |
-| 4.2 | 租户隔离查询 | security-tenant-policy §4 | ⬜ 待实现（需 DB 层） |
+| 4.2 | 租户隔离查询 | security-tenant-policy §4 | ✅ 所有 Repository list 方法增加 `tenant_id` 过滤参数，SQL 层 WHERE 子句，4 条 contract test |
 | 4.3 | Tool Permission 矩阵 | security-tenant-policy §7 | ✅ `compute_tool_permission()` 三层计算 |
 | 4.4 | Secret 引用与注入 | security-tenant-policy §8 | ✅ `SecretResolver` + `EnvSecretBackend` |
 | 4.5 | 日志和 Trace 脱敏 | security-tenant-policy §9 | ✅ `LogSanitizer` + `TraceSanitizer` |
 | **DevFlow 闭环** | | | |
-| 4.6 | Webhook 幂等持久化 | devflow-state-sync §4 | ⬜ 待实现（需 DB 层） |
-| 4.7 | GitLab → Plane 状态回写 | devflow-state-sync §3.2 | ⬜ 待实现 |
-| 4.8 | Eval report 回写 Plane | devflow-state-sync §3.3 | 🔶 `EvalFeedback.update_plane_state()` 已实现，ci-callback 待接入 |
+| 4.6 | Webhook 幂等持久化 | devflow-state-sync §4 | ✅ `WebhookDeliveryRepository` 已注入 `DevFlowOrchestrator`，替代内存 set |
+| 4.7 | GitLab → Plane 状态回写 | devflow-state-sync §3.2 | ✅ `get_merge_request()` + `update_commit_status()` 已接入；`EvalFeedback.post_to_gitlab()` 同步设置 commit status |
+| 4.8 | Eval report 回写 Plane | devflow-state-sync §3.3 | ✅ `EvalFeedback.persist()` 调用 `EvalRunRepository.record()`；`post_to_gitlab()` 设置 commit status |
 | 4.9 | WorkspaceManager | devflow-runner-workspace §5 | ✅ `WorkspaceManager` (create/validate/commit/cleanup) |
 | 4.10 | PathGuard | devflow-runner-workspace §6 | ✅ `PathGuard` (fnmatch glob, denied-first) |
 | 4.11 | CodingAgentRunner Protocol | devflow-runner-workspace §3 | ✅ `RunnerAdapter` Protocol + `CodingAgentRunner` |
@@ -201,7 +201,7 @@ Week 1          Week 2          Week 3          Week 4
 | M1：平台管线可观测 | Week 1 末 | PolicyEngine、HookRegistry、Metrics 全部接入 runtime；工具动态加载 | ✅ 完成 |
 | M2：状态可持久化 | Week 2 末 | 重启不丢 session/run/deployment；Domain Model 泛化完成 | ✅ 完成（7 Repository Protocol + InMemory/SQL 双实现 + Alembic migration + DI；RuntimeManager 内部仍用 InMemory store 待切换） |
 | M3：非 stub runtime | Week 3 末 | Hermes 可跑 hermes_echo agent；artifact 有 checksum 和版本 | ✅ 完成（ConversationEngine 修复 + model_gateway 注入 + hermes_echo 集成测试通过） |
-| M4：生产可审计 | Week 4 末 | 工具权限管控、Secret 安全、日志脱敏、DevFlow 自动执行 | 🔶 安全基线 + DevFlow Runner 已实现；4.2 租户隔离、4.6-4.7 状态同步待完成 |
+| M4：生产可审计 | Week 4 末 | 工具权限管控、Secret 安全、日志脱敏、DevFlow 自动执行 | ✅ 完成（安全基线全量、租户隔离、Webhook 持久化幂等、GitLab↔Plane 状态同步、Eval 持久化、Runner→Orchestrator 接入） |
 
 ## 不在此计划范围内（后续阶段）
 

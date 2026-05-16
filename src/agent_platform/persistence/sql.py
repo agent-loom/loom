@@ -213,12 +213,19 @@ class SqlAgentDeploymentRepository:
             return self._to_domain(row)
 
     async def list_all(
-        self, *, agent_id: str | None = None
+        self,
+        *,
+        agent_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> list[AgentDeployment]:
         stmt = select(AgentDeploymentRow)
         if agent_id is not None:
             stmt = stmt.where(
                 AgentDeploymentRow.agent_id == agent_id
+            )
+        if tenant_id is not None:
+            stmt = stmt.where(
+                AgentDeploymentRow.tenant_id == tenant_id
             )
         async with self._sf() as session:
             result = await session.execute(stmt)
@@ -288,6 +295,7 @@ class SqlDeploymentAuditRepository:
         *,
         agent_id: str | None = None,
         channel: str | None = None,
+        tenant_id: str | None = None,
         limit: int = 50,
     ) -> list[DeploymentEvent]:
         stmt = select(DeploymentAuditEventRow)
@@ -298,6 +306,10 @@ class SqlDeploymentAuditRepository:
         if channel is not None:
             stmt = stmt.where(
                 DeploymentAuditEventRow.channel == channel
+            )
+        if tenant_id is not None:
+            stmt = stmt.where(
+                DeploymentAuditEventRow.tenant_id == tenant_id
             )
         stmt = stmt.order_by(
             DeploymentAuditEventRow.created_at.desc()
@@ -406,6 +418,7 @@ class SqlAgentRunRepository:
         *,
         agent_id: str | None = None,
         session_id: str | None = None,
+        tenant_id: str | None = None,
         limit: int = 100,
     ) -> list[AgentRun]:
         stmt = select(AgentRunRow)
@@ -416,6 +429,10 @@ class SqlAgentRunRepository:
         if session_id is not None:
             stmt = stmt.where(
                 AgentRunRow.session_id == session_id
+            )
+        if tenant_id is not None:
+            stmt = stmt.where(
+                AgentRunRow.tenant_id == tenant_id
             )
         stmt = stmt.order_by(
             AgentRunRow.created_at.desc()
@@ -512,12 +529,19 @@ class SqlAgentSessionRepository:
                 await db.commit()
 
     async def list_sessions(
-        self, *, agent_id: str | None = None
+        self,
+        *,
+        agent_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> list[AgentSession]:
         stmt = select(AgentSessionRow)
         if agent_id is not None:
             stmt = stmt.where(
                 AgentSessionRow.agent_id == agent_id
+            )
+        if tenant_id is not None:
+            stmt = stmt.where(
+                AgentSessionRow.tenant_id == tenant_id
             )
         async with self._sf() as db:
             result = await db.execute(stmt)
@@ -649,12 +673,17 @@ class SqlEvalRunRepository:
         self,
         *,
         agent_id: str | None = None,
+        tenant_id: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
         stmt = select(EvalRunRow)
         if agent_id is not None:
             stmt = stmt.where(
                 EvalRunRow.agent_id == agent_id
+            )
+        if tenant_id is not None:
+            stmt = stmt.where(
+                EvalRunRow.tenant_id == tenant_id
             )
         stmt = stmt.order_by(
             EvalRunRow.created_at.desc()

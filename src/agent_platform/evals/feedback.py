@@ -5,6 +5,7 @@ import logging
 from agent_platform.evals.runner import EvalReport
 from agent_platform.integrations.gitlab.adapter import GitLabAdapter
 from agent_platform.integrations.plane.adapter import PlaneAdapter
+from agent_platform.persistence.repositories import EvalRunRepository
 
 logger = logging.getLogger(__name__)
 
@@ -14,21 +15,51 @@ class EvalFeedback:
         self,
         gitlab: GitLabAdapter | None = None,
         plane: PlaneAdapter | None = None,
+        eval_repo: EvalRunRepository | None = None,
     ):
         self.gitlab = gitlab
         self.plane = plane
+        self.eval_repo = eval_repo
 
     async def post_to_gitlab(
         self,
         report: EvalReport,
         project_id: str,
         mr_iid: int,
+        *,
+        commit_sha: str | None = None,
     ) -> None:
         if not self.gitlab:
             return
         body = self.format_report_markdown(report)
         await self.gitlab.comment_merge_request(project_id, mr_iid, body)
         logger.info("Eval report posted to MR %s/%s", project_id, mr_iid)
+
+        if commit_sha:
+            state = "success" if report.gate_passed else "failed"
+            description = f"pass_rate={report.pass_rate:.1%}"
+            try:
+                await self.gitlab.update_commit_status(
+                    project_id, commit_sha, state,
+                    description=description,
+                )
+            except Exception:
+                logger.warning("Failed to set commit status for %s", commit_sha)
+
+    async def persist(self, report: EvalReport, *, trigger: str = "ci") -> None:
+        if not self.eval_repo:
+            return
+        await self.eval_repo.record(
+            agent_id=report.agent_id,
+            agent_version=report.agent_version,
+            total=report.total,
+            passed=report.passed,
+            pass_rate=report.pass_rate,
+            required_pass_rate=report.required_pass_rate,
+            gate_passed=report.gate_passed,
+            results=[r.model_dump(mode="json") for r in report.results],
+            trigger=trigger,
+        )
 
     async def update_plane_state(
         self,

@@ -94,12 +94,19 @@ class InMemoryAgentDeploymentRepository:
         return None
 
     async def list_all(
-        self, *, agent_id: str | None = None
+        self,
+        *,
+        agent_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> list[AgentDeployment]:
         items = list(self._store.values())
         if agent_id is not None:
             items = [
                 d for d in items if d.agent_id == agent_id
+            ]
+        if tenant_id is not None:
+            items = [
+                d for d in items if d.tenant_id == tenant_id
             ]
         return items
 
@@ -125,6 +132,7 @@ class InMemoryDeploymentAuditRepository:
         *,
         agent_id: str | None = None,
         channel: str | None = None,
+        tenant_id: str | None = None,
         limit: int = 50,
     ) -> list[DeploymentEvent]:
         result = self._events
@@ -162,6 +170,7 @@ class InMemoryAgentRunRepository:
         *,
         agent_id: str | None = None,
         session_id: str | None = None,
+        tenant_id: str | None = None,
         limit: int = 100,
     ) -> list[AgentRun]:
         items = list(self._store.values())
@@ -195,12 +204,19 @@ class InMemoryAgentSessionRepository:
         self._store.pop(session_id, None)
 
     async def list_sessions(
-        self, *, agent_id: str | None = None
+        self,
+        *,
+        agent_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> list[AgentSession]:
         items = list(self._store.values())
         if agent_id is not None:
             items = [
                 s for s in items if s.agent_id == agent_id
+            ]
+        if tenant_id is not None:
+            items = [
+                s for s in items if s.tenant_id == tenant_id
             ]
         return items
 
@@ -277,6 +293,7 @@ class InMemoryEvalRunRepository:
         self,
         *,
         agent_id: str | None = None,
+        tenant_id: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
         items = self._runs

@@ -53,7 +53,10 @@ class AgentDeploymentRepository(Protocol):
     ) -> AgentDeployment | None: ...
 
     async def list_all(
-        self, *, agent_id: str | None = None
+        self,
+        *,
+        agent_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> list[AgentDeployment]: ...
 
     async def delete(self, deployment_id: str) -> None: ...
@@ -70,6 +73,7 @@ class DeploymentAuditRepository(Protocol):
         *,
         agent_id: str | None = None,
         channel: str | None = None,
+        tenant_id: str | None = None,
         limit: int = 50,
     ) -> list[DeploymentEvent]: ...
 
@@ -91,6 +95,7 @@ class AgentRunRepository(Protocol):
         *,
         agent_id: str | None = None,
         session_id: str | None = None,
+        tenant_id: str | None = None,
         limit: int = 100,
     ) -> list[AgentRun]: ...
 
@@ -110,7 +115,10 @@ class AgentSessionRepository(Protocol):
     ) -> None: ...
 
     async def list_sessions(
-        self, *, agent_id: str | None = None
+        self,
+        *,
+        agent_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> list[AgentSession]: ...
 
 
@@ -153,5 +161,9 @@ class EvalRunRepository(Protocol):
     ) -> dict[str, Any] | None: ...
 
     async def list_runs(
-        self, *, agent_id: str | None = None, limit: int = 50
+        self,
+        *,
+        agent_id: str | None = None,
+        tenant_id: str | None = None,
+        limit: int = 50,
     ) -> list[dict[str, Any]]: ...
