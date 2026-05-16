@@ -234,8 +234,6 @@ class TestConfigValidation:
 
 class TestRbacScopes:
     def test_register_endpoint_requires_register_scope(self):
-        from agent_platform.api.auth import AuthIdentity
-
         app = _make_app(AGENT_PLATFORM_API_KEY="key-1")
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post(
