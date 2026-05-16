@@ -6,6 +6,9 @@ from pydantic import BaseModel, Field
 
 
 class TaskMetadata(BaseModel):
+    """
+    任务的元数据信息。
+    """
     task_id: str
     title: str
     type: str
@@ -14,6 +17,9 @@ class TaskMetadata(BaseModel):
 
 
 class MergeRequestSpec(BaseModel):
+    """
+    合并请求（MR）的基本配置规范。
+    """
     title: str
     labels: list[str] = Field(default_factory=list)
     reviewers: list[str] = Field(default_factory=list)
@@ -21,6 +27,9 @@ class MergeRequestSpec(BaseModel):
 
 
 class RepositoryTarget(BaseModel):
+    """
+    代码仓库目标配置，包含分支和 MR 信息。
+    """
     provider: Literal["gitlab"] = "gitlab"
     project_id: str
     default_branch: str = "main"
@@ -29,6 +38,9 @@ class RepositoryTarget(BaseModel):
 
 
 class RequirementSpec(BaseModel):
+    """
+    开发需求规范，包含背景、用户场景和验收标准等。
+    """
     background: str
     user_scenarios: list[str] = Field(default_factory=list)
     acceptance: list[str] = Field(default_factory=list)
@@ -36,6 +48,10 @@ class RequirementSpec(BaseModel):
 
 
 class DevelopmentTask(BaseModel):
+    """
+    开发任务核心模型（Task Pack）。
+    描述了完整开发过程的配置：元数据、目标代码库、需求规范以及实现、验证、审查环节的约束。
+    """
     api_version: Literal["devflow.agent-platform/v1"] = "devflow.agent-platform/v1"
     kind: Literal["DevelopmentTask"] = "DevelopmentTask"
     metadata: TaskMetadata
@@ -48,6 +64,10 @@ class DevelopmentTask(BaseModel):
     review: dict[str, Any] = Field(default_factory=dict)
 
     def merge_request_description(self) -> str:
+        """
+        生成合并请求的 Markdown 描述文本。
+        汇总来源任务、需求、预期变更、验证方式和风险。
+        """
         source = self.metadata.source
         source_label = source.get("url") or source.get("issue_id") or self.metadata.task_id
         changes = self.implementation.get("required_outputs", [])
@@ -80,6 +100,11 @@ class DevelopmentTask(BaseModel):
 
 
 class TaskPackGenerator:
+    """
+    任务包生成器。
+    用于将外部原始需求转换为标准的 DevelopmentTask (Task Pack) 模型，
+    内置了平台级别的验证命令、审查项及范围控制等默认策略。
+    """
     def from_requirement(
         self,
         *,
@@ -95,10 +120,24 @@ class TaskPackGenerator:
         non_goals: list[str] | None = None,
         reviewers: list[str] | None = None,
     ) -> DevelopmentTask:
+        """
+        通过给定的需求字段组合生成一个完整的开发任务对象。
+
+        :param task_id: 外部任务的唯一标识。
+        :param title: 任务标题。
+        :param task_type: 任务的分类（例如 platform:change）。
+        :param project_id: 代码仓库项目 ID。
+        :param background: 需求背景描述。
+        :param agent_id: 指定的 AI Agent 的 ID（如有）。
+        :param source: 任务来源信息字典。
+        ...
+        """
         branch_suffix = task_id.lower().replace("_", "-")
         source = source or {"system": "manual", "issue_id": task_id}
         reviewers = reviewers or ["backend-owner", "product-owner"]
         agent_package_path = f"agents/{agent_id}" if agent_id else "agents/<agent_id>"
+        
+        # 定义验证流程涉及的基础命令
         validation_commands = [
             "pytest tests/unit",
             "pytest tests/contract",
@@ -108,6 +147,7 @@ class TaskPackGenerator:
                 "--report eval-report.json"
             ),
         ]
+        
         task = DevelopmentTask(
             metadata=TaskMetadata(task_id=task_id, title=title, type=task_type, source=source),
             repository=RepositoryTarget(
@@ -141,6 +181,7 @@ class TaskPackGenerator:
             }
             if agent_id
             else {},
+            # 限定允许修改的代码范围
             scope={
                 "write_allowed": ["src/agent_platform/**", "agents/**", "tests/**", "docs/**"],
                 "write_denied": [".env", "secrets/**", "deploy/prod/**", "infra/prod/**"],

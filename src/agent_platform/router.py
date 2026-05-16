@@ -9,6 +9,10 @@ from agent_platform.router_semantic import SemanticRouter
 
 @dataclass(frozen=True)
 class RouteResult:
+    """路由结果数据类。
+    
+    包含目标 Agent 的规格信息、路由原因以及相关的部署和流量控制信息。
+    """
     agent_spec: AgentSpec
     reason: str
     deployment_id: str | None = None
@@ -16,6 +20,11 @@ class RouteResult:
 
 
 class AgentRouter:
+    """Agent 路由器。
+    
+    负责根据请求上下文（如 Agent ID、App ID、租户、渠道等）或语义匹配，
+    将传入请求路由到对应的 Agent 实例，并处理流量分配和金丝雀部署。
+    """
     def __init__(
         self,
         registry: AgentRegistry,
@@ -27,9 +36,16 @@ class AgentRouter:
         self.semantic_router = semantic_router
 
     def route(self, request: AgentRequest) -> RouteResult:
+        """执行请求路由。
+        
+        依次检查 Agent ID、App ID、租户 ID、渠道 ID，以及语义匹配，
+        最后降级为默认 Agent。
+        """
+        # 1. 显式指定了 Agent ID
         if request.agent_id:
             return self._route_agent(request.agent_id, request, "agent_id")
 
+        # 2. 根据元数据中的 App ID 进行路由
         app_id = request.metadata.get("app_id")
         if app_id:
             try:
@@ -37,6 +53,7 @@ class AgentRouter:
             except LookupError:
                 pass
 
+        # 3. 根据租户 ID 进行路由
         retailer_id = request.context.tenant.org_id
         if retailer_id:
             try:
@@ -44,6 +61,7 @@ class AgentRouter:
             except LookupError:
                 pass
 
+        # 4. 根据渠道 ID 进行路由
         channel_id = request.context.channel.channel_id
         if channel_id:
             try:
@@ -51,6 +69,7 @@ class AgentRouter:
             except LookupError:
                 pass
 
+        # 5. 如果启用了语义路由，尝试进行语义匹配
         if self.semantic_router:
             semantic_match = self.semantic_router.match(request.input.query)
             if semantic_match:
@@ -63,19 +82,23 @@ class AgentRouter:
                 except LookupError:
                     pass
 
+        # 6. 如果都没有匹配，使用配置的默认 Agent
         if not self.settings.default_agent_id:
             raise LookupError("no agent matched and no default_agent_id configured")
         return self._route_agent(self.settings.default_agent_id, request, "default_agent")
 
     def _route_agent(self, agent_id: str, request: AgentRequest, reason: str) -> RouteResult:
+        """解析 Agent 的具体部署信息并进行灰度流量计算。"""
         spec = self.registry.get(agent_id)
         canary = None
+        # 如果是生产环境，尝试查找是否有金丝雀部署
         if request.options.runtime_profile == "prod":
             canary = self.registry.resolve_canary_deployment(
                 agent_id=agent_id,
                 channel="prod",
                 tenant_id=request.context.tenant.tenant_id,
             )
+        # 获取基础的部署实例
         deployment = self.registry.resolve_deployment(
             agent_id=agent_id,
             channel=request.options.runtime_profile,
@@ -83,6 +106,7 @@ class AgentRouter:
         )
 
         traffic_bucket = None
+        # 如果存在金丝雀部署，根据稳定 key 计算流量桶来决定是否路由到金丝雀版本
         if canary:
             stable_key = self._stable_user_key(request)
             traffic_bucket = self._compute_bucket(stable_key)
@@ -98,6 +122,7 @@ class AgentRouter:
 
     @staticmethod
     def _stable_user_key(request: AgentRequest) -> str:
+        """生成一个稳定的用户唯一标识，用于一致性哈希和流量分配。"""
         parts = [
             request.context.tenant.tenant_id or "",
             request.context.user.user_id or "",
@@ -107,5 +132,6 @@ class AgentRouter:
 
     @staticmethod
     def _compute_bucket(key: str) -> int:
+        """将稳定的用户标识映射到 0-99 的流量桶中。"""
         digest = hashlib.md5(key.encode(), usedforsecurity=False).hexdigest()
         return int(digest[:8], 16) % 100

@@ -14,6 +14,11 @@ logger = logging.getLogger(__name__)
 
 
 class WorkspaceManager:
+    """
+    工作区管理器。
+    负责为每次 AI 编码任务建立独立的本地环境，处理代码克隆、文件变更检测、
+    执行验证脚本、以及最终的代码提交、推送和工作区清理。
+    """
 
     def __init__(
         self,
@@ -22,6 +27,13 @@ class WorkspaceManager:
         cleanup_on_success: bool = True,
         cleanup_on_failure: bool = False,
     ):
+        """
+        初始化工作区管理器。
+
+        :param base_dir: 工作区的根目录，如果未提供则使用系统临时目录下的 devflow-workspaces。
+        :param cleanup_on_success: 任务成功完成后是否清理工作区，默认为 True。
+        :param cleanup_on_failure: 任务失败后是否清理工作区，默认为 False（保留以供排错）。
+        """
         self.base_dir = (
             Path(base_dir) if base_dir
             else Path(tempfile.gettempdir()) / "devflow-workspaces"
@@ -31,6 +43,13 @@ class WorkspaceManager:
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
     async def create(self, *, branch: str, repo_url: str) -> Path:
+        """
+        创建新的工作区并从远程仓库克隆代码。
+
+        :param branch: 目标分支。
+        :param repo_url: Git 仓库的拉取地址。
+        :return: 返回创建的本地工作区目录的 Path 对象。
+        """
         workspace_id = f"ws-{uuid.uuid4().hex[:12]}"
         workspace_dir = self.base_dir / workspace_id
         workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -58,6 +77,12 @@ class WorkspaceManager:
         return workspace_dir
 
     async def get_changed_files(self, workspace_dir: Path) -> list[str]:
+        """
+        使用 git status 获取当前工作区中发生了修改、新增或删除的文件列表。
+
+        :param workspace_dir: 工作区目录。
+        :return: 变更文件的相对路径列表。
+        """
         proc = await asyncio.create_subprocess_exec(
             "git", "status", "--porcelain=v1", "-z", "-uall",
             cwd=str(workspace_dir),
@@ -74,6 +99,7 @@ class WorkspaceManager:
                 continue
             status = part[:2].decode(errors='replace')
             path = part[3:].decode(errors='replace')
+            # 如果是重命名或拷贝，提取新文件路径
             if status.startswith("R") or status.startswith("C"):
                 files.append(parts[i+1].decode(errors='replace'))
                 i += 2
@@ -87,6 +113,13 @@ class WorkspaceManager:
         workspace_dir: Path,
         commands: list[str],
     ) -> ValidationResult:
+        """
+        在工作区目录中执行指定的验证命令列表。
+
+        :param workspace_dir: 工作区目录。
+        :param commands: 待执行的 shell 命令列表。
+        :return: 包含验证结果和解析出的测试报告路径信息的 ValidationResult。
+        """
         results: list[CommandResult] = []
         all_passed = True
 
@@ -122,6 +155,7 @@ class WorkspaceManager:
             if cmd_result.exit_code != 0:
                 all_passed = False
 
+        # 尝试搜集常见的测试或验证报告文件
         report_paths: list[str] = []
         for pattern in ["eval-report.json", "test-report.xml"]:
             found = list(workspace_dir.rglob(pattern))
@@ -141,13 +175,30 @@ class WorkspaceManager:
         branch: str,
         changed_files: list[str],
     ) -> str | None:
+        """
+        将所有变更文件添加进暂存区，并进行提交和推送到远程分支。
+
+        :param workspace_dir: 工作区目录。
+        :param message: Git commit 描述信息。
+        :param branch: 推送的目标分支名。
+        :param changed_files: 需要暂存的文件列表。
+        :return: 成功提交后的 commit sha，若没有变更则返回 None。
+        """
         if not changed_files:
             return None
+            
         cmd = ["git", "add", "--"] + changed_files
         await self._run_git(workspace_dir, cmd)
 
-        await self._run_git(workspace_dir, ["git", "config", "user.name", "Agent Platform DevFlow"])
-        await self._run_git(workspace_dir, ["git", "config", "user.email", "devflow@agent.platform"])
+        # 配置提交的用户信息
+        await self._run_git(
+            workspace_dir,
+            ["git", "config", "user.name", "Agent Platform DevFlow"],
+        )
+        await self._run_git(
+            workspace_dir,
+            ["git", "config", "user.email", "devflow@agent.platform"],
+        )
 
         proc = await asyncio.create_subprocess_exec(
             "git", "commit", "-m", message,
@@ -176,6 +227,12 @@ class WorkspaceManager:
         return commit_sha
 
     async def cleanup(self, workspace_dir: Path, *, keep_on_failure: bool = False) -> None:
+        """
+        清理并删除本地工作区目录。
+
+        :param workspace_dir: 需要清理的工作区目录。
+        :param keep_on_failure: 如果被标记为失败且需要保留现场时传 True，否则删除目录。
+        """
         if keep_on_failure:
             logger.info("Keeping workspace for debugging: %s", workspace_dir)
             return
@@ -184,6 +241,9 @@ class WorkspaceManager:
             logger.info("Cleaned up workspace: %s", workspace_dir)
 
     async def _run_git(self, cwd: Path, cmd: list[str]) -> None:
+        """
+        底层通用的 git 命令行执行封装。
+        """
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,

@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 
 
 class CodingAgentRunner:
+    """
+    AI 编码代理运行器。
+    用于管理整个代码生成的生命周期：包括工作区分配、代理调用、验证检查以及变更提交和结果上报。
+    """
 
     def __init__(
         self,
@@ -35,6 +39,17 @@ class CodingAgentRunner:
         repo_url: str | None = None,
         testing_state_id: str | None = None,
     ):
+        """
+        初始化。
+
+        :param adapter: 具体的 AI 编码适配器（如 Codex, Claude）。
+        :param workspace_manager: 工作区管理工具，负责环境的克隆与清理。
+        :param gitlab: GitLab API 适配器。
+        :param plane: 关联的项目管理平台适配器。
+        :param gitlab_project_id: 关联的代码项目 ID。
+        :param repo_url: 指定拉取代码的 git URL。
+        :param testing_state_id: 代码成功提交后在项目平台上所需要流转到的测试状态。
+        """
         self.adapter = adapter
         self.workspace_manager = workspace_manager
         self.gitlab = gitlab
@@ -51,6 +66,9 @@ class CodingAgentRunner:
         plane_project_id: str | None = None,
         plane_work_item_id: str | None = None,
     ) -> CodingJob:
+        """
+        执行编码任务的核心流程。
+        """
         job = self._create_job(
             task, mr_iid=mr_iid,
             plane_project_id=plane_project_id,
@@ -59,6 +77,7 @@ class CodingAgentRunner:
 
         try:
             job.state = JobState.WORKSPACE_CREATING
+            # 创建本地代码工作区
             workspace_dir = await self.workspace_manager.create(
                 branch=task.repository.work_branch,
                 repo_url=self._repo_url(),
@@ -67,6 +86,7 @@ class CodingAgentRunner:
 
             job.state = JobState.RUNNING
             path_guard = PathGuard.from_task(task)
+            # 执行 AI 代理编写代码，包含重试机制
             adapter_result = await self._execute_with_retry(job, task)
             
             if not adapter_result or not adapter_result.success:
@@ -79,7 +99,10 @@ class CodingAgentRunner:
                 await self._report_failure(job)
                 return job
 
+            # 获取所有变更的文件
             changed_files = await self.workspace_manager.get_changed_files(workspace_dir)
+            
+            # 使用 PathGuard 检查代理是否修改了越界或被保护的文件
             violations = path_guard.check(changed_files)
             if violations:
                 job.result = RunnerResult(
@@ -92,6 +115,7 @@ class CodingAgentRunner:
                 return job
 
             job.state = JobState.VALIDATING
+            # 运行任务包要求的验证命令 (如 pytest 等)
             validation = await self.workspace_manager.run_validation(
                 workspace_dir,
                 task.validation.get("commands", []),
@@ -100,6 +124,7 @@ class CodingAgentRunner:
             job.state = JobState.COMMITTING
             commit_sha = None
             if changed_files and validation.all_passed:
+                # 只有验证完全通过才将变更提交并推送
                 commit_sha = await self.workspace_manager.commit_and_push(
                     workspace_dir,
                     message=f"feat: {task.metadata.title}\n\nTask: {task.metadata.task_id}",
@@ -134,6 +159,7 @@ class CodingAgentRunner:
 
         finally:
             job.updated_at = datetime.now(UTC)
+            # 根据配置清理工作区目录
             if job.workspace_dir:
                 wm = self.workspace_manager
                 keep = (
@@ -155,6 +181,9 @@ class CodingAgentRunner:
         plane_project_id: str | None = None,
         plane_work_item_id: str | None = None,
     ) -> CodingJob:
+        """
+        构造一个新的编码作业记录。
+        """
         return CodingJob(
             job_id=f"job-{uuid.uuid4().hex[:12]}",
             task_id=task.metadata.task_id,
@@ -167,6 +196,9 @@ class CodingAgentRunner:
     async def _execute_with_retry(
         self, job: CodingJob, task: DevelopmentTask,
     ) -> RunnerAdapterResult:
+        """
+        在出现失败时，依据最大重试次数配置重新调度 Adapter 执行。
+        """
         last_result: RunnerAdapterResult | None = None
         for attempt in range(1, job.max_retries + 1):
             invocation = RunnerInvocation(
@@ -199,11 +231,18 @@ class CodingAgentRunner:
         return last_result
 
     def _repo_url(self) -> str:
+        """
+        获取拉取代码库所用的 Git URL。
+        """
         if self._repo_url_override:
             return self._repo_url_override
         return f"https://gitlab.example.com/{self.gitlab_project_id}.git"
 
     async def _report_result(self, job: CodingJob) -> None:
+        """
+        将执行结果通过评论等形式回传至 GitLab 和项目管理平台。
+        若配置了测试状态，还将触发状态扭转。
+        """
         if job.mr_iid:
             comment = self._build_mr_comment(job)
             try:
@@ -237,9 +276,15 @@ class CodingAgentRunner:
                         )
 
     async def _report_failure(self, job: CodingJob) -> None:
+        """
+        报告运行失败。目前复用了 _report_result。
+        """
         await self._report_result(job)
 
     def _build_mr_comment(self, job: CodingJob) -> str:
+        """
+        构建用于 GitLab 合并请求的报告评论模板。
+        """
         result = job.result
         if result is None:
             return "## DevFlow Runner 执行报告\n\n**状态**: 未完成"
@@ -278,6 +323,9 @@ class CodingAgentRunner:
         return "\n".join(lines)
 
     def _build_plane_comment(self, job: CodingJob) -> str:
+        """
+        构建用于项目管理平台（Plane）的汇总评论模板。
+        """
         result = job.result
         status = result.status.value if result else "unknown"
         parts = [f"<p><strong>DevFlow Runner</strong>: {status}</p>"]

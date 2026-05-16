@@ -37,6 +37,11 @@ logger = logging.getLogger(__name__)
 
 
 class RuntimeManager:
+    """Agent 运行时管理器。
+    
+    负责管理不同运行时后端（如 Native, Hermes, LangGraph）的生命周期，
+    处理请求的策略检查、会话管理、Hooks 触发和指标收集，并将请求路由到对应的后端。
+    """
     def __init__(
         self,
         run_store: AgentRunRepository | None = None,
@@ -65,9 +70,19 @@ class RuntimeManager:
         self.metrics_collector = metrics_collector
 
     def register(self, backend) -> None:
+        """注册一个新的运行时后端。"""
         self._backends[backend.name] = backend
 
     async def run(self, request: RuntimeRequest) -> RuntimeResponse:
+        """执行运行时请求。
+        
+        该方法涵盖了完整的请求生命周期，包括：
+        1. 检查输入策略。
+        2. 触发相关 Hooks。
+        3. 加载并更新会话信息。
+        4. 调用指定的运行时后端处理请求。
+        5. 检查输出策略并保存运行结果。
+        """
         run_id = f"run_{uuid4().hex}"
         started = perf_counter()
         backend_name = request.agent_spec.manifest.runtime.backend
@@ -76,7 +91,7 @@ class RuntimeManager:
         except KeyError as exc:
             raise ValueError(f"runtime backend not registered: {backend_name}") from exc
 
-        # Policy check: check_input
+        # 策略检查：校验输入 (check_input)
         if self.policy_engine:
             policy_set = self.policy_engine.load_policies(request.agent_spec)
             violations = self.policy_engine.check_input(
@@ -93,7 +108,7 @@ class RuntimeManager:
                     request, run_id, backend_name, latency_ms, error,
                 )
 
-        # Hook: on_route
+        # 钩子触发：路由后触发 (on_route)
         if self.hook_registry:
             try:
                 await self.hook_registry.emit(
@@ -102,7 +117,7 @@ class RuntimeManager:
             except Exception:
                 logger.exception("hook on_route failed")
 
-        # Hook: pre_run
+        # 钩子触发：运行前触发 (pre_run)
         if self.hook_registry:
             try:
                 await self.hook_registry.emit("pre_run", {"request": request, "run_id": run_id})
@@ -168,7 +183,7 @@ class RuntimeManager:
         trace.latency_ms = latency_ms
         response.response.trace = trace
 
-        # Policy check: check_output
+        # 策略检查：校验输出 (check_output)
         if self.policy_engine:
             policy_set = self.policy_engine.load_policies(request.agent_spec)
             output_violations = self.policy_engine.check_output(
@@ -188,14 +203,14 @@ class RuntimeManager:
                 except Exception:
                     logger.exception("metrics set_active_sessions failed")
 
-        # Hook: post_run
+        # 钩子触发：运行后触发 (post_run)
         if self.hook_registry:
             try:
                 await self.hook_registry.emit("post_run", {"response": response, "run_id": run_id})
             except Exception:
                 logger.exception("hook post_run failed")
 
-        # Metrics: success
+        # 指标收集：记录成功请求
         if self.metrics_collector:
             try:
                 agent_id = request.agent_spec.agent_id
@@ -215,6 +230,7 @@ class RuntimeManager:
         return response
 
     async def _load_session(self, request: RuntimeRequest) -> AgentSession | None:
+        """从存储中加载当前请求对应的会话。如果不存在则创建一个新会话。"""
         session_id = request.request.session_id
         if not session_id:
             return None
@@ -238,6 +254,7 @@ class RuntimeManager:
         latency_ms: int,
         error: AgentError,
     ) -> RuntimeResponse:
+        """构建并返回一个表示运行失败的响应，并记录失败的运行状态。"""
         agent = request.agent_spec
         failed_response = AgentResponse(
             request_id=request.request.request_id,
@@ -272,6 +289,7 @@ class RuntimeManager:
 
     @staticmethod
     def _latency_ms(started: float) -> int:
+        """计算当前执行的延迟时间（毫秒）。"""
         return max(0, round((perf_counter() - started) * 1000))
 
     async def _record_run(
@@ -284,6 +302,7 @@ class RuntimeManager:
         latency_ms: int,
         response: AgentResponse,
     ) -> None:
+        """将当前 Agent 运行的结果和状态持久化记录到数据库或内存中。"""
         trace = response.trace or ResponseTrace()
         run = AgentRun(
                 run_id=run_id,

@@ -19,10 +19,10 @@ from agent_platform.devflow.agents import ArchitectureDesignAgent, TestGeneratio
 from agent_platform.devflow.issue_generator import IssueGenerator
 from agent_platform.devflow.orchestrator import DevFlowOrchestrator
 from agent_platform.devflow.requirement_parser import RequirementParser
-from agent_platform.devflow.scaffolder import AgentScaffolder
-from agent_platform.devflow.runner.workspace import WorkspaceManager
-from agent_platform.devflow.runner.runner import CodingAgentRunner
 from agent_platform.devflow.runner.factory import create_adapter
+from agent_platform.devflow.runner.runner import CodingAgentRunner
+from agent_platform.devflow.runner.workspace import WorkspaceManager
+from agent_platform.devflow.scaffolder import AgentScaffolder
 from agent_platform.devflow.task_pack import TaskPackGenerator
 from agent_platform.domain.models import (
     AgentDeploymentStatus,
@@ -129,6 +129,11 @@ class RollbackRequest(BaseModel):
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
+    """请求上下文中间件。
+    
+    负责在每个请求中提取或生成 request_id 和 tenant_id，并将其附加到请求上下文中，
+    最后在响应头中带上 X-Request-ID。
+    """
     async def dispatch(self, request: Request, call_next):
         request_id = request.headers.get("x-request-id") or f"req_{uuid4().hex}"
         tenant_id = request.headers.get("x-tenant-id")
@@ -142,6 +147,11 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
+    """身份验证中间件。
+    
+    用于校验传入请求的 API 密钥是否合法（支持 Bearer Token 和 x-api-key 头），
+    排除对健康检查和 API 文档端点的验证。
+    """
     def __init__(self, app, api_key: str | None = None):
         super().__init__(app)
         self.api_key = api_key
@@ -171,6 +181,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 
 def create_app() -> FastAPI:
+    """创建并配置 FastAPI 应用实例。
+    
+    该工厂函数负责：
+    1. 初始化日志记录器和配置。
+    2. 设置核心组件，如注册中心、路由器、策略引擎、指标收集器等。
+    3. 根据配置决定是否使用 SQL 持久化或内存存储。
+    4. 配置应用中间件（鉴权、限流、CORS、请求上下文）。
+    5. 注册所有的 API 路由和 WebSocket 端点。
+    """
     setup_logging()
 
     settings = get_settings()
@@ -287,9 +306,9 @@ def create_app() -> FastAPI:
             base_url=settings.gitlab_base_url,
             token=settings.gitlab_token,
         )
-        # Inject CodingAgentRunner into DevFlowOrchestrator
+        # 将 CodingAgentRunner 注入到 DevFlowOrchestrator 中
         workspace_manager = WorkspaceManager()
-        adapter = create_adapter("mock")  # Defaulting to mock for MVP safely, could read from settings
+        adapter = create_adapter("mock")
         coding_runner = CodingAgentRunner(
             adapter=adapter,
             workspace_manager=workspace_manager,
@@ -660,16 +679,17 @@ def create_app() -> FastAPI:
         if devflow and x_plane_event:
             try:
                 payload = json.loads(raw_body) if raw_body else {}
-                # Execute devflow handling in background to unblock webhook response
-                async def _bg_task(event, data):
-                    try:
-                        await devflow.handle_webhook_event(event, data)
-                    except Exception:
-                        logger.exception("DevFlow background orchestration failed for event %s", event)
-                background_tasks.add_task(_bg_task, x_plane_event, payload)
-                result["message"] = "Webhook received and processing in background"
+                devflow_result = await devflow.handle_webhook_event(
+                    x_plane_event, payload,
+                )
+                if devflow_result:
+                    result["devflow_branch"] = devflow_result.branch
+                    result["devflow_mr_url"] = devflow_result.mr_url
             except Exception:
-                logger.exception("DevFlow orchestration prep failed for event %s", x_plane_event)
+                logger.exception(
+                    "DevFlow orchestration failed for event %s",
+                    x_plane_event,
+                )
 
         return result
 
@@ -688,6 +708,7 @@ def _error_response(
     agent_id: str | None = None,
     agent_version: str = "unknown",
 ) -> AgentResponse:
+    """构建一个标准的错误响应对象。"""
     return AgentResponse(
         request_id=request.request_id,
         session_id=request.session_id,
@@ -710,6 +731,7 @@ def _error_response(
 
 
 def _missing_required_context(request: AgentRequest, required_paths: list[str]) -> list[str]:
+    """检查请求负载中是否缺少必填的上下文路径。"""
     missing: list[str] = []
     payload = request.model_dump(by_alias=True)
     for path in required_paths:
@@ -725,6 +747,7 @@ def _missing_required_context(request: AgentRequest, required_paths: list[str]) 
 
 
 def _deployment_status(channel: str, traffic_percent: int) -> AgentDeploymentStatus:
+    """根据部署渠道和流量比例确定部署的状态。"""
     if channel == "staging":
         return AgentDeploymentStatus.STAGING
     if channel == "prod" and traffic_percent < 100:

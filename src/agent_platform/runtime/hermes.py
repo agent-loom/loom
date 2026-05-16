@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 
 
 class ManifestMapper:
+    """Agent 清单映射器。
+    
+    用于将 Agent 的规范（AgentSpec）转换为 Hermes 引擎可识别的配置。
+    """
     @staticmethod
     def to_hermes_config(spec: AgentSpec) -> dict[str, Any]:
         manifest = spec.manifest
@@ -64,6 +68,10 @@ class ManifestMapper:
 
 
 class ToolBridge:
+    """工具桥接器。
+    
+    负责将平台注册的工具转换为 Hermes/LLM 要求的工具 Schema 格式。
+    """
     @staticmethod
     def wrap_platform_tools(tool_names: list[str], tool_executor) -> list[dict[str, Any]]:
         tools = []
@@ -81,6 +89,10 @@ class ToolBridge:
 
 
 class SessionBridge:
+    """会话桥接器。
+    
+    用于在平台会话 ID 与 Hermes 会话配置之间建立映射。
+    """
     @staticmethod
     def map_session(session_id: str | None, hermes_config: dict) -> dict[str, Any]:
         return {
@@ -90,6 +102,10 @@ class SessionBridge:
 
 
 class ResponseMapper:
+    """响应映射器。
+    
+    将 Hermes 引擎执行后的结果字典转换为平台标准的 RuntimeResponse。
+    """
     @staticmethod
     def to_platform_response(
         hermes_result: dict[str, Any],
@@ -125,6 +141,10 @@ class ResponseMapper:
 
 
 class TraceBridge:
+    """调用追踪桥接器。
+    
+    提取 Hermes 执行过程中产生的追踪信息（如迭代次数、模型调用次数等）。
+    """
     @staticmethod
     def extract_trace(hermes_result: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -135,6 +155,10 @@ class TraceBridge:
 
 
 class PolicyEnforcer:
+    """策略执行器。
+    
+    在运行时执行前的校验逻辑，例如检查被允许和被拒绝的工具列表是否存在冲突。
+    """
     @staticmethod
     def check_pre_run(spec: AgentSpec) -> list[str]:
         violations: list[str] = []
@@ -147,11 +171,10 @@ class PolicyEnforcer:
 
 
 class ConversationEngine:
-    """Lightweight conversation engine that calls a model gateway and executes tools.
-
-    When *model_gateway* is ``None`` the engine falls back to a canned stub
-    response so the rest of the pipeline can still be exercised without a live
-    LLM connection.
+    """轻量级对话引擎。
+    
+    负责调用模型网关并执行相关的工具。当模型网关（model_gateway）为 None 时，
+    引擎会返回默认的存根（stub）响应，以便在无真实 LLM 连接的情况下仍能测试管道。
     """
 
     def __init__(
@@ -172,10 +195,10 @@ class ConversationEngine:
         max_iterations: int = 4,
         session_config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Run a multi-turn tool-use loop and return a result dict.
+        """运行多轮带工具调用的对话循环并返回结果字典。
 
-        Returns a dict with keys: text, tool_calls, iterations,
-        model_calls.
+        返回的字典包含键: text（生成的文本）, tool_calls（工具调用记录）,
+        iterations（迭代次数）, model_calls（模型调用次数）。
         """
         if self.model_gateway is None:
             return self._stub_response(
@@ -205,7 +228,7 @@ class ConversationEngine:
                 tools=tools or None,
             )
 
-            # If the model did not request tool calls, done.
+            # 如果模型没有请求任何工具调用，则循环结束。
             if not model_response.tool_calls:
                 return {
                     "text": model_response.content,
@@ -214,7 +237,7 @@ class ConversationEngine:
                     "model_calls": total_model_calls,
                 }
 
-            # Execute each requested tool, feed results back.
+            # 执行每一个被请求的工具，并将结果反馈给模型。
             for tc in model_response.tool_calls:
                 tool_name = tc.name
                 tool_input = tc.arguments
@@ -255,7 +278,7 @@ class ConversationEngine:
                     ),
                 )
 
-        # Exhausted iterations -- final call for closing answer.
+        # 达到了最大迭代次数 —— 进行最后一次调用以生成最终答案。
         total_model_calls += 1
         final = await self.model_gateway.chat(
             provider,
@@ -285,6 +308,10 @@ class ConversationEngine:
 
 
 class HermesRuntimeBackend:
+    """Hermes 运行时后端实现。
+    
+    实现了对 Hermes 对话引擎的封装，提供从请求校验、配置转换、多轮对话到结果格式化的完整流程。
+    """
     name = "hermes"
 
     def __init__(
@@ -306,6 +333,11 @@ class HermesRuntimeBackend:
         )
 
     async def run(self, request: RuntimeRequest) -> RuntimeResponse:
+        """执行运行时请求。
+        
+        首先进行策略前置检查，然后将请求转化为 Hermes 配置，接着调用会话引擎执行对话循环，
+        最后映射返回结果为平台标准格式。
+        """
         violations = self.policy_enforcer.check_pre_run(request.agent_spec)
         if violations:
             return self._policy_error(request, violations)
@@ -315,7 +347,7 @@ class HermesRuntimeBackend:
             request.request.session_id, hermes_config
         )
 
-        # Build tool definitions for the conversation engine
+        # 为对话引擎构建工具定义列表
         tools: list[dict[str, Any]] = []
         if self.tool_executor:
             tools = self.tool_bridge.wrap_platform_tools(
