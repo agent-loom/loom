@@ -46,6 +46,7 @@ class RuntimeManager:
         metrics_collector: Any | None = None,
         model_gateway: ModelGateway | None = None,
         tool_executor: ToolExecutor | None = None,
+        knowledge_service: Any | None = None,
     ):
         self._backends = {
             NativeRuntimeBackend.name: NativeRuntimeBackend(tool_executor=tool_executor),

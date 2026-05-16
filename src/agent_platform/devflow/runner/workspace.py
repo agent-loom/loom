@@ -146,6 +146,9 @@ class WorkspaceManager:
         cmd = ["git", "add", "--"] + changed_files
         await self._run_git(workspace_dir, cmd)
 
+        await self._run_git(workspace_dir, ["git", "config", "user.name", "Agent Platform DevFlow"])
+        await self._run_git(workspace_dir, ["git", "config", "user.email", "devflow@agent.platform"])
+
         proc = await asyncio.create_subprocess_exec(
             "git", "commit", "-m", message,
             stdout=asyncio.subprocess.PIPE,

@@ -20,6 +20,9 @@ from agent_platform.devflow.issue_generator import IssueGenerator
 from agent_platform.devflow.orchestrator import DevFlowOrchestrator
 from agent_platform.devflow.requirement_parser import RequirementParser
 from agent_platform.devflow.scaffolder import AgentScaffolder
+from agent_platform.devflow.runner.workspace import WorkspaceManager
+from agent_platform.devflow.runner.runner import CodingAgentRunner
+from agent_platform.devflow.runner.factory import create_adapter
 from agent_platform.devflow.task_pack import TaskPackGenerator
 from agent_platform.domain.models import (
     AgentDeploymentStatus,
@@ -230,6 +233,7 @@ def create_app() -> FastAPI:
         metrics_collector=app_metrics,
         model_gateway=model_gateway,
         tool_executor=tool_executor,
+        knowledge_service=app_knowledge_service,
     )
     eval_runner = EvalRunner(runtime_manager)
     task_pack_generator = TaskPackGenerator()
@@ -283,11 +287,22 @@ def create_app() -> FastAPI:
             base_url=settings.gitlab_base_url,
             token=settings.gitlab_token,
         )
+        # Inject CodingAgentRunner into DevFlowOrchestrator
+        workspace_manager = WorkspaceManager()
+        adapter = create_adapter("mock")  # Defaulting to mock for MVP safely, could read from settings
+        coding_runner = CodingAgentRunner(
+            adapter=adapter,
+            workspace_manager=workspace_manager,
+            gitlab=gitlab_adapter,
+            plane=plane_adapter,
+            gitlab_project_id=settings.gitlab_project_id,
+        )
         devflow = DevFlowOrchestrator(
             plane=plane_adapter,
             gitlab=gitlab_adapter,
             gitlab_project_id=settings.gitlab_project_id,
             webhook_repo=webhook_repo,
+            coding_runner=coding_runner,
         )
     app.state.devflow_enabled = devflow is not None
 
@@ -645,12 +660,16 @@ def create_app() -> FastAPI:
         if devflow and x_plane_event:
             try:
                 payload = json.loads(raw_body) if raw_body else {}
-                devflow_result = await devflow.handle_webhook_event(x_plane_event, payload)
-                if devflow_result:
-                    result["devflow_branch"] = devflow_result.branch
-                    result["devflow_mr_url"] = devflow_result.mr_url
+                # Execute devflow handling in background to unblock webhook response
+                async def _bg_task(event, data):
+                    try:
+                        await devflow.handle_webhook_event(event, data)
+                    except Exception:
+                        logger.exception("DevFlow background orchestration failed for event %s", event)
+                background_tasks.add_task(_bg_task, x_plane_event, payload)
+                result["message"] = "Webhook received and processing in background"
             except Exception:
-                logger.exception("DevFlow orchestration failed for event %s", x_plane_event)
+                logger.exception("DevFlow orchestration prep failed for event %s", x_plane_event)
 
         return result
 

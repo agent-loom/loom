@@ -68,7 +68,7 @@ All checks passed
 | Model Gateway | ✅ 有网关抽象与 `OpenAICompatibleProvider`（httpx.AsyncClient） | 缺少 token/cost 统计、限流、fallback、多模型路由 |
 | Observability | ✅ run store、metrics 已串联至 RuntimeManager 和 ToolExecutor、HookRegistry 已串联、logging、✅ LogSanitizer（PII 脱敏）+ TraceSanitizer（tool trace / run 脱敏） | 缺少 OpenTelemetry/Langfuse、dashboard、trace 持久化、告警 |
 | Domain Model | ✅ 泛化完成：LocationContext、org_id、locale=en、timezone=UTC | 旧字段通过 alias 保持向后兼容 |
-| 持久化骨架 | ✅ SQLAlchemy 2.0 + Alembic + persistence/ 包（7 ORM 表 + 7 Protocol + 7 InMemory + 7 SQL + AuditMixin + Alembic migration） | DI 已就绪；RuntimeManager 内部 store 待切换到 Repository |
+| 持久化骨架 | ✅ SQLAlchemy 2.0 + Alembic + persistence/ 包（7 ORM 表 + 7 Protocol + 7 InMemory + 7 SQL + AuditMixin + Alembic migration） | ✅ DI 完成：`DATABASE_URL` 显式设置时切换 SQL 实现 |
 | Artifact 管理 | ✅ ArtifactStore（tar.gz + SHA256 + 部署绑定） | 仅 in-memory；缺 manifest_sha256 绑定和远程存储 |
 
 ### 2.2 多 Agent 路由
@@ -319,9 +319,9 @@ All checks passed
 - ✅ ArtifactStore 已实现本地产物保存（in-memory tar.gz + SHA256）。
 - ✅ `persistence/` 包已创建（tables.py 7 ORM Row + AuditMixin、repositories.py 7 Protocol、memory.py 7 InMemory、sql.py 7 SQL、context.py AuditContext）。
 - ✅ Alembic 配置和初始 migration 已完成，`alembic upgrade head` 验证通过。
-- 🔶 DI 注入部分就绪：`create_app()` 创建 SQL engine 但所有 Repository 仍默认使用 InMemory 实现。SQL 实现已完成但未在 DI 中切换。
+- ✅ DI 注入完成：`create_app()` 根据 `DATABASE_URL` 环境变量选择 SQL 或 InMemory 实现，5 个核心 Repository（run、session、webhook、audit、eval）全部切换。
 - ✅ 62 个 Repository contract tests 验证 InMemory 和 SQL 行为一致。
-- ✅ RuntimeManager 内部已切换到 `AgentRunRepository` / `AgentSessionRepository` Protocol 接口（异步），但默认注入 InMemory 实现。
+- ✅ RuntimeManager 内部已切换到 `AgentRunRepository` / `AgentSessionRepository` Protocol 接口（异步），DI 注入 SQL 或 InMemory 实现。
 
 重构方向：
 
