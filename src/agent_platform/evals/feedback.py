@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 
 from agent_platform.evals.runner import EvalReport
-from agent_platform.integrations.gitlab.adapter import GitLabAdapter
 from agent_platform.integrations.plane.adapter import PlaneAdapter
+from agent_platform.integrations.scm.protocol import ScmAdapter
 from agent_platform.persistence.repositories import EvalRunRepository
 
 logger = logging.getLogger(__name__)
@@ -17,7 +17,7 @@ class EvalFeedback:
 
     def __init__(
         self,
-        gitlab: GitLabAdapter | None = None,
+        gitlab: ScmAdapter | None = None,
         plane: PlaneAdapter | None = None,
         eval_repo: EvalRunRepository | None = None,
     ):

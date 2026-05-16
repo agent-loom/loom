@@ -1,12 +1,21 @@
 """Plane 项目管理平台 API 适配器。"""
 
+from __future__ import annotations
+
 from typing import Any
 
 import httpx
 
+from agent_platform.integrations.errors import PlaneError
+from agent_platform.integrations.http_client import HttpClient
+
 
 class PlaneAdapter:
-    """Plane API 异步适配器，支持工作项的增删改查。"""
+    """Plane API 异步适配器，支持工作项的增删改查。
+
+    Uses ``HttpClient`` internally for connection pooling and retry.
+    """
+
     def __init__(
         self,
         base_url: str,
@@ -14,28 +23,33 @@ class PlaneAdapter:
         workspace_slug: str,
         *,
         transport: httpx.AsyncBaseTransport | None = None,
+        max_retries: int = 3,
     ):
-        """初始化 Plane 适配器。"""
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.workspace_slug = workspace_slug
-        self.transport = transport
+        self._http = HttpClient(
+            base_url=self.base_url,
+            headers={"X-API-Key": api_key, "Content-Type": "application/json"},
+            transport=transport,
+            max_retries=max_retries,
+        )
 
     @property
     def headers(self) -> dict[str, str]:
         return {"X-API-Key": self.api_key, "Content-Type": "application/json"}
 
+    async def close(self) -> None:
+        await self._http.close()
+
     async def list_projects(self) -> dict[str, Any]:
-        """列出工作空间下的所有项目。"""
         return await self._request("GET", f"/api/v1/workspaces/{self.workspace_slug}/projects/")
 
     async def list_work_items(self, project_id: str) -> dict[str, Any]:
-        """列出指定项目下的所有工作项。"""
         path = f"/api/v1/workspaces/{self.workspace_slug}/projects/{project_id}/work-items/"
         return await self._request("GET", path)
 
     async def get_work_item(self, project_id: str, work_item_id: str) -> dict[str, Any]:
-        """获取单个工作项的详情。"""
         path = (
             f"/api/v1/workspaces/{self.workspace_slug}/projects/{project_id}"
             f"/work-items/{work_item_id}/"
@@ -43,7 +57,6 @@ class PlaneAdapter:
         return await self._request("GET", path)
 
     async def search_work_items(self, project_id: str, query: str) -> dict[str, Any]:
-        """按关键词搜索工作项。"""
         path = f"/api/v1/workspaces/{self.workspace_slug}/projects/{project_id}/work-items/"
         return await self._request("GET", path, params={"search": query})
 
@@ -58,7 +71,6 @@ class PlaneAdapter:
         labels: list[str] | None = None,
         properties: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """创建新的工作项。"""
         path = f"/api/v1/workspaces/{self.workspace_slug}/projects/{project_id}/work-items/"
         payload: dict[str, Any] = {"name": name, "description_html": description}
         if state_id:
@@ -72,7 +84,6 @@ class PlaneAdapter:
         return await self._request("POST", path, json=payload)
 
     async def add_comment(self, project_id: str, work_item_id: str, body: str) -> dict[str, Any]:
-        """为工作项添加评论。"""
         path = (
             f"/api/v1/workspaces/{self.workspace_slug}/projects/{project_id}"
             f"/work-items/{work_item_id}/comments/"
@@ -83,9 +94,8 @@ class PlaneAdapter:
         self,
         project_id: str,
         work_item_id: str,
-        **fields,
+        **fields: Any,
     ) -> dict[str, Any]:
-        """更新工作项的指定字段。"""
         path = (
             f"/api/v1/workspaces/{self.workspace_slug}/projects/{project_id}"
             f"/work-items/{work_item_id}/"
@@ -98,7 +108,6 @@ class PlaneAdapter:
         work_item_id: str,
         state_id: str,
     ) -> dict[str, Any]:
-        """更新工作项的状态。"""
         return await self.update_work_item(project_id, work_item_id, state=state_id)
 
     async def update_custom_properties(
@@ -107,16 +116,15 @@ class PlaneAdapter:
         work_item_id: str,
         properties: dict[str, Any],
     ) -> dict[str, Any]:
-        """更新工作项的自定义属性。"""
         return await self.update_work_item(project_id, work_item_id, properties=properties)
 
-    async def _request(self, method: str, path: str, **kwargs) -> dict[str, Any]:
-        async with httpx.AsyncClient(
-            base_url=self.base_url,
-            headers=self.headers,
-            timeout=20,
-            transport=self.transport,
-        ) as client:
-            response = await client.request(method, path, **kwargs)
-            response.raise_for_status()
-            return response.json()
+    async def list_states(self, project_id: str) -> list[dict[str, Any]]:
+        """List all workflow states for a project."""
+        path = f"/api/v1/workspaces/{self.workspace_slug}/projects/{project_id}/states/"
+        result = await self._request("GET", path)
+        if isinstance(result, list):
+            return result
+        return result.get("results", [])
+
+    async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        return await self._http.request(method, path, error_cls=PlaneError, **kwargs)

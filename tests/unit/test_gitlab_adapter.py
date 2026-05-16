@@ -33,7 +33,9 @@ async def test_gitlab_create_merge_request_sends_review_metadata():
         reviewer_ids=[101],
     )
 
-    assert response["iid"] == 7
+    assert response.mr_id == 7
+    assert response.url == "https://gitlab.local/mr/7"
+    assert response.source_branch == "feat/task"
     assert seen["method"] == "POST"
     assert seen["path"] == "/api/v4/projects/group%2Fproject/merge_requests"
     assert seen["token"] == "token"
