@@ -1,8 +1,8 @@
 # 实现与设计差距分析
 
-> Last verified against code: 2026-05-16
+> Last verified against code: 2026-05-16 (Phase 0 完成后更新)
 >
-> S5 开工口径：S2-S4 的很多基础组件已经实现，但“基础组件存在”不等于“生产主链路闭环”。Registry/Deployment/Audit/Artifact、Hermes 官方 SDK、Knowledge/RAG、RBAC/scopes enforcement、审批和观测仍是 S5 需要校准或补齐的重点。
+> S5 Phase 0 校准已完成。Registry/Deployment/Audit 已全面接入持久化 Repository，ArtifactStore 已 Protocol 化并实现 LocalArtifactStore，Knowledge/ContextBuilder 已接入 RuntimeManager 主链路，Webhook 已改为 BackgroundTasks 异步分发。
 
 本文档对齐以下两份设计文档和当前代码实现：
 
@@ -39,7 +39,7 @@
 
 ```text
 .venv/bin/python -m pytest
-516 passed
+559 passed, 1 skipped
 
 .venv/bin/ruff check src tests scripts alembic
 All checks passed
@@ -61,25 +61,25 @@ All checks passed
 
 | 层级 | 当前成熟度 | 主要缺口 |
 | --- | --- | --- |
-| API 层 | 70% | RBAC/scopes、WebSocket 鉴权/背压、capability negotiation |
-| Agent Contract / Manifest | 75% | tool handler import、adapter entrypoint import、artifact hash 绑定 |
+| API 层 | 75% | RBAC/scopes、WebSocket 鉴权/背压、capability negotiation |
+| Agent Contract / Manifest | 80% | tool handler import、adapter entrypoint import |
 | Routing | 70% | semantic rules 自动加载、route decision 持久化、DB 化路由配置 |
-| Runtime 抽象 | 60% | ContextBuilder/Knowledge/ResponseBuilder 未完整串主链路 |
+| Runtime 抽象 | 70% | Hermes 官方 SDK 真接入、ResponseBuilder 完整串联 |
 | Tool 执行 | 65% | 高风险审批、审计持久化、完整 JSON Schema 校验 |
 | Eval | 55% | EvalRun 自动持久化、LLM judge/semantic scoring、线上反馈回归集 |
-| DevFlow | 50% | 真实 runner 配置、job 持久化、安全沙箱、失败恢复 |
-| Persistence | 55% | repo 层完成较多，但 Registry/Deployment/Audit/Eval 主链路未完全接入 |
-| Artifact / Release | 40% | 持久化 store、artifact hash、deployment 绑定、可复现 rollback |
+| DevFlow | 55% | 真实 runner 配置、job 持久化、安全沙箱、失败恢复 |
+| Persistence | 75% | Registry/Deployment/Audit 已接入 repo 主链路；Eval 主链路待完善 |
+| Artifact / Release | 60% | LocalArtifactStore + Protocol 已完成；S3/远程后端待实现 |
 | Security / Tenant / Policy | 40% | endpoint RBAC/scopes、多租户强隔离、高危操作审批 |
-| Hermes 真接入 | 30% | 当前是平台 tool-loop 原型，不是官方 Hermes runtime |
+| Hermes 真接入 | 35% | Spike B 实现中，SDK 工具桥接 + fallback 进行中 |
 | Observability | 45% | OTel/Langfuse、结构化 span/event、dashboard、alerting |
-| Knowledge / RAG | 25% | 未接 runtime 主链路，无真实 vector backend、同步和权限过滤 |
+| Knowledge / RAG | 45% | 已接 runtime 主链路 + ContextBuilder；真实 vector backend 待实现 |
 
 需要特别避免的文档误判：
 
-- “持久化层完成”只能表示 repository/interface 基础较完整，不能表示 Registry/Deployment/Audit/Eval 等业务状态已经全部生产持久化。
-- “Hermes 真接入”当前只能表示 Spike A 的平台自研 conversation loop 已接 ModelGateway/ToolExecutor，不能表示接入了 Hermes 官方 runtime/planner/memory/event stream。
-- “ArtifactStore 完成”当前只能表示内存 tar.gz/checksum 原型可用，不能表示生产 artifact registry 完成。
+- ~~”持久化层完成”只能表示 repository/interface 基础较完整，不能表示 Registry/Deployment/Audit/Eval 等业务状态已经全部生产持久化。~~ → **Phase 0 已校准**：Registry/Deployment/Audit 主链路已接入 Repository，DI 条件注入 SQL/InMemory。
+- “Hermes 真接入”当前只能表示 Spike A 的平台自研 conversation loop 已接 ModelGateway/ToolExecutor，不能表示接入了 Hermes 官方 runtime/planner/memory/event stream。→ **Spike B 进行中**
+- ~~”ArtifactStore 完成”当前只能表示内存 tar.gz/checksum 原型可用，不能表示生产 artifact registry 完成。~~ → **Phase 0 已校准**：ArtifactStore Protocol 化 + LocalArtifactStore + manifest_sha256 绑定已完成。
 - “租户隔离完成”当前只能表示部分 repo 支持 tenant filter，不能表示所有 API/list/registry/runtime 路径都强制租户隔离。
 - “DevFlow 闭环完成”当前只能表示基础 orchestrator/runner/workspace 已有，不能表示真实 Codex/Claude Code 生产执行、job 持久化和失败恢复完成。
 

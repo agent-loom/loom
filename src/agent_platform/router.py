@@ -35,7 +35,7 @@ class AgentRouter:
         self.settings = settings
         self.semantic_router = semantic_router
 
-    def route(self, request: AgentRequest) -> RouteResult:
+    async def route(self, request: AgentRequest) -> RouteResult:
         """执行请求路由。
         
         依次检查 Agent ID、App ID、租户 ID、渠道 ID，以及语义匹配，
@@ -43,13 +43,13 @@ class AgentRouter:
         """
         # 1. 显式指定了 Agent ID
         if request.agent_id:
-            return self._route_agent(request.agent_id, request, "agent_id")
+            return await self._route_agent(request.agent_id, request, "agent_id")
 
         # 2. 根据元数据中的 App ID 进行路由
         app_id = request.metadata.get("app_id")
         if app_id:
             try:
-                return self._route_agent(app_id, request, "app_id")
+                return await self._route_agent(app_id, request, "app_id")
             except LookupError:
                 pass
 
@@ -57,7 +57,7 @@ class AgentRouter:
         retailer_id = request.context.tenant.org_id
         if retailer_id:
             try:
-                return self._route_agent(retailer_id, request, "tenant.org_id")
+                return await self._route_agent(retailer_id, request, "tenant.org_id")
             except LookupError:
                 pass
 
@@ -65,7 +65,7 @@ class AgentRouter:
         channel_id = request.context.channel.channel_id
         if channel_id:
             try:
-                return self._route_agent(channel_id, request, "channel.channel_id")
+                return await self._route_agent(channel_id, request, "channel.channel_id")
             except LookupError:
                 pass
 
@@ -74,7 +74,7 @@ class AgentRouter:
             semantic_match = self.semantic_router.match(request.input.query)
             if semantic_match:
                 try:
-                    return self._route_agent(
+                    return await self._route_agent(
                         semantic_match.agent_id,
                         request,
                         semantic_match.reason,
@@ -85,21 +85,21 @@ class AgentRouter:
         # 6. 如果都没有匹配，使用配置的默认 Agent
         if not self.settings.default_agent_id:
             raise LookupError("no agent matched and no default_agent_id configured")
-        return self._route_agent(self.settings.default_agent_id, request, "default_agent")
+        return await self._route_agent(self.settings.default_agent_id, request, "default_agent")
 
-    def _route_agent(self, agent_id: str, request: AgentRequest, reason: str) -> RouteResult:
+    async def _route_agent(self, agent_id: str, request: AgentRequest, reason: str) -> RouteResult:
         """解析 Agent 的具体部署信息并进行灰度流量计算。"""
-        spec = self.registry.get(agent_id)
+        spec = await self.registry.get(agent_id)
         canary = None
         # 如果是生产环境，尝试查找是否有金丝雀部署
         if request.options.runtime_profile == "prod":
-            canary = self.registry.resolve_canary_deployment(
+            canary = await self.registry.resolve_canary_deployment(
                 agent_id=agent_id,
                 channel="prod",
                 tenant_id=request.context.tenant.tenant_id,
             )
         # 获取基础的部署实例
-        deployment = self.registry.resolve_deployment(
+        deployment = await self.registry.resolve_deployment(
             agent_id=agent_id,
             channel=request.options.runtime_profile,
             tenant_id=request.context.tenant.tenant_id,

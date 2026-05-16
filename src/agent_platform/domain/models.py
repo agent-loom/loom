@@ -263,6 +263,10 @@ class ResponseTrace(BaseModel):
     tool_calls: list[ToolCallTrace] = Field(default_factory=list)
     latency_ms: int | None = None
     error: str | None = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float | None = None
 
 
 class AgentResponse(BaseModel):
@@ -348,11 +352,20 @@ class ManifestKnowledge(BaseModel):
     sources: list[ManifestKnowledgeSource] = Field(default_factory=list)
 
 
+class ManifestRoutingRule(BaseModel):
+    """单条语义路由规则，声明关键词和正则模式。"""
+
+    keywords: list[str] = Field(default_factory=list)
+    patterns: list[str] = Field(default_factory=list)
+    description: str = ""
+
+
 class ManifestRouting(BaseModel):
     """路由策略配置。"""
 
     strategy: str = "single"
     rules: str | None = None
+    routing_rules: list[ManifestRoutingRule] = Field(default_factory=list)
     fallback_worker: str = "direct_reply"
     human_handoff_intents: list[str] = Field(default_factory=list)
 
@@ -458,6 +471,8 @@ class RuntimeRequest(BaseModel):
     route_reason: str | None = None
     deployment_id: str | None = None
     traffic_bucket: int | None = None
+    knowledge_context: list[str] = Field(default_factory=list)
+    runtime_context: Any | None = None
 
     model_config = {"arbitrary_types_allowed": True}
 

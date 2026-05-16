@@ -24,6 +24,9 @@ dev = [
     "ruff>=0.5",
     "alembic>=1.13",
 ]
+hermes = [
+    "hermes-agent>=0.13.0,<1.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

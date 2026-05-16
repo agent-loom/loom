@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
 from agent_platform.domain.models import AgentDeployment, AgentDeploymentStatus
+
+if TYPE_CHECKING:
+    from agent_platform.persistence.repositories import DeploymentAuditRepository
 
 logger = logging.getLogger(__name__)
 
@@ -31,19 +34,21 @@ class DeploymentEvent(BaseModel):
 class DeploymentAuditLog:
     """Records all deployment events for audit trail and rollback support."""
 
-    def __init__(self) -> None:
-        """初始化审计日志。"""
-        self._events: list[DeploymentEvent] = []
-        self._rollback_targets: dict[str, tuple[str, str | None]] = {}
+    def __init__(self, *, repo: DeploymentAuditRepository | None = None) -> None:
+        if repo is None:
+            from agent_platform.persistence.memory import InMemoryDeploymentAuditRepository
+            self._repo = InMemoryDeploymentAuditRepository()
+        else:
+            self._repo = repo
 
-    def record_deploy(
+    async def record_deploy(
         self,
         deployment: AgentDeployment,
         previous_version: str | None = None,
         actor: str = "system",
         artifact_id: str | None = None,
     ) -> DeploymentEvent:
-        """记录一次部署事件，并保存回滚目标版本。"""
+        """记录一次部署事件。"""
         event = DeploymentEvent(
             event_type="deploy",
             agent_id=deployment.agent_id,
@@ -55,11 +60,7 @@ class DeploymentAuditLog:
             actor=actor,
             artifact_id=artifact_id,
         )
-        self._events.append(event)
-
-        if previous_version:
-            key = f"{deployment.agent_id}:{deployment.channel}"
-            self._rollback_targets[key] = (previous_version, None)
+        await self._repo.record(event)
 
         logger.info(
             "deployment event: %s %s@%s -> %s (channel=%s, traffic=%d%%)",
@@ -72,7 +73,7 @@ class DeploymentAuditLog:
         )
         return event
 
-    def record_rollback(
+    async def record_rollback(
         self,
         agent_id: str,
         channel: str,
@@ -90,7 +91,7 @@ class DeploymentAuditLog:
             previous_version=from_version,
             actor=actor,
         )
-        self._events.append(event)
+        await self._repo.record(event)
         logger.info(
             "rollback: %s %s -> %s (channel=%s)",
             agent_id,
@@ -100,26 +101,20 @@ class DeploymentAuditLog:
         )
         return event
 
-    def get_rollback_version(self, agent_id: str, channel: str) -> tuple[str, str | None] | None:
+    async def get_rollback_version(
+        self, agent_id: str, channel: str
+    ) -> tuple[str, str | None] | None:
         """Return (version, artifact_id) for rollback, or None if no target exists."""
-        key = f"{agent_id}:{channel}"
-        return self._rollback_targets.get(key)
+        version = await self._repo.get_rollback_version(agent_id, channel)
+        if version:
+            return (version, None)
+        return None
 
-    def list_events(
+    async def list_events(
         self,
         agent_id: str | None = None,
         channel: str | None = None,
         limit: int = 50,
     ) -> list[DeploymentEvent]:
         """按条件筛选并返回最近的部署事件列表。"""
-        events = self._events
-        if agent_id:
-            events = [e for e in events if e.agent_id == agent_id]
-        if channel:
-            events = [e for e in events if e.channel == channel]
-        return events[-limit:]
-
-    def clear(self) -> None:
-        """清空所有事件和回滚目标。"""
-        self._events.clear()
-        self._rollback_targets.clear()
+        return await self._repo.list_events(agent_id=agent_id, channel=channel, limit=limit)

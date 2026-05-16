@@ -1,9 +1,22 @@
 """Agent 注册中心：发现、注册、部署管理。"""
 
+from __future__ import annotations
+
+import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from agent_platform.domain.models import AgentDeployment, AgentDeploymentStatus, AgentSpec
 from agent_platform.registry.loader import ManifestLoader
+from agent_platform.router_semantic import SemanticRouter, SemanticRule
+
+if TYPE_CHECKING:
+    from agent_platform.persistence.repositories import (
+        AgentDefinitionRepository,
+        AgentDeploymentRepository,
+    )
+
+logger = logging.getLogger(__name__)
 
 
 class AgentNotFoundError(LookupError):
@@ -13,51 +26,113 @@ class AgentNotFoundError(LookupError):
 class AgentRegistry:
     """Agent 注册中心，提供发现、注册和部署管理功能。"""
 
-    def __init__(self, root: Path, loader: ManifestLoader | None = None):
-        """初始化注册中心。"""
+    def __init__(
+        self,
+        root: Path,
+        loader: ManifestLoader | None = None,
+        *,
+        definition_repo: AgentDefinitionRepository | None = None,
+        deployment_repo: AgentDeploymentRepository | None = None,
+        semantic_router: SemanticRouter | None = None,
+    ):
         self.root = root
         self.loader = loader or ManifestLoader()
-        self._cache: dict[str, AgentSpec] = {}
-        self._deployments: dict[str, AgentDeployment] = {}
+        self.semantic_router = semantic_router
 
-    def discover(self) -> dict[str, AgentSpec]:
-        """扫描 root 目录下的 manifest.yaml，发现并注册所有 Agent。"""
-        self._cache.clear()
+        # We fallback to in-memory repos if none provided
+        if definition_repo is None or deployment_repo is None:
+            from agent_platform.persistence.memory import (
+                InMemoryAgentDefinitionRepository,
+                InMemoryAgentDeploymentRepository,
+            )
+            self._definition_repo = definition_repo or InMemoryAgentDefinitionRepository()
+            self._deployment_repo = deployment_repo or InMemoryAgentDeploymentRepository()
+        else:
+            self._definition_repo = definition_repo
+            self._deployment_repo = deployment_repo
+
+        # We still keep a small cache to map agent_id to its local package_path
+        # But all deployment/routing state goes to DB.
+        self._local_specs: dict[str, AgentSpec] = {}
+
+    async def discover(self) -> dict[str, AgentSpec]:
+        """扫描 root 目录下的 manifest.yaml，发现并注册所有 Agent（写 DB）。"""
+        self._local_specs.clear()
         if not self.root.exists():
-            return self._cache
+            return self._local_specs
 
         for manifest_path in sorted(self.root.glob("*/manifest.yaml")):
             spec = self.loader.load_file(manifest_path)
-            self.register(spec)
-        return dict(self._cache)
+            await self.register(spec)
+        return dict(self._local_specs)
 
-    def register(self, spec: AgentSpec) -> AgentSpec:
+    async def persist_definition(self, spec: AgentSpec) -> None:
+        """将 Agent 定义写入持久化存储（如果配置了 repo）。"""
+        from agent_platform.domain.models import AgentDefinition, AgentDefinitionStatus
+        definition = AgentDefinition(
+            agent_id=spec.agent_id,
+            version=spec.version,
+            status=AgentDefinitionStatus.ACTIVE,
+            manifest=spec.manifest,
+        )
+        await self._definition_repo.save(definition)
+
+    async def register(self, spec: AgentSpec) -> AgentSpec:
         """注册一个 AgentSpec 并创建对应的 dev 部署记录。"""
-        self._cache[spec.agent_id] = spec
-        self.deploy(
+        self._local_specs[spec.agent_id] = spec
+        await self.persist_definition(spec)
+        await self.deploy(
             agent_id=spec.agent_id,
             version=spec.version,
             channel="dev",
             status=AgentDeploymentStatus.REGISTERED,
         )
+        self._load_routing_rules(spec)
         return spec
 
-    def list_agents(self) -> list[AgentSpec]:
+    def _load_routing_rules(self, spec: AgentSpec) -> None:
+        """Extract manifest routing rules and register them with the SemanticRouter."""
+        if not self.semantic_router:
+            return
+        for manifest_rule in spec.manifest.routing.routing_rules:
+            rule = SemanticRule(
+                agent_id=spec.agent_id,
+                keywords=manifest_rule.keywords,
+                patterns=manifest_rule.patterns,
+                description=manifest_rule.description,
+            )
+            self.semantic_router.add_rule(rule)
+            logger.info(
+                "loaded routing rule for %s: %s",
+                spec.agent_id,
+                manifest_rule.description or "(unnamed)",
+            )
+
+    async def list_agents(self) -> list[AgentSpec]:
         """列出所有已注册的 Agent，必要时自动触发发现。"""
-        if not self._cache:
-            self.discover()
-        return list(self._cache.values())
+        if not self._local_specs:
+            await self.discover()
+        # Querying DB to sync is an option, but for now just return discovery results.
+        return list(self._local_specs.values())
 
-    def get(self, agent_id: str) -> AgentSpec:
+    async def get(self, agent_id: str) -> AgentSpec:
         """根据 agent_id 获取 AgentSpec，未找到时抛出 AgentNotFoundError。"""
-        if not self._cache:
-            self.discover()
-        try:
-            return self._cache[agent_id]
-        except KeyError as exc:
-            raise AgentNotFoundError(f"agent not found: {agent_id}") from exc
+        if not self._local_specs:
+            await self.discover()
 
-    def deploy(
+        spec = self._local_specs.get(agent_id)
+        if spec is None:
+            # Maybe it is in DB?
+            db_def = await self._definition_repo.get_latest(agent_id)
+            if db_def:
+                # Reconstruct spec using default path when the local cache misses.
+                spec = AgentSpec(manifest=db_def.manifest, package_path=self.root / agent_id)
+                self._local_specs[agent_id] = spec
+                return spec
+            raise AgentNotFoundError(f"agent not found: {agent_id}")
+        return spec
+
+    async def deploy(
         self,
         *,
         agent_id: str,
@@ -67,9 +142,9 @@ class AgentRegistry:
         tenant_id: str | None = None,
         traffic_percent: int = 100,
     ) -> AgentDeployment:
-        """创建或更新一条部署记录。"""
-        if agent_id not in self._cache:
-            self.get(agent_id)
+        """创建或更新一条部署记录（直接入库）。"""
+        # Ensure agent exists in memory
+        await self.get(agent_id)
 
         deployment_id = self._deployment_id(agent_id, channel, tenant_id)
         if status == AgentDeploymentStatus.PROD_CANARY:
@@ -84,16 +159,20 @@ class AgentRegistry:
             tenant_id=tenant_id,
             traffic_percent=traffic_percent,
         )
-        self._deployments[deployment.deployment_id] = deployment
+        await self.persist_deployment(deployment)
         return deployment
 
-    def list_deployments(self) -> list[AgentDeployment]:
-        """列出所有部署记录。"""
-        if not self._cache:
-            self.discover()
-        return list(self._deployments.values())
+    async def persist_deployment(self, deployment: AgentDeployment) -> None:
+        """将部署记录写入持久化存储。"""
+        await self._deployment_repo.save(deployment)
 
-    def resolve_deployment(
+    async def list_deployments(self) -> list[AgentDeployment]:
+        """列出所有部署记录（来自 DB）。"""
+        if not self._local_specs:
+            await self.discover()
+        return await self._deployment_repo.list_all()
+
+    async def resolve_deployment(
         self,
         *,
         agent_id: str,
@@ -101,15 +180,26 @@ class AgentRegistry:
         tenant_id: str | None = None,
     ) -> AgentDeployment | None:
         """解析指定 Agent 在给定 channel 的部署，优先匹配租户级别。"""
-        if not self._cache:
-            self.discover()
+        if not self._local_specs:
+            await self.discover()
 
-        tenant_deployment = self._deployments.get(self._deployment_id(agent_id, channel, tenant_id))
-        if tenant_deployment:
-            return tenant_deployment
-        return self._deployments.get(self._deployment_id(agent_id, channel, None))
+        # Try tenant specific deployment
+        if tenant_id:
+            dep = await self._deployment_repo.resolve(
+                agent_id=agent_id,
+                channel=channel,
+                tenant_id=tenant_id,
+            )
+            if dep:
+                return dep
+        # Fallback to general deployment
+        return await self._deployment_repo.resolve(
+            agent_id=agent_id,
+            channel=channel,
+            tenant_id=None,
+        )
 
-    def resolve_canary_deployment(
+    async def resolve_canary_deployment(
         self,
         *,
         agent_id: str,
@@ -117,15 +207,18 @@ class AgentRegistry:
         tenant_id: str | None = None,
     ) -> AgentDeployment | None:
         """解析指定 Agent 的金丝雀部署。"""
-        if not self._cache:
-            self.discover()
+        if not self._local_specs:
+            await self.discover()
 
-        tenant_deployment = self._deployments.get(
-            self._deployment_id(agent_id, channel, tenant_id, slot="canary")
-        )
-        if tenant_deployment:
-            return tenant_deployment
-        return self._deployments.get(self._deployment_id(agent_id, channel, None, slot="canary"))
+        deployment_id = self._deployment_id(agent_id, channel, tenant_id, slot="canary")
+        dep = await self._deployment_repo.get(deployment_id)
+        if dep:
+            return dep
+
+        if tenant_id:
+            fallback_id = self._deployment_id(agent_id, channel, None, slot="canary")
+            return await self._deployment_repo.get(fallback_id)
+        return None
 
     @staticmethod
     def _deployment_id(

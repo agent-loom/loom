@@ -18,7 +18,9 @@ from agent_platform.domain.models import (
     RuntimeRequest,
     RuntimeResponse,
 )
+from agent_platform.observability.instrumentation import instrument_agent_run
 from agent_platform.observability.sanitizer import TraceSanitizer
+from agent_platform.observability.tracing import get_tracer
 from agent_platform.persistence.memory import (
     InMemoryAgentRunRepository,
     InMemoryAgentSessionRepository,
@@ -34,6 +36,7 @@ from agent_platform.runtime.native import NativeRuntimeBackend
 from agent_platform.tools.executor import ToolExecutor
 
 logger = logging.getLogger(__name__)
+tracer = get_tracer("agent_platform.runtime")
 
 
 class RuntimeManager:
@@ -68,6 +71,7 @@ class RuntimeManager:
         self.policy_engine = policy_engine
         self.hook_registry = hook_registry
         self.metrics_collector = metrics_collector
+        self.knowledge_service = knowledge_service
 
     def register(self, backend) -> None:
         """注册一个新的运行时后端。"""
@@ -86,148 +90,174 @@ class RuntimeManager:
         run_id = f"run_{uuid4().hex}"
         started = perf_counter()
         backend_name = request.agent_spec.manifest.runtime.backend
-        try:
-            backend = self._backends[backend_name]
-        except KeyError as exc:
-            raise ValueError(f"runtime backend not registered: {backend_name}") from exc
+        agent_id = request.agent_spec.agent_id
 
-        # 策略检查：校验输入 (check_input)
-        if self.policy_engine:
-            policy_set = self.policy_engine.load_policies(request.agent_spec)
-            violations = self.policy_engine.check_input(
-                request.request.input.query, policy_set
+        with tracer.start_as_current_span("agent_run") as span:
+            instrument_agent_run(span, agent_id, run_id, backend_name)
+
+            try:
+                backend = self._backends[backend_name]
+            except KeyError as exc:
+                span.record_exception(exc)
+                span.set_status("ERROR", str(exc))
+                raise ValueError(f"runtime backend not registered: {backend_name}") from exc
+
+            # 策略检查：校验输入 (check_input)
+            span.add_event("policy_check")
+            if self.policy_engine:
+                policy_set = self.policy_engine.load_policies(request.agent_spec)
+                violations = self.policy_engine.check_input(
+                    request.request.input.query, policy_set
+                )
+                if violations:
+                    error = AgentError(
+                        code="INPUT_POLICY_VIOLATION",
+                        message="; ".join(v.message for v in violations),
+                        retryable=False,
+                    )
+                    latency_ms = self._latency_ms(started)
+                    return await self._build_error_response(
+                        request, run_id, backend_name, latency_ms, error,
+                    )
+
+            # 钩子触发：路由后触发 (on_route)
+            if self.hook_registry:
+                try:
+                    await self.hook_registry.emit(
+                        "on_route", {"backend": backend_name, "run_id": run_id},
+                    )
+                except Exception:
+                    logger.exception("hook on_route failed")
+
+            # 钩子触发：运行前触发 (pre_run)
+            if self.hook_registry:
+                try:
+                    await self.hook_registry.emit("pre_run", {"request": request, "run_id": run_id})
+                except Exception:
+                    logger.exception("hook pre_run failed")
+
+            span.add_event("knowledge_enrichment")
+            await self._enrich_knowledge(request)
+
+            session = await self._load_session(request)
+            if session:
+                session.add_message("user", request.request.input.query)
+
+            # Build runtime context using ContextBuilder
+            from agent_platform.runtime.context_builder import ContextBuilder
+            builder = ContextBuilder()
+            runtime_context = builder.build(
+                spec=request.agent_spec,
+                request=request.request,
+                session_history=session.history if session else [],
+                knowledge_results=request.knowledge_context,
             )
-            if violations:
+            # Store on the request so backends can access it
+            request.runtime_context = runtime_context
+
+            timeout_ms = request.agent_spec.manifest.runtime.timeout_ms
+            timeout_sec = timeout_ms / 1000.0
+
+            span.add_event("backend_run")
+            try:
+                response = await asyncio.wait_for(backend.run(request), timeout=timeout_sec)
+            except TimeoutError:
+                latency_ms = self._latency_ms(started)
                 error = AgentError(
-                    code="INPUT_POLICY_VIOLATION",
-                    message="; ".join(v.message for v in violations),
+                    code="RUNTIME_TIMEOUT",
+                    message=f"agent runtime timed out after {timeout_ms}ms",
+                    retryable=True,
+                )
+                span.set_status("ERROR", error.message)
+                if self.hook_registry:
+                    try:
+                        await self.hook_registry.emit("on_error", {"error": error, "run_id": run_id})
+                    except Exception:
+                        logger.exception("hook on_error failed")
+                if self.metrics_collector:
+                    try:
+                        self.metrics_collector.record_request(request.agent_spec.agent_id, "failed")
+                    except Exception:
+                        logger.exception("metrics record_request failed")
+                return await self._build_error_response(
+                    request, run_id, backend_name, latency_ms, error,
+                )
+            except Exception as exc:
+                latency_ms = self._latency_ms(started)
+                error = AgentError(
+                    code="RUNTIME_ERROR",
+                    message=str(exc),
                     retryable=False,
                 )
-                latency_ms = self._latency_ms(started)
+                span.record_exception(exc)
+                span.set_status("ERROR", str(exc))
+                if self.hook_registry:
+                    try:
+                        await self.hook_registry.emit("on_error", {"error": error, "run_id": run_id})
+                    except Exception:
+                        logger.exception("hook on_error failed")
+                if self.metrics_collector:
+                    try:
+                        self.metrics_collector.record_request(request.agent_spec.agent_id, "failed")
+                    except Exception:
+                        logger.exception("metrics record_request failed")
                 return await self._build_error_response(
                     request, run_id, backend_name, latency_ms, error,
                 )
 
-        # 钩子触发：路由后触发 (on_route)
-        if self.hook_registry:
-            try:
-                await self.hook_registry.emit(
-                    "on_route", {"backend": backend_name, "run_id": run_id},
+            latency_ms = self._latency_ms(started)
+            trace = response.response.trace or ResponseTrace()
+            trace.run_id = trace.run_id or run_id
+            trace.route_reason = trace.route_reason or request.route_reason
+            if trace.traffic_bucket is None:
+                trace.traffic_bucket = request.traffic_bucket
+            trace.latency_ms = latency_ms
+            response.response.trace = trace
+
+            # 策略检查：校验输出 (check_output)
+            if self.policy_engine:
+                policy_set = self.policy_engine.load_policies(request.agent_spec)
+                output_violations = self.policy_engine.check_output(
+                    response.response.output.text.display, policy_set
                 )
-            except Exception:
-                logger.exception("hook on_route failed")
+                if output_violations:
+                    logger.warning("output policy violations: %s", output_violations)
 
-        # 钩子触发：运行前触发 (pre_run)
-        if self.hook_registry:
-            try:
-                await self.hook_registry.emit("pre_run", {"request": request, "run_id": run_id})
-            except Exception:
-                logger.exception("hook pre_run failed")
+            if session:
+                display = response.response.output.text.display
+                session.add_message("assistant", display)
+                await self.session_store.save(session)
+                if self.metrics_collector:
+                    try:
+                        sessions = await self.session_store.list_sessions()
+                        self.metrics_collector.set_active_sessions(len(sessions))
+                    except Exception:
+                        logger.exception("metrics set_active_sessions failed")
 
-        session = await self._load_session(request)
-        if session:
-            session.add_message("user", request.request.input.query)
-
-        timeout_ms = request.agent_spec.manifest.runtime.timeout_ms
-        timeout_sec = timeout_ms / 1000.0
-
-        try:
-            response = await asyncio.wait_for(backend.run(request), timeout=timeout_sec)
-        except TimeoutError:
-            latency_ms = self._latency_ms(started)
-            error = AgentError(
-                code="RUNTIME_TIMEOUT",
-                message=f"agent runtime timed out after {timeout_ms}ms",
-                retryable=True,
-            )
+            # 钩子触发：运行后触发 (post_run)
             if self.hook_registry:
                 try:
-                    await self.hook_registry.emit("on_error", {"error": error, "run_id": run_id})
+                    await self.hook_registry.emit("post_run", {"response": response, "run_id": run_id})
                 except Exception:
-                    logger.exception("hook on_error failed")
+                    logger.exception("hook post_run failed")
+
+            # 指标收集：记录成功请求
             if self.metrics_collector:
                 try:
-                    self.metrics_collector.record_request(request.agent_spec.agent_id, "failed")
+                    self.metrics_collector.record_request(agent_id, "success")
+                    self.metrics_collector.record_duration(agent_id, latency_ms / 1000.0)
                 except Exception:
-                    logger.exception("metrics record_request failed")
-            return await self._build_error_response(
-                request, run_id, backend_name, latency_ms, error,
+                    logger.exception("metrics recording failed")
+
+            await self._record_run(
+                request=request,
+                run_id=trace.run_id,
+                backend_name=backend_name,
+                status=AgentRunStatus.SUCCEEDED,
+                latency_ms=latency_ms,
+                response=response.response,
             )
-        except Exception as exc:
-            latency_ms = self._latency_ms(started)
-            error = AgentError(
-                code="RUNTIME_ERROR",
-                message=str(exc),
-                retryable=False,
-            )
-            if self.hook_registry:
-                try:
-                    await self.hook_registry.emit("on_error", {"error": error, "run_id": run_id})
-                except Exception:
-                    logger.exception("hook on_error failed")
-            if self.metrics_collector:
-                try:
-                    self.metrics_collector.record_request(request.agent_spec.agent_id, "failed")
-                except Exception:
-                    logger.exception("metrics record_request failed")
-            return await self._build_error_response(
-                request, run_id, backend_name, latency_ms, error,
-            )
-
-        latency_ms = self._latency_ms(started)
-        trace = response.response.trace or ResponseTrace()
-        trace.run_id = trace.run_id or run_id
-        trace.route_reason = trace.route_reason or request.route_reason
-        if trace.traffic_bucket is None:
-            trace.traffic_bucket = request.traffic_bucket
-        trace.latency_ms = latency_ms
-        response.response.trace = trace
-
-        # 策略检查：校验输出 (check_output)
-        if self.policy_engine:
-            policy_set = self.policy_engine.load_policies(request.agent_spec)
-            output_violations = self.policy_engine.check_output(
-                response.response.output.text.display, policy_set
-            )
-            if output_violations:
-                logger.warning("output policy violations: %s", output_violations)
-
-        if session:
-            display = response.response.output.text.display
-            session.add_message("assistant", display)
-            await self.session_store.save(session)
-            if self.metrics_collector:
-                try:
-                    sessions = await self.session_store.list_sessions()
-                    self.metrics_collector.set_active_sessions(len(sessions))
-                except Exception:
-                    logger.exception("metrics set_active_sessions failed")
-
-        # 钩子触发：运行后触发 (post_run)
-        if self.hook_registry:
-            try:
-                await self.hook_registry.emit("post_run", {"response": response, "run_id": run_id})
-            except Exception:
-                logger.exception("hook post_run failed")
-
-        # 指标收集：记录成功请求
-        if self.metrics_collector:
-            try:
-                agent_id = request.agent_spec.agent_id
-                self.metrics_collector.record_request(agent_id, "success")
-                self.metrics_collector.record_duration(agent_id, latency_ms / 1000.0)
-            except Exception:
-                logger.exception("metrics recording failed")
-
-        await self._record_run(
-            request=request,
-            run_id=trace.run_id,
-            backend_name=backend_name,
-            status=AgentRunStatus.SUCCEEDED,
-            latency_ms=latency_ms,
-            response=response.response,
-        )
-        return response
+            return response
 
     async def _load_session(self, request: RuntimeRequest) -> AgentSession | None:
         """从存储中加载当前请求对应的会话。如果不存在则创建一个新会话。"""
@@ -245,6 +275,23 @@ class RuntimeManager:
                 channel_id=request.request.context.channel.channel_id,
             )
         return session
+
+    async def _enrich_knowledge(self, request: RuntimeRequest) -> None:
+        """Retrieve knowledge snippets and attach them to the request."""
+        sources = request.agent_spec.manifest.knowledge.sources
+        if not sources or not self.knowledge_service:
+            return
+        try:
+            results = await self.knowledge_service.retrieve(
+                query=request.request.input.query,
+                sources=sources,
+            )
+            snippets: list[str] = []
+            for r in results:
+                snippets.extend(r.snippets)
+            request.knowledge_context = snippets
+        except Exception:
+            logger.exception("knowledge retrieval failed")
 
     async def _build_error_response(
         self,

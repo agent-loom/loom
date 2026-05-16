@@ -28,12 +28,20 @@ class ConversationResult:
         tool_traces: list[ToolCallTrace] | None = None,
         model_used: str | None = None,
         total_iterations: int = 0,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        total_tokens: int = 0,
+        estimated_cost_usd: float | None = None,
     ):
         """初始化对话结果。"""
         self.display = display
         self.tool_traces = tool_traces or []
         self.model_used = model_used
         self.total_iterations = total_iterations
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+        self.total_tokens = total_tokens
+        self.estimated_cost_usd = estimated_cost_usd
 
 
 class ConversationEngine:
@@ -75,6 +83,11 @@ class ConversationEngine:
         tool_defs = context.tools if context.tools else None
         all_traces: list[ToolCallTrace] = []
         allowed_tools = spec.manifest.tools.allow
+        
+        cum_prompt_tokens = 0
+        cum_completion_tokens = 0
+        cum_total_tokens = 0
+        cum_cost_usd = 0.0
 
         for iteration in range(max_iterations):
             response = await self.model_gateway.chat(
@@ -85,6 +98,11 @@ class ConversationEngine:
                 max_tokens=model_config.max_tokens,
                 tools=tool_defs,
             )
+            cum_prompt_tokens += response.input_tokens
+            cum_completion_tokens += response.output_tokens
+            cum_total_tokens += response.input_tokens + response.output_tokens
+            if response.estimated_cost_usd:
+                cum_cost_usd += response.estimated_cost_usd
 
             if not response.tool_calls:
                 return ConversationResult(
@@ -92,6 +110,10 @@ class ConversationEngine:
                     tool_traces=all_traces,
                     model_used=response.model,
                     total_iterations=iteration + 1,
+                    prompt_tokens=cum_prompt_tokens,
+                    completion_tokens=cum_completion_tokens,
+                    total_tokens=cum_total_tokens,
+                    estimated_cost_usd=cum_cost_usd,
                 )
 
             for tc in response.tool_calls:
@@ -131,4 +153,8 @@ class ConversationEngine:
             tool_traces=all_traces,
             model_used=fallback_response.model,
             total_iterations=max_iterations,
+            prompt_tokens=fallback_response.input_tokens,
+            completion_tokens=fallback_response.output_tokens,
+            total_tokens=fallback_response.input_tokens + fallback_response.output_tokens,
+            estimated_cost_usd=fallback_response.estimated_cost_usd,
         )

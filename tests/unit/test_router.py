@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from agent_platform.config import Settings
 from agent_platform.domain.models import (
     AgentDeploymentStatus,
@@ -13,19 +15,21 @@ from agent_platform.router import AgentRouter
 from agent_platform.router_semantic import SemanticRouter, SemanticRule
 
 
-def test_router_uses_explicit_agent_id():
+@pytest.mark.asyncio
+async def test_router_uses_explicit_agent_id():
     registry = AgentRegistry(Path("agents"))
     router = AgentRouter(registry, Settings(default_agent_id="myj"))
     request = AgentRequest(agent_id="myj", input=AgentInput(query="hello"))
 
-    route = router.route(request)
+    route = await router.route(request)
 
     assert route.agent_spec.agent_id == "myj"
     assert route.reason == "agent_id"
     assert route.deployment_id == "dep_myj_dev_default"
 
 
-def test_router_uses_retailer_id():
+@pytest.mark.asyncio
+async def test_router_uses_retailer_id():
     registry = AgentRegistry(Path("agents"))
     router = AgentRouter(registry, Settings(default_agent_id="myj"))
     request = AgentRequest(
@@ -33,24 +37,25 @@ def test_router_uses_retailer_id():
         input=AgentInput(query="hello"),
     )
 
-    route = router.route(request)
+    route = await router.route(request)
 
     assert route.agent_spec.agent_id == "myj"
     assert route.reason == "tenant.org_id"
     assert route.deployment_id == "dep_myj_dev_default"
 
 
-def test_router_canary_miss_falls_back_to_stable_prod(monkeypatch):
+@pytest.mark.asyncio
+async def test_router_canary_miss_falls_back_to_stable_prod(monkeypatch):
     registry = AgentRegistry(Path("agents"))
-    registry.discover()
-    registry.deploy(
+    await registry.discover()
+    await registry.deploy(
         agent_id="myj",
         version="0.1.0",
         channel="prod",
         status=AgentDeploymentStatus.PROD,
         traffic_percent=100,
     )
-    registry.deploy(
+    await registry.deploy(
         agent_id="myj",
         version="0.1.0",
         channel="prod",
@@ -66,22 +71,23 @@ def test_router_canary_miss_falls_back_to_stable_prod(monkeypatch):
         options={"runtime_profile": "prod"},
     )
 
-    route = router.route(request)
+    route = await router.route(request)
 
     assert route.deployment_id == "dep_myj_prod_default"
     assert route.traffic_bucket == 90
 
 
-def test_router_canary_hit_uses_canary_deployment(monkeypatch):
+@pytest.mark.asyncio
+async def test_router_canary_hit_uses_canary_deployment(monkeypatch):
     registry = AgentRegistry(Path("agents"))
-    registry.discover()
-    registry.deploy(
+    await registry.discover()
+    await registry.deploy(
         agent_id="myj",
         version="0.1.0",
         channel="prod",
         status=AgentDeploymentStatus.PROD,
     )
-    registry.deploy(
+    await registry.deploy(
         agent_id="myj",
         version="0.1.0",
         channel="prod",
@@ -97,13 +103,14 @@ def test_router_canary_hit_uses_canary_deployment(monkeypatch):
         options={"runtime_profile": "prod"},
     )
 
-    route = router.route(request)
+    route = await router.route(request)
 
     assert route.deployment_id == "dep_myj_prod_canary_default"
     assert route.traffic_bucket == 3
 
 
-def test_router_uses_semantic_route_before_default_agent():
+@pytest.mark.asyncio
+async def test_router_uses_semantic_route_before_default_agent():
     registry = AgentRegistry(Path("agents"))
     semantic_router = SemanticRouter(confidence_threshold=0.5)
     semantic_router.add_rule(
@@ -120,7 +127,7 @@ def test_router_uses_semantic_route_before_default_agent():
     )
     request = AgentRequest(input=AgentInput(query="please echo this"))
 
-    route = router.route(request)
+    route = await router.route(request)
 
     assert route.agent_spec.agent_id == "echo"
     assert route.reason == "semantic:echo fallback"

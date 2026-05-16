@@ -65,7 +65,7 @@ class AgentWebSocketManager:
                 request.session_id = ws_id
 
             try:
-                route = self.router.route(request)
+                route = await self.router.route(request)
             except AgentNotFoundError as exc:
                 return {
                     "type": "error",
