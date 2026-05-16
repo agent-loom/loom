@@ -52,10 +52,13 @@ class DataSynchronization:
                 except Exception as e:
                     logger.warning("Failed to read %s: %s", filepath, e)
 
-        # WeaviateKnowledgeBackend implements sync, but currently just logs it.
-        # We'd pass the parsed documents explicitly later or adapt the backend signature.
-        # For now, simulate by calling backend.sync(source).
         logger.info("Found %d documents for %s", len(documents), source.collection)
-        result = await self.backend.sync(source)
+
+        doc_dicts = [d.model_dump() for d in documents]
+        try:
+            result = await self.backend.sync(source, documents=doc_dicts)
+        except TypeError:
+            result = await self.backend.sync(source)
+
         result["processed_documents"] = len(documents)
         return result

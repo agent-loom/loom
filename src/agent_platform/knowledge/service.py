@@ -63,14 +63,29 @@ class StubKnowledgeBackend:
 
 
 class WeaviateKnowledgeBackend:
-    """Weaviate vector store backend — real implementation placeholder."""
+    """Weaviate vector store backend via httpx REST/GraphQL API."""
 
     name = "weaviate"
 
-    def __init__(self, url: str | None = None, api_key: str | None = None):
-        """初始化 Weaviate 后端连接。"""
-        self.url = url or "http://localhost:8080"
+    def __init__(
+        self,
+        url: str | None = None,
+        api_key: str | None = None,
+        *,
+        timeout: float = 30.0,
+    ):
+        import httpx
+
+        self.url = (url or "http://localhost:8080").rstrip("/")
         self.api_key = api_key
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        self._client = httpx.AsyncClient(
+            base_url=self.url,
+            headers=headers,
+            timeout=timeout,
+        )
         logger.info("WeaviateKnowledgeBackend initialized (url=%s)", self.url)
 
     async def retrieve(
@@ -81,26 +96,131 @@ class WeaviateKnowledgeBackend:
         top_k: int = 5,
         filters: dict[str, Any] | None = None,
     ) -> list[KnowledgeResult]:
-        logger.info(
-            "Weaviate retrieve: collection=%s query=%s top_k=%d",
-            source.collection,
-            query[:50],
-            top_k,
-        )
+        collection = source.collection or source.id
         merged_filters = {**source.filters, **(filters or {})}
-        # Real implementation would call weaviate client here
-        return [
-            KnowledgeResult(
-                source_id=source.id,
-                snippets=[f"[Weaviate] Result from {source.collection} for '{query}'"],
-                metadata={"collection": source.collection, "filters": merged_filters},
-                score=0.8,
-            )
-        ]
 
-    async def sync(self, source: ManifestKnowledgeSource) -> dict[str, Any]:
-        logger.info("Weaviate sync: collection=%s", source.collection)
-        return {"status": "sync_scheduled", "source_id": source.id, "collection": source.collection}
+        where_clause = ""
+        if merged_filters:
+            operands = []
+            for key, val in merged_filters.items():
+                operands.append(
+                    f'{{ path: ["{key}"], operator: Equal, '
+                    f'valueText: "{val}" }}'
+                )
+            if len(operands) == 1:
+                where_clause = f"where: {operands[0]}"
+            else:
+                joined = ", ".join(operands)
+                where_clause = (
+                    f"where: {{ operator: And, operands: [{joined}] }}"
+                )
+
+        graphql_query = {
+            "query": "{"
+            f"  Get {{"
+            f"    {collection}("
+            f'      nearText: {{ concepts: ["{query}"] }}'
+            f"      limit: {top_k}"
+            f"      {where_clause}"
+            f"    ) {{"
+            f"      _additional {{ id distance }}"
+            f"      content"
+            f"    }}"
+            f"  }}"
+            f"}}"
+        }
+
+        try:
+            resp = await self._client.post("/v1/graphql", json=graphql_query)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception:
+            logger.exception(
+                "Weaviate retrieve failed: collection=%s", collection,
+            )
+            return []
+
+        objects = (
+            data.get("data", {}).get("Get", {}).get(collection, []) or []
+        )
+        results: list[KnowledgeResult] = []
+        for obj in objects:
+            additional = obj.get("_additional", {})
+            distance = additional.get("distance", 1.0)
+            score = max(0.0, 1.0 - float(distance))
+            content = obj.get("content", "")
+            if content:
+                results.append(
+                    KnowledgeResult(
+                        source_id=source.id,
+                        snippets=[content],
+                        metadata={
+                            "collection": collection,
+                            "weaviate_id": additional.get("id", ""),
+                            "distance": distance,
+                        },
+                        score=score,
+                    )
+                )
+        return results
+
+    async def sync(
+        self,
+        source: ManifestKnowledgeSource,
+        documents: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        collection = source.collection or source.id
+
+        if not documents:
+            logger.info("Weaviate sync: no documents for %s", collection)
+            return {
+                "status": "no_documents",
+                "source_id": source.id,
+                "collection": collection,
+            }
+
+        batch_objects = []
+        for doc in documents:
+            batch_objects.append({
+                "class": collection,
+                "properties": {
+                    "content": doc.get("content", ""),
+                    "doc_id": doc.get("doc_id", ""),
+                    **doc.get("metadata", {}),
+                },
+            })
+
+        try:
+            resp = await self._client.post(
+                "/v1/batch/objects",
+                json={"objects": batch_objects},
+            )
+            resp.raise_for_status()
+            result_data = resp.json()
+            return {
+                "status": "synced",
+                "source_id": source.id,
+                "collection": collection,
+                "objects_sent": len(batch_objects),
+                "response_count": len(result_data) if isinstance(result_data, list) else 1,
+            }
+        except Exception:
+            logger.exception("Weaviate batch sync failed: collection=%s", collection)
+            return {
+                "status": "error",
+                "source_id": source.id,
+                "collection": collection,
+            }
+
+    async def health_check(self) -> bool:
+        try:
+            resp = await self._client.get("/v1/.well-known/ready")
+            return resp.status_code == 200
+        except Exception:
+            return False
+
+    async def close(self) -> None:
+        await self._client.aclose()
 
 
 class KnowledgeService:
