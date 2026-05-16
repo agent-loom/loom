@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections import deque
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 MAX_PENDING_MESSAGES = 32
 MAX_MESSAGE_SIZE = 65536
+REPLAY_BUFFER_SIZE = 50
 
 
 class AgentWebSocketManager:
@@ -39,6 +41,8 @@ class AgentWebSocketManager:
         self._max_connections = max_connections
         self._connections: dict[str, WebSocket] = {}
         self._pending: dict[str, int] = {}
+        self._replay_buffers: dict[str, deque] = {}
+        self._last_seq: dict[str, int] = {}
 
     async def handle(self, websocket: WebSocket, session_id: str | None = None) -> None:
         if len(self._connections) >= self._max_connections:
@@ -53,10 +57,17 @@ class AgentWebSocketManager:
         ws_id = session_id or f"ws_{id(websocket)}"
         self._connections[ws_id] = websocket
         self._pending[ws_id] = 0
+        if ws_id not in self._replay_buffers:
+            self._replay_buffers[ws_id] = deque(maxlen=REPLAY_BUFFER_SIZE)
+            self._last_seq[ws_id] = 0
         logger.info(
             "WebSocket connected: %s (auth=%s, total=%d)",
             ws_id, auth_identity.get("subject", "unknown"), len(self._connections),
         )
+
+        last_seen_seq = websocket.query_params.get("last_seq")
+        if last_seen_seq is not None:
+            await self._replay_missed(websocket, ws_id, int(last_seen_seq))
 
         try:
             while True:
@@ -93,6 +104,11 @@ class AgentWebSocketManager:
                 try:
                     data = json.loads(raw)
                     response = await self._process_message(data, ws_id, auth_identity)
+                    self._last_seq[ws_id] = self._last_seq.get(ws_id, 0) + 1
+                    response["seq"] = self._last_seq[ws_id]
+                    self._replay_buffers.setdefault(
+                        ws_id, deque(maxlen=REPLAY_BUFFER_SIZE),
+                    ).append(response)
                     await websocket.send_json(response)
                 except Exception as exc:
                     await websocket.send_json({
@@ -202,3 +218,17 @@ class AgentWebSocketManager:
                 pass
         self._connections.clear()
         self._pending.clear()
+
+    async def _replay_missed(
+        self, websocket: WebSocket, ws_id: str, last_seen_seq: int,
+    ) -> None:
+        buf = self._replay_buffers.get(ws_id)
+        if not buf:
+            return
+        missed = [msg for msg in buf if msg.get("seq", 0) > last_seen_seq]
+        if missed:
+            await websocket.send_json({
+                "type": "replay",
+                "messages": missed,
+                "count": len(missed),
+            })

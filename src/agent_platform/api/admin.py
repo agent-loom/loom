@@ -273,3 +273,58 @@ async def revoke_api_key(
     if not revoked:
         raise HTTPException(status_code=404, detail=f"key not found: {key_id}")
     return {"status": "revoked", "key_id": key_id}
+
+
+# ---------------------------------------------------------------------------
+# Eval Runs
+# ---------------------------------------------------------------------------
+
+
+@router.get("/evals")
+async def list_eval_runs(
+    request: Request,
+    agent_id: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """List eval runs with optional agent_id filter."""
+    deps = _deps(request)
+    if deps.eval_repo is None:
+        raise HTTPException(status_code=501, detail="eval repo not configured")
+    return await deps.eval_repo.list_runs(agent_id=agent_id, limit=limit)
+
+
+@router.get("/evals/{agent_id}/latest")
+async def get_latest_eval(
+    agent_id: str,
+    request: Request,
+) -> dict[str, Any]:
+    """Get the most recent eval run for an agent."""
+    deps = _deps(request)
+    if deps.eval_repo is None:
+        raise HTTPException(status_code=501, detail="eval repo not configured")
+    result = await deps.eval_repo.get_latest(agent_id)
+    if result is None:
+        raise HTTPException(
+            status_code=404, detail=f"no eval runs found for {agent_id}",
+        )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Deployment Audit
+# ---------------------------------------------------------------------------
+
+
+@router.get("/audit")
+async def list_audit_events(
+    request: Request,
+    agent_id: str | None = None,
+    channel: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """List deployment audit events."""
+    deps = _deps(request)
+    events = await deps.audit_log.list_events(
+        agent_id=agent_id, channel=channel, limit=limit,
+    )
+    return [e.model_dump(mode="json") for e in events]

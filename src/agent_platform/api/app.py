@@ -498,6 +498,7 @@ def create_app() -> FastAPI:
         tool_registry=tool_registry,
         metrics=app_metrics,
         key_store=key_store,
+        eval_repo=eval_repo,
     )
     app.include_router(
         admin_router,
@@ -727,6 +728,67 @@ def create_app() -> FastAPI:
         if session is None:
             raise HTTPException(status_code=404, detail=f"session not found: {session_id}")
         return session.model_dump(mode="json")
+
+    @app.get("/api/v1/agent-packages/{agent_id}/versions/{version}/validate")
+    async def validate_agent_deploy(
+        agent_id: str,
+        version: str,
+        _auth: AuthIdentity = _SCOPE_DEPLOY,
+    ) -> dict:
+        """Pre-deploy validation: checks manifest, backend, and tools."""
+        checks: list[dict] = []
+        try:
+            spec = await registry.get(agent_id)
+        except AgentNotFoundError:
+            return {
+                "valid": False,
+                "checks": [{"name": "agent_exists", "passed": False,
+                             "message": f"agent not found: {agent_id}"}],
+            }
+        checks.append({"name": "agent_exists", "passed": True})
+
+        if spec.version != version:
+            checks.append({
+                "name": "version_match", "passed": False,
+                "message": f"loaded {spec.version}, requested {version}",
+            })
+        else:
+            checks.append({"name": "version_match", "passed": True})
+
+        backend_name = spec.manifest.runtime.backend
+        backend_ok = backend_name in runtime_manager._backends
+        checks.append({
+            "name": "backend_available", "passed": backend_ok,
+            "message": f"backend={backend_name}" + (
+                "" if backend_ok else " not registered"
+            ),
+        })
+
+        allowed_tools = spec.manifest.tools.allow or []
+        missing_tools = []
+        for tool_name in allowed_tools:
+            if not tool_registry.get(tool_name):
+                missing_tools.append(tool_name)
+        checks.append({
+            "name": "tools_registered", "passed": len(missing_tools) == 0,
+            "message": (
+                f"missing: {missing_tools}" if missing_tools
+                else f"{len(allowed_tools)} tools verified"
+            ),
+        })
+
+        eval_suites = spec.manifest.evals.suites
+        suites_ok = len(eval_suites) > 0
+        checks.append({
+            "name": "eval_suites", "passed": suites_ok,
+            "message": (
+                f"{len(eval_suites)} suites configured"
+                if suites_ok else "no eval suites"
+            ),
+        })
+
+        all_passed = all(c["passed"] for c in checks)
+        return {"valid": all_passed, "checks": checks}
 
     @app.post("/api/v1/agent-packages/{agent_id}/versions/{version}/deploy")
     async def deploy_agent(
