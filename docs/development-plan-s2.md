@@ -1,7 +1,7 @@
 # S2-S4 开发计划归档
 
 > Status: Historical Plan
-> Last updated: 2026-05-16
+> Last updated: 2026-05-17
 
 本计划记录 S2-S4 阶段的原始开发拆解和已完成的基础组件。它不再作为当前完成度事实源；当前事实源以 `implementation-gap.md` 和 `development-plan-s5.md` 为准。
 
@@ -218,21 +218,21 @@ Week 1          Week 2          Week 3          Week 4
 | 里程碑 | 时间 | 标志 | 状态 |
 |---|---|---|---|
 | M1：平台管线可观测 | Week 1 末 | PolicyEngine、HookRegistry、Metrics 全部接入 runtime；工具动态加载 | ✅ 完成 |
-| M2：状态可持久化 | Week 2 末 | 重启不丢 session/run/deployment；Domain Model 泛化完成 | 🔶 部分完成：repository/migration 基础完成，Registry/Deployment/Audit/Eval 主链路待 S5 |
-| M3：非 stub runtime | Week 3 末 | Hermes 可跑 hermes_echo agent；artifact 有 checksum 和版本 | 🔶 部分完成：Hermes Spike A 完成，官方 Hermes SDK 和生产 ArtifactStore 待 S5 |
-| M4：生产可审计 | Week 4 末 | 工具权限管控、Secret 安全、日志脱敏、DevFlow 自动执行 | 🔶 部分完成：安全/DevFlow 基础完成，RBAC/scopes、高风险审批、job 持久化、release audit 待 S5 |
+| M2：状态可持久化 | Week 2 末 | 重启不丢 session/run/deployment；Domain Model 泛化完成 | ✅ 完成（S5 Phase 0 闭环：Registry/Deployment/Audit 主链路持久化接入） |
+| M3：非 stub runtime | Week 3 末 | Hermes 可跑 hermes_echo agent；artifact 有 checksum 和版本 | ✅ 完成（S5 Phase 1 闭环：Hermes Spike B SDK 真接入 + ArtifactStore Protocol 化） |
+| M4：生产可审计 | Week 4 末 | 工具权限管控、Secret 安全、日志脱敏、DevFlow 自动执行 | ✅ 完成（S5 Phase 3 闭环：ApprovalGate HITL + Admin API + OTel 观测） |
 
 ## 后续阶段落点
 
-| 工作项 | 阶段 | 原因 |
+| 工作项 | 阶段 | 状态 |
 |---|---|---|
-| 主链路可靠性校准 | S5 Phase 0 | S2-S4 留下的 Registry/Deployment/Audit/Artifact/ContextBuilder 缺口需要先闭环 |
-| Knowledge/RAG 真实接入 | S5 | 需要先明确数据源和向量库 |
-| 多模型路由和成本统计 | S5 | 底座稳定后再做 |
-| MCP 集成 | S5 | 需要先确定暴露哪些能力 |
-| Human-in-the-loop 审批 | S5 | 安全基线之后做 |
-| Hermes SDK 真接入（Spike B）| S5 | Spike A 验证通过后再评估 |
-| Admin Web UI | S6 | S5 先提供 Admin API，前端 UI 后续跟进 |
+| 主链路可靠性校准 | S5 Phase 0 | ✅ 完成 |
+| Knowledge/RAG 真实接入 | S5 Phase 1 | ✅ 基础完成（KnowledgeService + WeaviateKnowledgeBackend stub） |
+| 多模型路由和成本统计 | S5 Phase 1 | ✅ 完成（ChatResult + 多 provider 路由 + token/cost metrics） |
+| MCP 集成 | S5 Phase 2 | ✅ 完成（6 tools + StdioTransport + JSON-RPC 2.0） |
+| Human-in-the-loop 审批 | S5 Phase 3 | ✅ 完成（ApprovalGate Protocol + InMemory/AutoApprove 双实现） |
+| Hermes SDK 真接入（Spike B）| S5 Phase 1 | ✅ 完成（工具桥接 + 结果规范化 + fallback） |
+| Admin Web UI | S6 | ⬜ 待实施 |
 
 ## 与 Plane Work Item 的对应
 

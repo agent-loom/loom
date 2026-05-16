@@ -171,7 +171,9 @@ class RuntimeManager:
                 span.set_status("ERROR", error.message)
                 if self.hook_registry:
                     try:
-                        await self.hook_registry.emit("on_error", {"error": error, "run_id": run_id})
+                        await self.hook_registry.emit(
+                            "on_error", {"error": error, "run_id": run_id},
+                        )
                     except Exception:
                         logger.exception("hook on_error failed")
                 if self.metrics_collector:
@@ -193,7 +195,9 @@ class RuntimeManager:
                 span.set_status("ERROR", str(exc))
                 if self.hook_registry:
                     try:
-                        await self.hook_registry.emit("on_error", {"error": error, "run_id": run_id})
+                        await self.hook_registry.emit(
+                            "on_error", {"error": error, "run_id": run_id},
+                        )
                     except Exception:
                         logger.exception("hook on_error failed")
                 if self.metrics_collector:
@@ -237,7 +241,9 @@ class RuntimeManager:
             # 钩子触发：运行后触发 (post_run)
             if self.hook_registry:
                 try:
-                    await self.hook_registry.emit("post_run", {"response": response, "run_id": run_id})
+                    await self.hook_registry.emit(
+                        "post_run", {"response": response, "run_id": run_id},
+                    )
                 except Exception:
                     logger.exception("hook post_run failed")
 

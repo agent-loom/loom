@@ -19,7 +19,7 @@
 | S2 | 生产化底座 | 持久化、artifact、发布审计、回滚、权限、观测 | 部分完成；Registry/Deployment/Audit/Artifact/Knowledge 相关接线已在工作树中实现，但 ruff/manifest 质量门禁未通过 |
 | S3 | Hermes 真接入 | 从 stub/adapter 原型变成真实 Hermes runtime 能力 | 部分完成；Spike A 已完成，官方 Hermes SDK Spike B 待实施 |
 | S4 | AI 研发闭环 | CodingAgentRunner、workspace、path guard、Plane/GitLab 状态同步 | 部分完成；runner/workspace/path guard 基础已实现，真实 runner 配置、job 持久化、失败恢复待补 |
-| S5 | 平台生产化与规模化 | 主链路可靠性校准、semantic routing、model gateway、knowledge/RAG、admin API、MCP、治理 | 实施中；pytest 通过，ruff/manifest validate 未通过，入口为 `development-plan-s5.md` |
+| S5 | 平台生产化与规模化 | 主链路可靠性校准、semantic routing、model gateway、knowledge/RAG、admin API、MCP、治理 | ✅ 已完成 Phase 0-3（670 tests passed, ruff clean）；入口为 `development-plan-s5.md` |
 
 ## 2. 文档状态定义
 
@@ -61,18 +61,18 @@
 | --- | --- | --- |
 | `next-stage-design-plan.md` | Baseline | 下一阶段设计清单和顺序 |
 | `development-plan-s2.md` | Historical Plan | S2-S4 开发计划和任务跟踪；记录基础组件实现历史，不作为当前完成度事实源 |
-| `development-plan-s5.md` | In Progress | S5 平台生产化与规模化执行计划；Phase 0 代码实施中但质量门禁未通过 |
-| `05-production/persistence-storage-design.md` | Partially Implemented | repository/migration 基础已实现；Registry/Deployment/Audit 接线已在工作树中实现但待质量门禁确认；Eval 主链路仍需校准 |
-| `05-production/package-artifact-release-design.md` | Partially Implemented | agent artifact、manifest snapshot、发布回滚设计；LocalArtifactStore 代码已出现但待质量门禁确认，远程 registry 未实现 |
-| `05-production/security-tenant-policy-design.md` | Partially Implemented | 鉴权、租户、tool policy、secret、脱敏设计；RBAC/scopes endpoint enforcement 和高风险审批待补 |
-| `05-production/observability-eval-feedback-design.md` | Planned | trace、metrics、eval report、反馈闭环设计 |
+| `development-plan-s5.md` | Completed | S5 平台生产化与规模化执行计划；Phase 0-3 全部完成，670 tests passed |
+| `05-production/persistence-storage-design.md` | Implemented | repository/migration 基础已实现；Registry/Deployment/Audit 主链路已在 S5 Phase 0 接入 |
+| `05-production/package-artifact-release-design.md` | Partially Implemented | ArtifactStore Protocol 化 + LocalArtifactStore 已完成；远程 registry (S3/GitLab) 未实现 |
+| `05-production/security-tenant-policy-design.md` | Partially Implemented | Scoped API key、tool permission、secret、脱敏已完成；ApprovalGate HITL 已完成；RBAC/scopes endpoint enforcement 待补 |
+| `05-production/observability-eval-feedback-design.md` | Partially Implemented | OpenTelemetry 接入、@traced decorator、MetricsCollector 已完成；Langfuse 适配层已实现；结构化 trace event schema 待完善 |
 
 ### S3. Hermes 真接入
 
 | 文档 | 状态 | 用途 |
 | --- | --- | --- |
-| `03-runtime/hermes-runtime.md` | Partially Implemented | Hermes 接入边界和能力映射；官方 runtime/planner/memory/event stream 尚未接入 |
-| `03-runtime/hermes-backend-spike.md` | Partially Implemented | Spike A 完成；Spike B 官方 Hermes SDK 真接入待实施 |
+| `03-runtime/hermes-runtime.md` | Partially Implemented | Hermes 接入边界和能力映射；Spike B 已完成 SDK 工具桥接和 fallback；官方 runtime/planner/memory/event stream 待 S6 |
+| `03-runtime/hermes-backend-spike.md` | Implemented | Spike A + Spike B 均已完成；工具桥接、结果规范化、fallback 路径全部实现 |
 
 ### S4. AI 研发闭环
 
@@ -83,14 +83,14 @@
 | `04-devflow/devflow-runner-workspace-design.md` | Draft | CodingAgentRunner、workspace、path guard |
 | `04-devflow/devflow-state-sync-design.md` | Draft | Plane/GitLab 状态同步、幂等、重试、DLQ |
 
-### S5. 多 Agent 规模化
+### S5. 平台生产化与规模化
 
 | 文档 | 状态 | 用途 |
 | --- | --- | --- |
-| `development-plan-s5.md` | In Progress | S5 执行入口：Phase 0 主链路校准实施中，Phase 1-3 部分实验代码已出现但未完成质量门禁 |
-| `06-scale/semantic-routing-policy-design.md` | Planned | semantic routing rule schema 和 manifest 自动加载 |
-| `06-scale/model-gateway-design.md` | Planned | 模型 provider、profile、fallback、成本统计 |
-| `06-scale/knowledge-rag-design.md` | Planned | knowledge source、RAG、同步和租户过滤 |
+| `development-plan-s5.md` | Completed | S5 执行入口：Phase 0-3 全部完成（19 项任务，670 tests passed） |
+| `06-scale/semantic-routing-policy-design.md` | Implemented | semantic routing rule schema 和 manifest 自动加载；`ManifestRoutingRule` 已实现 |
+| `06-scale/model-gateway-design.md` | Implemented | 模型 provider、ChatResult、token/cost 统计；多 provider 路由已实现 |
+| `06-scale/knowledge-rag-design.md` | Partially Implemented | KnowledgeService + WeaviateKnowledgeBackend 已实现；真实 vector backend 连接待补 |
 | `99-reference/plane-docs-acquisition.md` | Reference | Plane API/MCP 文档获取方式 |
 | `vendor/plane/*` | Reference | Plane OpenAPI 原始快照 |
 

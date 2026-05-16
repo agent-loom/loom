@@ -1,8 +1,11 @@
 # 下一阶段技术设计计划
 
-本文档用于承接 `implementation-gap.md` 的结论，把“接下来要补哪些技术设计”拆成可执行的设计文档和决策项。
+> Status: Implemented (S5 完成后校准)
+> Last updated: 2026-05-17
 
-当前判断：现有文档已经覆盖 MVP 和总体方向，但还不足以直接进入生产级重构。下一阶段不应继续扩大功能面，而应先冻结持久化、发布制品、Hermes 真接入、DevFlow Runner、安全治理和观测这几条主干设计。
+本文档用于承接 `implementation-gap.md` 的结论，把”接下来要补哪些技术设计”拆成可执行的设计文档和决策项。
+
+当前状态：S5 Phase 0-3 全部完成后，P0 设计文档对应的核心能力已全部实现。P1 中 semantic routing、observability、model gateway、knowledge/RAG 也已实现基础版本。剩余设计工作集中在 S6 生产深化。
 
 ## 1. 当前文档体系评估
 
@@ -19,22 +22,22 @@
 | Hermes 定位 | `hermes-runtime.md` | 明确不深 fork，作为 RuntimeBackend 能力来源 |
 | 实现差距 | `implementation-gap.md` | 已能指导下一批 P0/P1 工作 |
 
-### 1.2 当前文档的主要不足
+### 1.2 当前文档的主要不足（S5 完成后校准）
 
-| 问题 | 影响 | 建议 |
+| 问题 | 影响 | 状态 |
 | --- | --- | --- |
-| 生产级持久化没有专门设计 | 继续写内存 store 会阻碍多实例、审计和回滚 | 新增 `persistence-storage-design.md` |
-| Agent package artifact 只有概念，没有产物格式 | 无法保证发布、回滚、跨环境版本可复现 | 新增 `package-artifact-release-design.md` |
-| Hermes 文档偏战略，缺少 spike 接口和测试计划 | 容易继续停留在 stub backend | 新增 `hermes-backend-spike.md` |
-| DevFlow 只设计到 task pack，没有 runner/workspace/job | 无法真正启动 Codex/Claude Code 自动开发闭环 | 新增 `devflow-runner-workspace-design.md` |
-| 安全、租户、secret、tool permission 分散在多个文档 | 生产前难以形成统一 enforcement | 新增 `security-tenant-policy-design.md` |
-| 观测、eval、反馈闭环缺少统一数据模型 | 线上质量、灰度、回归无法闭环 | 新增 `observability-eval-feedback-design.md` |
-| SemanticRouter 已接主链路，但规则加载没有契约 | 后续 agent 需要手工注册路由规则 | 新增 `semantic-routing-policy-design.md` |
-| Plane/GitLab 状态同步只有流程建议 | 缺少状态机、幂等、重试、DLQ 设计 | 新增 `devflow-state-sync-design.md` |
+| 生产级持久化没有专门设计 | 继续写内存 store 会阻碍多实例、审计和回滚 | ✅ 已完成：`persistence-storage-design.md` + Repository Protocol/InMemory/SQL 双实现 |
+| Agent package artifact 只有概念，没有产物格式 | 无法保证发布、回滚、跨环境版本可复现 | ✅ 已完成：`package-artifact-release-design.md` + ArtifactStore Protocol + LocalArtifactStore |
+| Hermes 文档偏战略，缺少 spike 接口和测试计划 | 容易继续停留在 stub backend | ✅ 已完成：`hermes-backend-spike.md` + Spike A/B 全部实现 |
+| DevFlow 只设计到 task pack，没有 runner/workspace/job | 无法真正启动 Codex/Claude Code 自动开发闭环 | ✅ 已完成：`devflow-runner-workspace-design.md` + Runner/Workspace/PathGuard 实现 |
+| 安全、租户、secret、tool permission 分散在多个文档 | 生产前难以形成统一 enforcement | ✅ 已完成：`security-tenant-policy-design.md` + Scoped Key/Permission/Secret/Sanitizer/ApprovalGate |
+| 观测、eval、反馈闭环缺少统一数据模型 | 线上质量、灰度、回归无法闭环 | 🔶 部分完成：OTel + Langfuse 适配 + MetricsCollector；结构化 trace event schema 待完善 |
+| SemanticRouter 已接主链路，但规则加载没有契约 | 后续 agent 需要手工注册路由规则 | ✅ 已完成：manifest routing rules 自动加载（ManifestRoutingRule） |
+| Plane/GitLab 状态同步只有流程建议 | 缺少状态机、幂等、重试、DLQ 设计 | 🔶 部分完成：webhook 幂等 + 基础回写；强状态机和 DLQ 待 S6 |
 
-## 2. 下一阶段必须先设计的文档
+## 2. 下一阶段必须先设计的文档（P0 — ✅ 全部完成）
 
-### P0-1. 持久化与 Repository 设计
+### P0-1. 持久化与 Repository 设计 — ✅ S5 完成
 
 建议文档：`docs/persistence-storage-design.md`
 
@@ -65,7 +68,7 @@
 2. memory store 仍可用于单测。
 3. repository contract tests 覆盖 memory 和 SQL 实现。
 
-### P0-2. Agent Package Artifact 与发布设计
+### P0-2. Agent Package Artifact 与发布设计 — ✅ S5 完成
 
 建议文档：`docs/package-artifact-release-design.md`
 
@@ -98,7 +101,7 @@ eval_report_id: ...
 2. deploy 记录 artifact id 和 manifest hash。
 3. rollback 使用历史 deployment 的 artifact id。
 
-### P0-3. HermesBackend Spike 设计
+### P0-3. HermesBackend Spike 设计 — ✅ S5 完成
 
 建议文档：`docs/hermes-backend-spike.md`
 
@@ -119,7 +122,7 @@ eval_report_id: ...
 4. tool call 进入 `ResponseTrace.tool_calls`。
 5. 有一条 integration test 可证明不是 stub。
 
-### P0-4. DevFlow Runner / Workspace 设计
+### P0-4. DevFlow Runner / Workspace 设计 — ✅ S4 完成
 
 建议文档：`docs/devflow-runner-workspace-design.md`
 
@@ -149,7 +152,7 @@ ValidationResult
 2. runner 不能修改 task pack 允许路径之外的文件。
 3. 测试结果和 changed files 可回写 GitLab MR comment。
 
-### P0-5. Plane/GitLab 状态同步设计
+### P0-5. Plane/GitLab 状态同步设计 — 🔶 部分完成
 
 建议文档：`docs/devflow-state-sync-design.md`
 
@@ -181,7 +184,7 @@ Blocked
 2. GitLab pipeline fail 会回写 Plane comment 和状态。
 3. Eval report 链接可回写 Plane custom property。
 
-### P0-6. 安全、租户、Policy、Secret 设计
+### P0-6. 安全、租户、Policy、Secret 设计 — ✅ S5 完成
 
 建议文档：`docs/security-tenant-policy-design.md`
 
@@ -200,54 +203,61 @@ Blocked
 2. secret 不进入 manifest 明文、trace、日志。
 3. prod 高风险工具默认拒绝或需要审批。
 
-## 3. P1 设计文档
+## 3. P1 设计文档（部分已在 S5 实现）
 
-### 3.1 Semantic Routing Policy
+### 3.1 Semantic Routing Policy — ✅ S5 完成
 
 建议文档：`docs/semantic-routing-policy-design.md`
 
-目标：
+已实现：
 
-1. 定义 `policies/routing.yaml` schema。
-2. 明确入口级 semantic route 和 package 内部 worker route 的区别。
-3. 让 `SemanticRouter` 可从 manifest/policy 自动加载 rule。
-4. 将 semantic 命中原因进入 trace。
+1. manifest `routing.rules` schema 已定义（`ManifestRoutingRule`）。
+2. `SemanticRouter` 在 agent 注册时自动从 manifest 加载规则。
+3. semantic 命中原因进入 trace（`routing_score` / `matched_keywords`）。
 
-### 3.2 Observability / Eval / Feedback
+### 3.2 Observability / Eval / Feedback — 🔶 部分完成
 
 建议文档：`docs/observability-eval-feedback-design.md`
 
-目标：
+已实现：
 
-1. 定义 trace event schema。
-2. 定义 eval report artifact。
-3. 定义线上失败样本如何回流到 eval。
-4. 定义 Langfuse/OpenTelemetry 的接入边界。
-5. 定义 token/cost/latency 指标。
+1. OpenTelemetry 集成（`@traced` decorator, `configure_tracing()`）。
+2. Langfuse 可选适配层。
+3. MetricsCollector + `/metrics` Prometheus 端点。
+4. token/cost/latency 指标通过 `ChatResult` 采集。
 
-### 3.3 Model Gateway
+待补：
+
+1. 结构化 trace event schema 定义。
+2. eval report artifact 标准化。
+3. 线上失败样本回流 eval 机制。
+
+### 3.3 Model Gateway — ✅ S5 完成
 
 建议文档：`docs/model-gateway-design.md`
 
-目标：
+已实现：
 
-1. provider 配置和 secret 引用。
-2. model profile。
-3. fallback / retry / timeout。
-4. token usage 和成本统计。
-5. Hermes provider 与平台 ModelGateway 的边界。
+1. provider 注册和 `_resolve_provider()` 路由。
+2. `ChatResult` 统一返回 token 用量和成本。
+3. `OpenAICompatibleProvider` + `StubModelProvider`。
+4. MetricsCollector 集成（`llm_calls_total` / `llm_input_tokens_total` / `llm_cost_usd_total`）。
 
-### 3.4 Knowledge / RAG
+### 3.4 Knowledge / RAG — 🔶 部分完成
 
 建议文档：`docs/knowledge-rag-design.md`
 
-目标：
+已实现：
 
-1. knowledge source 同步模型。
-2. Weaviate/Postgres/local source 的统一接口。
+1. `KnowledgeService` + `KnowledgeBackend` Protocol。
+2. `WeaviateKnowledgeBackend` stub 实现（retrieve/sync 接口）。
+3. RuntimeManager 在 `run()` 中注入 knowledge snippets 到 system message。
+
+待补：
+
+1. 真实 Weaviate/Qdrant/pgvector 连接。
+2. 文档同步 pipeline（增量更新）。
 3. tenant/store 过滤。
-4. 文档更新、索引、回滚。
-5. MYJ 商品/货架/促销数据的接入路径。
 
 ## 4. 当前文档可优化项
 
@@ -287,35 +297,32 @@ Owner: platform
 
 `docs/.DS_Store` 出现在目录里，不应作为文档资产保留。建议确认是否被 Git 跟踪；如果未跟踪，加入全局或项目 `.gitignore` 的 `**/.DS_Store`。
 
-## 5. 推荐设计顺序
+## 5. 推荐设计顺序（S6 剩余工作）
 
-按阻塞程度排序：
+S5 完成后，P0 全部落地，P1 大部分已实现基础版本。S6 阶段剩余设计按优先级：
 
-1. `persistence-storage-design.md`
-2. `package-artifact-release-design.md`
-3. `hermes-backend-spike.md`
-4. `devflow-runner-workspace-design.md`
-5. `devflow-state-sync-design.md`
-6. `security-tenant-policy-design.md`
-7. `semantic-routing-policy-design.md`
-8. `observability-eval-feedback-design.md`
-9. `model-gateway-design.md`
-10. `knowledge-rag-design.md`
+1. `observability-eval-feedback-design.md` — 结构化 trace event schema 和 eval report artifact 标准化
+2. `knowledge-rag-design.md` — 真实 vector backend 连接、同步 pipeline、tenant 过滤
+3. `devflow-state-sync-design.md` — 强状态机、DLQ、失败恢复
+4. Admin Web UI 前端设计
+5. 多租户计费/配额
+6. 蓝绿/灰度真实流量控制
+7. 分布式 Job Queue（CodingAgentRunner 异步化）
+8. Hermes memory 持久化（映射到平台 session store）
 
 理由：
 
-1. 持久化和 artifact 是生产发布、回滚、审计的前置条件。
-2. Hermes spike 决定 runtime 方向，越早验证越能避免业务 agent 绑定 stub。
-3. DevFlow runner 是“AI + 人 + vibe coding”闭环的核心。
-4. 安全和观测必须在接真实业务 API 前完成基线设计。
-5. semantic routing、model gateway、knowledge/RAG 属于多 agent 扩展能力，可以在底座明确后推进。
+1. 观测和 eval 的结构化数据模型是后续所有质量闭环的前置条件。
+2. Knowledge/RAG 真实连接是 agent 能力差异化的关键。
+3. DevFlow 状态同步强化使 AI 研发闭环可靠。
+4. 其余项属于规模化扩展，可在以上基础稳定后推进。
 
 ## 6. 下一步建议
 
-下一步不建议直接继续扩大功能。建议先完成前三份 P0 设计：
+S5 Phase 0-3 全部完成后，平台已具备：持久化可靠、Runtime 可执行、工具可审批、MCP 可集成、观测可追踪。
 
-1. 持久化与 Repository 设计。
-2. Package Artifact 与发布设计。
-3. HermesBackend Spike 设计。
+S6 建议聚焦三条线：
 
-这三份设计冻结后，再进入实现会更稳：状态不会丢、发布能回滚、runtime 路线可验证。
+1. **观测深化**：结构化 trace event + eval report 标准化 + 线上样本回流。
+2. **Knowledge 生产化**：接入真实 vector store + 文档同步 pipeline。
+3. **DevFlow 强化**：强状态机 + DLQ + job 持久化和失败恢复。

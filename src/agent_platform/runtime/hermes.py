@@ -196,7 +196,9 @@ def register_platform_tools_to_hermes(
     for defn in tool_executor.registry.list_tools():
         hermes_name = f"{agent_id}__{defn.name}"
 
-        def _make_handler(tool_name: str) -> Callable[[dict[str, Any]], str]:
+        def _make_handler(
+            tool_name: str, tool_timeout: int,
+        ) -> Callable[[dict[str, Any]], str]:
             def handler(args: dict[str, Any], **_kw: Any) -> str:
                 try:
                     loop = asyncio.get_running_loop()
@@ -209,7 +211,7 @@ def register_platform_tools_to_hermes(
                         tool_name,
                         args,
                         allowed_tools=[tool_name],
-                        timeout_ms=defn.timeout_ms,
+                        timeout_ms=tool_timeout,
                     )
                 )
                 return str(result.output)
@@ -224,7 +226,7 @@ def register_platform_tools_to_hermes(
                 "description": defn.description,
                 "parameters": defn.input_schema,
             },
-            handler=_make_handler(defn.name),
+            handler=_make_handler(defn.name, defn.timeout_ms),
             is_async=False,
             description=defn.description,
             emoji="",
@@ -285,7 +287,10 @@ def normalize_hermes_result(hermes_result: Any) -> dict[str, Any]:
         "text": str(final_response),
         "tool_calls": tool_calls,
         "run_id": raw.get("run_id"),
-        "iterations": len(raw.get("messages", [])) if "messages" in raw else raw.get("iterations", 0),
+        "iterations": (
+            len(raw.get("messages", [])) if "messages" in raw
+            else raw.get("iterations", 0)
+        ),
         "model_calls": len(api_calls) if api_calls else raw.get("model_calls", 0),
         "model": raw.get("model"),
         "prompt_tokens": input_tokens,

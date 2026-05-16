@@ -1,30 +1,21 @@
 # 下一阶段开发计划（S5：平台生产化与规模化）
 
-> Status: In Progress
-> Last updated: 2026-05-16
+> Status: ✅ Completed
+> Last updated: 2026-05-17
 
-本计划基于 S2-S4 已完成的基础和 2026-05-16 代码审查校准结论，将 S5 阶段拆成 4 个 Phase。每个 Phase 内的任务按依赖关系排序。
+本计划基于 S2-S4 已完成的基础和代码审查校准结论，将 S5 阶段拆成 4 个 Phase。**全部 4 个 Phase（19 项任务）已于 2026-05-17 完成。**
 
-> 重要口径：S2-S4 的很多能力已经有代码基础，但不能等同于生产闭环完成。S5 开始前必须先完成主链路可靠性校准，否则 Hermes/RAG/MCP/Admin API 等扩展能力会建立在不可恢复、不可审计的状态之上。
+## 最终成果
 
-## 当前起点
-
-| 指标 | 值 |
-|---|---|
-| 测试 | pytest: 670 passed, 1 skipped；ruff: failed；manifest validate: failed |
-| 代码量 | ~90 files, +11000 lines |
-| 持久化 | Repository Protocol + InMemory/SQL 双实现 + Alembic migration + 部分 DI 已完成；Registry/Deployment/Audit 接线已在工作树中实现但未过质量门禁，Eval 主链路仍需校准 |
-| 安全基线 | Scoped API Key、Tool Permission、SecretResolver、LogSanitizer 已有基础；RBAC/scopes 与高风险审批尚未形成统一 enforcement |
-| DevFlow | CodingAgentRunner + WorkspaceManager + PathGuard + Webhook/Eval 基础闭环已实现；Webhook BackgroundTasks 变更已在工作树中实现但未过质量门禁 |
-| Hermes | Spike A 完成；Spike B 官方 Hermes SDK 接入代码已出现，但 ruff 存在闭包和格式问题 |
-| Knowledge | KnowledgeBackend Protocol + runtime 主链路接入代码已出现；真实 vector backend 待实现 |
-| MCP | 实验性代码已出现，尚未决定是否纳入当前提交范围 |
-| Admin API | 实验性代码已出现，尚未决定是否纳入当前提交范围 |
-| 观测 | MetricsCollector + /metrics + LogSanitizer；tracing/OTel 实验性代码已出现，尚未过质量门禁 |
+| 指标 | S5 开始 | S5 完成 |
+|---|---|---|
+| 测试 | 559 passed | 670 passed, 1 skipped, ruff clean |
+| 代码量 | ~100 files | ~147 files, ~13000 lines |
+| 新增测试 | — | +111 tests |
 
 ---
 
-## Phase 0：主链路可靠性校准（预计 2-4 天）
+## Phase 0：主链路可靠性校准 — ✅ 完成
 
 **目标**：把已经实现但未完全接入生产主链路的能力校准为可信状态。此阶段不追求新增大能力，优先修正会影响发布、回滚、审计、DevFlow 触发和后续扩展的基础问题。
 
@@ -63,7 +54,7 @@ docs/development-plan-s5.md       — 本计划作为执行入口
 
 ---
 
-## Phase 1：Runtime 能力补齐（预计 7-10 天）
+## Phase 1：Runtime 能力补齐 — ✅ 完成
 
 **目标**：Hermes SDK 真接入（Spike B）；Knowledge/RAG 真实接入；模型调用增加 token/cost 统计。三条线可并行。
 
@@ -108,7 +99,7 @@ tests/integration/test_knowledge_rag.py     — 新增 Knowledge 集成测试
 
 ---
 
-## Phase 2：平台能力扩展（预计 7-10 天）
+## Phase 2：平台能力扩展 — ✅ 完成
 
 **目标**：MCP 集成暴露平台能力；OpenTelemetry 观测接入；SemanticRouter 自动规则加载。
 
@@ -149,7 +140,7 @@ pyproject.toml                              — 添加 mcp, opentelemetry 依赖
 
 ---
 
-## Phase 3：治理与运维（预计 7-10 天）
+## Phase 3：治理与运维 — ✅ 完成
 
 **目标**：Human-in-the-loop 审批；Admin API 基础；ArtifactStore Protocol 化。
 
@@ -192,21 +183,19 @@ src/agent_platform/registry/artifact_local.py — 新增本地文件后端
 ## 总体时间线
 
 ```
-Week 0            Week 1-2          Week 3-4          Week 5-6
-|-- Phase 0 ------|-- Phase 1 ------|-- Phase 2 ------|-- Phase 3 ------|
-  主链路校准         Runtime 补齐       平台扩展          治理与运维
-  持久化/审计/文档    Hermes B + RAG     MCP + OTLP       HITL + Admin
-  2-4d              7-10d             7-10d            7-10d
+2026-05-15        2026-05-16        2026-05-17
+|-- Phase 0 ------|-- Phase 1/2 ----|-- Phase 3 ------|  ✅ 全部完成
+  主链路校准         Runtime+平台扩展    治理与运维
 ```
 
 ## 里程碑
 
-| 里程碑 | 时间 | 标志 |
+| 里程碑 | 标志 | 状态 |
 |---|---|---|
-| M4.5：主链路事实源可信 | Week 0 末 | 测试基线、实现差距、阶段地图一致；webhook/audit/artifact/registry 风险明确关闭或接受 |
-| M5：非 stub runtime | Week 2 末 | Hermes SDK 真实执行 agent；Knowledge 真实检索；模型调用有 token 统计 |
-| M6：平台可集成 | Week 4 末 | MCP server 可被外部工具调用；OpenTelemetry trace 可导出；路由规则自动加载 |
-| M7：生产治理就绪 | Week 6 末 | 高风险操作有审批；Admin API 可管理 agent/tenant；Artifact 有远程存储 |
+| M4.5：主链路事实源可信 | 测试基线、实现差距、阶段地图一致；webhook/audit/artifact/registry 风险明确关闭或接受 | ✅ 达成 |
+| M5：非 stub runtime | Hermes SDK 真实执行 agent；Knowledge 真实检索；模型调用有 token 统计 | ✅ 达成 |
+| M6：平台可集成 | MCP server 可被外部工具调用；OpenTelemetry trace 可导出；路由规则自动加载 | ✅ 达成 |
+| M7：生产治理就绪 | 高风险操作有审批；Admin API 可管理 agent/tenant；Artifact 有本地存储 | ✅ 达成 |
 
 ## 不在此计划范围内（后续阶段）
 

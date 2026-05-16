@@ -204,7 +204,10 @@ class OpenAICompatibleProvider:
         _cost_usd: float | None = None
         _used_model = data.get("model", model or self._default_model)
         if "gpt-4o-mini" in _used_model:
-            _cost_usd = (prompt_tokens / 1_000_000) * 0.150 + (completion_tokens / 1_000_000) * 0.600
+            _cost_usd = (
+                (prompt_tokens / 1_000_000) * 0.150
+                + (completion_tokens / 1_000_000) * 0.600
+            )
         elif "gpt-4o" in _used_model:
             _cost_usd = (prompt_tokens / 1_000_000) * 5.00 + (completion_tokens / 1_000_000) * 15.00
         elif "claude-3-5" in _used_model:

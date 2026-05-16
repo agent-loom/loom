@@ -78,7 +78,11 @@ async def test_knowledge_rag_injection():
     knowledge_service = KnowledgeService()
     weaviate_mock = WeaviateKnowledgeBackend(url="http://fake-url")
     weaviate_mock.retrieve = AsyncMock(return_value=[
-        KnowledgeResult(source_id="test_products", snippets=["[Weaviate] Specific Mocked Snippet for RAG"], score=0.9)
+        KnowledgeResult(
+            source_id="test_products",
+            snippets=["[Weaviate] Specific Mocked Snippet for RAG"],
+            score=0.9,
+        ),
     ])
     knowledge_service.register(weaviate_mock)
 

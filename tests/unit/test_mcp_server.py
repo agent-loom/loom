@@ -356,7 +356,7 @@ class TestStdioTransport:
 
     def _read_responses(self, output: io.StringIO) -> list[dict[str, Any]]:
         output.seek(0)
-        lines = [l.strip() for l in output.readlines() if l.strip()]
+        lines = [line.strip() for line in output.readlines() if line.strip()]
         return [json.loads(line) for line in lines]
 
     @pytest.mark.asyncio

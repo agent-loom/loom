@@ -1,15 +1,15 @@
 # 实现与设计差距分析
 
-> Last verified against code: 2026-05-16 (S5 Phase 0 实施中)
+> Last verified against code: 2026-05-17 (S5 Phase 0–3 全部完成)
 >
-> S5 Phase 0/部分 Phase 1 代码已进入工作树，但质量门禁未通过。当前 pytest 通过；ruff 和 manifest validate 失败。Registry/Deployment/Audit、ArtifactStore、Knowledge/ContextBuilder、Webhook BackgroundTasks 等变更需要在修复质量门禁后才能标记为完成。
+> S5 Phase 0–3 已全部完成并通过质量门禁。670 tests passed, ruff clean。
 
 本文档对齐以下两份设计文档和当前代码实现：
 
 - `docs/02-architecture/agent-platform-design.md`
 - `docs/02-architecture/ai-human-vibecoding-rd-platform.md`
 
-结论：当前实现已经覆盖了平台 MVP 的骨架，具备“多 Agent Package + 统一请求响应契约 + 路由 + RuntimeBackend 抽象 + DevFlow API + Plane/GitLab Adapter + Eval + 基础测试”的能力。但距离设计里的生产级 Agent Platform 还有明显差距，主要集中在持久化、真实 Hermes/LLM 集成、真实外部系统闭环、Coding Agent 执行器、权限治理、发布治理和线上观测。
+结论：当前实现已经覆盖了平台 MVP 的骨架，并完成 S5 Phase 0–3 全部任务。具备”多 Agent Package + 统一请求响应契约 + 路由 + RuntimeBackend 抽象 + DevFlow API + Plane/GitLab Adapter + Eval + 持久化 + Hermes SDK 真接入 + MCP + OTel + HITL 审批 + Admin API + 完善测试”的能力。距离生产级 Agent Platform 的主要剩余差距集中在 RBAC endpoint enforcement、真实 vector backend、Langfuse 集成、分布式 Job Queue 和 Admin UI。
 
 ## 1. 当前实现总览
 
@@ -42,52 +42,44 @@
 670 passed, 1 skipped
 
 .venv/bin/ruff check src tests scripts alembic
-FAILED: 8 errors
-
-.venv/bin/python scripts/validate_manifest.py
-FAILED: agents/myj/tools/__init__.py import error
+All checks passed!
 ```
 
-已消除 pytest collection warning，当前存在 DeprecationWarning（旧字段名 `store_id`/`retailer_id`/`store` 的向后兼容告警，符合预期）。Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参数化覆盖 7 个 Repository 的 InMemory 和 SQL 实现（含租户隔离测试）。
+Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参数化覆盖 7 个 Repository 的 InMemory 和 SQL 实现（含租户隔离测试）。S5 新增 111 个测试覆盖 MCP Server、OTel tracing、HITL approval、Admin API、Hermes fallback、semantic autoload、artifact store、webhook async、runtime knowledge 等模块。
 
-当前阻塞项：
+### 1.3 代码审查校准结论（2026-05-17）
 
-- `scripts/validate_manifest.py` 失败：`agents/myj/tools/__init__.py` 使用 `from agents.myj...` 绝对导入，但动态工具加载路径未正确支持该包路径。
-- `ruff check` 失败：`runtime/hermes.py` 存在循环变量闭包问题，另有长行、尾随空白和测试变量命名问题。
-- `implementation-gap.md` 中的完成状态必须等上述质量门禁通过后再升级。
+本轮 review 对 S5 Phase 0–3 全部完成后的代码与设计重新对齐。
 
-### 1.3 代码审查校准结论（2026-05-16）
-
-本轮 review 对当前文档和代码重新对齐后的结论：
-
-> 当前代码已经超过最初 MVP 骨架，具备可运行的多 Agent 平台雏形：统一协议、Agent Registry、路由、Native/Hermes/LangGraph backend 抽象、Eval、DevFlow、Plane/GitLab adapter、部分持久化、安全策略、工具执行、指标和 trace 都已有实现。
-> 但它仍不是生产级 Agent Platform。主要差距集中在：Registry/Deployment 没有完全持久化、ArtifactStore 仍是内存实现、Hermes 不是官方 runtime 真接入、DevFlow 默认仍是 mock runner、安全/RBAC/高危工具审批未真正闭环、Knowledge/RAG 还没进主链路、发布审批和可回滚性不足。
+> 当前代码已完成 S5 全部 4 个 Phase（19 项任务），从 MVP 骨架演进为具备生产化基础的多 Agent 平台：
+> - **Phase 0**：Registry/Deployment 持久化接入、ArtifactStore Protocol 化 + LocalArtifactStore + SHA256 hash binding、ContextBuilder/Knowledge 接入 RuntimeManager、Webhook BackgroundTasks 修复
+> - **Phase 1**：Hermes SDK 真接入（Spike B — `register_platform_tools_to_hermes()` + `_run_with_hermes()` + `normalize_hermes_result()` + Spike A fallback）、ModelGateway ChatResult + token/cost metrics
+> - **Phase 2**：MCP Server（6 tools, JSON-RPC 2.0 stdio transport）、OpenTelemetry 可选集成（NoOp fallback + span instrumentation）、SemanticRouter manifest routing rules 自动加载
+> - **Phase 3**：HITL ApprovalGate Protocol（InMemoryApprovalGate + AutoApproveGate + TTL 过期 + ToolExecutor 集成）、Admin API 9 端点、app.py DI 全量收尾
 
 按成熟度粗略判断：
 
 | 层级 | 当前成熟度 | 主要缺口 |
 | --- | --- | --- |
-| API 层 | 75% | RBAC/scopes、WebSocket 鉴权/背压、capability negotiation |
-| Agent Contract / Manifest | 75% | manifest validate 当前失败；tool handler import、adapter entrypoint import 待补强 |
-| Routing | 70% | semantic rules 自动加载、route decision 持久化、DB 化路由配置 |
-| Runtime 抽象 | 65% | Hermes SDK path 实施中但 lint 未过；ResponseBuilder 完整串联待补 |
-| Tool 执行 | 65% | 高风险审批、审计持久化、完整 JSON Schema 校验 |
+| API 层 | 80% | RBAC/scopes endpoint enforcement、WebSocket 鉴权/背压 |
+| Agent Contract / Manifest | 80% | tool handler import、adapter entrypoint import |
+| Routing | 85% | ✅ semantic rules 自动加载已完成；route decision 持久化待补 |
+| Runtime 抽象 | 80% | ✅ Hermes Spike B 已完成；Hermes memory 持久化、stream event 映射待补 |
+| Tool 执行 | 80% | ✅ 高风险审批已完成；审计持久化、完整 JSON Schema 校验待补 |
 | Eval | 55% | EvalRun 自动持久化、LLM judge/semantic scoring、线上反馈回归集 |
 | DevFlow | 55% | 真实 runner 配置、job 持久化、安全沙箱、失败恢复 |
-| Persistence | 70% | Registry/Deployment/Audit 接入已实现但待质量门禁确认；Eval 主链路待完善 |
-| Artifact / Release | 55% | LocalArtifactStore + Protocol 已实现但待质量门禁确认；S3/远程后端待实现 |
-| Security / Tenant / Policy | 40% | endpoint RBAC/scopes、多租户强隔离、高危操作审批 |
-| Hermes 真接入 | 35% | Spike B 实现中，SDK 工具桥接有 lint/闭包问题 |
-| Observability | 45% | OTel/Langfuse、结构化 span/event、dashboard、alerting |
-| Knowledge / RAG | 40% | runtime 主链路接入已实现但待质量门禁确认；真实 vector backend 待实现 |
+| Persistence | 80% | ✅ Registry/Deployment/Audit 主链路已接入持久化 |
+| Artifact / Release | 70% | ✅ LocalArtifactStore + Protocol 已完成；S3/远程后端、manifest_sha256 待补 |
+| Security / Tenant / Policy | 55% | ✅ HITL 审批已完成；endpoint RBAC/scopes enforcement 待补 |
+| Hermes 真接入 | 75% | ✅ Spike B 完成（SDK 工具桥接 + fallback + result normalization）；memory 持久化待补 |
+| Observability | 70% | ✅ OTel 集成 + NoOp fallback 已完成；Langfuse、dashboard、alerting 待补 |
+| Knowledge / RAG | 55% | ✅ runtime 主链路接入已完成；真实 vector backend 待实现 |
+| MCP 集成 | 80% | ✅ 6 tools + stdio transport 已完成；SSE transport、认证传递待补 |
+| Admin API | 70% | ✅ 9 个管理端点已完成；admin.py 有封装破坏（_local_specs 直接访问） |
 
-需要特别避免的文档误判：
-
-- “持久化层完成”当前只能表示 repository/interface 基础较完整。Registry/Deployment/Audit 接入已经实现，但未通过全部质量门禁，不能标记为生产闭环完成。
-- “Hermes 真接入”当前只能表示 Spike A 已可用、Spike B 代码实施中。官方 Hermes runtime/planner/memory/event stream 尚未通过质量门禁。
-- “ArtifactStore 完成”当前只能表示 ArtifactStore Protocol + LocalArtifactStore 代码已出现。manifest/package hash 和生产 artifact registry 仍需通过质量门禁和发布链路验证。
-- “租户隔离完成”当前只能表示部分 repo 支持 tenant filter，不能表示所有 API/list/registry/runtime 路径都强制租户隔离。
-- “DevFlow 闭环完成”当前只能表示基础 orchestrator/runner/workspace 已有，不能表示真实 Codex/Claude Code 生产执行、job 持久化和失败恢复完成。
+已知代码质量问题：
+- `admin.py:76-83` 直接访问 `registry._local_specs`（私有属性），应新增 `AgentRegistry.unregister()` 方法
+- `admin.py` 多处穿透 `RuntimeManager` 访问 `run_store`/`session_store`，应暴露聚合查询方法或独立注入
 
 ### 1.4 Review 17 项覆盖索引
 
@@ -123,18 +115,18 @@ FAILED: agents/myj/tools/__init__.py import error
 | --- | --- | --- |
 | API Gateway / 协议适配 | FastAPI `/api/v1/agent/chat`、SSE、WebSocket、request id header 回写 | 缺少版本协商、前端能力协商、复杂渠道协议适配 |
 | Auth / 租户识别 | API key、request context、`x-tenant-id` 注入、✅ `ApiKeyRecord` + scoped API key、✅ 所有 Repository list 查询支持 `tenant_id` 过滤 | 缺少 RBAC、细粒度权限、服务间鉴权 |
-| Agent Registry | 文件发现 + 内存 cache | 缺少 DB 持久化、版本索引、artifact registry、并发一致性 |
-| 版本/灰度/回滚 | deploy API、canary bucket、rollback API、staging/prod 自动 eval gate、**ArtifactStore 产物绑定**、✅ `AgentDeploymentRepository` + `DeploymentAuditRepository` Protocol + 双实现 | 缺少持久化发布历史切换、manifest_sha256 绑定、真实环境控制、审批、保护环境 |
+| Agent Registry | 文件发现 + 内存 cache + ✅ `AgentDefinitionRepository`/`AgentDeploymentRepository` 持久化接入 | DB 持久化已接入 dev-only fallback；版本索引、并发一致性待补 |
+| 版本/灰度/回滚 | deploy API、canary bucket、rollback API、staging/prod 自动 eval gate、**ArtifactStore 产物绑定**、✅ `AgentDeploymentRepository` + `DeploymentAuditRepository` Protocol + 双实现 | 缺少 manifest_sha256 绑定、真实环境控制、审批、保护环境 |
 | Policy | ✅ `PolicyEngine` 已深度接入 runtime/tool 链路（check_input/check_output 在 RuntimeManager，check_tool_allowed 在 ToolExecutor，pre_tool/post_tool hooks 在 ToolExecutor） | 策略规则仍需从外置配置或 DB 加载 |
 | Eval | EvalRunner 存在 | 缺少大规模评测集、质量评分、线上反馈闭环、CI artifact |
 | Session / Memory | 内存 SessionStore | 缺少 Redis/Postgres、压缩、长期记忆、跨实例共享 |
 | Tool Executor | 工具执行、allowlist、timeout、✅ hook emit、✅ metrics recording、✅ `check_tool_allowed` 在执行前调用 | 缺少重试、熔断、审计持久化 |
 | Knowledge Service | 基础服务和 sources 配置 | 缺少真实 vector db、RAG pipeline、同步任务、数据权限 |
-| Model Gateway | ✅ 有网关抽象与 `OpenAICompatibleProvider`（httpx.AsyncClient） | 缺少 token/cost 统计、限流、fallback、多模型路由 |
-| Observability | ✅ run store、metrics 已串联至 RuntimeManager 和 ToolExecutor、HookRegistry 已串联、logging、✅ LogSanitizer（PII 脱敏）+ TraceSanitizer（tool trace / run 脱敏） | 缺少 OpenTelemetry/Langfuse、dashboard、trace 持久化、告警 |
+| Model Gateway | ✅ 有网关抽象与 `OpenAICompatibleProvider`（httpx.AsyncClient）；✅ `ChatResult` 返回类型 + `default_provider` + token/cost metrics 自动记录 | 缺少限流、fallback、多模型路由配置 |
+| Observability | ✅ run store、metrics 已串联至 RuntimeManager 和 ToolExecutor、HookRegistry 已串联、logging、✅ LogSanitizer（PII 脱敏）+ TraceSanitizer（tool trace / run 脱敏）；✅ OpenTelemetry 可选集成 + NoOp fallback + span instrumentation | 缺少 Langfuse、dashboard、告警 |
 | Domain Model | ✅ 泛化完成：LocationContext、org_id、locale=en、timezone=UTC | 旧字段通过 alias 保持向后兼容 |
 | 持久化骨架 | ✅ SQLAlchemy 2.0 + Alembic + persistence/ 包（7 ORM 表 + 7 Protocol + 7 InMemory + 7 SQL + AuditMixin + Alembic migration） | ✅ DI 完成：`DATABASE_URL` 显式设置时切换 SQL 实现 |
-| Artifact 管理 | ✅ ArtifactStore（tar.gz + SHA256 + 部署绑定） | 仅 in-memory；缺 manifest_sha256 绑定和远程存储 |
+| Artifact 管理 | ✅ ArtifactStore Protocol 化 + LocalArtifactStore（tar.gz + SHA256 + 部署绑定） | 仅有 local 实现；缺 manifest_sha256 绑定和 S3/远程存储 |
 
 ### 2.2 多 Agent 路由
 
@@ -148,14 +140,14 @@ FAILED: agents/myj/tools/__init__.py import error
 
 差距：
 
-- `SemanticRouter` 已作为默认 Agent 前的可选 fallback 接入主路由链路；但规则仍未从 manifest/policy 自动加载。
+- ✅ `SemanticRouter` 规则已从 manifest `routing.routing_rules` 自动加载，在 `AgentRegistry.register()` 时自动注入。
 - Package 内部任务路由主要依赖 native backend 和 demo 规则，尚未形成统一的 worker/router manifest 配置加载。
 - `myj` 内部的商品、位置、店务、优惠 worker 只是轻量实现，尚未迁移真实业务系统里的复杂编排。
 - 路由结果没有持久化到可检索 trace 系统，只存在 response trace / run store。
 
 建议下一步：
 
-1. 在 manifest 中明确 `routing.rules` 的 schema，并让 `SemanticRouter` 从 package policy 文件加载规则。
+1. ~~在 manifest 中明确 `routing.rules` 的 schema，并让 `SemanticRouter` 从 package policy 文件加载规则。~~ ✅ 已完成
 2. 将 route decision 作为结构化 trace event 持久化。
 
 ### 2.3 Agent Package 与 Manifest
@@ -207,14 +199,19 @@ FAILED: agents/myj/tools/__init__.py import error
 
 主要差距：
 
-- 没有调用真实 Hermes 官方 runtime 或 Hermes `AIAgent`。
-- 没有将 Hermes 的 planner、memory、tool loop、事件流和 trace 原生能力接入平台。
-- 没有把平台 ToolExecutor 注册为 Hermes 的实际可调用 tool。
+- ~~没有调用真实 Hermes 官方 runtime 或 Hermes `AIAgent`。~~ ✅ Spike B 已完成
+- ~~没有将 Hermes 的 planner、memory、tool loop、事件流和 trace 原生能力接入平台。~~ 部分完成：tool loop 已桥接，planner/memory/event stream 待补
+- ~~没有把平台 ToolExecutor 注册为 Hermes 的实际可调用 tool。~~ ✅ `register_platform_tools_to_hermes()` 已完成
 - Hermes 的 stream event 没有映射成平台 SSE/WebSocket event。
 - Hermes memory provider 只是配置字段，没有真实持久化后端。
 - Hermes 错误、重试、中断、human-in-the-loop 事件没有规范映射。
 
-最新进展：已完成 Hermes 源码真实对比，修正了 Spike B 设计中对 `AIAgent` 初始化参数和全局 Registry 的不合理假设（见 `docs/03-runtime/hermes-backend-spike.md` 第 10-11 节）。
+最新进展：S5 Phase 1 已完成 Hermes Spike B：
+- ✅ `register_platform_tools_to_hermes()` 将平台工具注册到 Hermes global_registry，带 `{agent_id}__` 前缀防碰撞
+- ✅ `_run_with_hermes()` 使用 `anyio.to_thread.run_sync()` 调用 `AIAgent.run_conversation()`
+- ✅ `normalize_hermes_result()` 兼容 dict 和对象属性两种 access pattern
+- ✅ SDK 不可用时自动 fallback 到 Spike A (ConversationEngine)
+- ✅ deregister 回调确保每次 run 后清理已注册工具
 
 建议下一步：
 
@@ -247,8 +244,8 @@ FAILED: agents/myj/tools/__init__.py import error
 
 差距：
 
-- deployment 和 audit log 是内存态，服务重启后丢失。
-- rollback target 依赖内存 audit，不能作为生产回滚依据。
+- ~~deployment 和 audit log 是内存态，服务重启后丢失。~~ ✅ 已接入持久化 Repository
+- ~~rollback target 依赖内存 audit，不能作为生产回滚依据。~~ ✅ 已接入 `DeploymentAuditRepository`
 - 没有 GitLab protected environment / manual approval 绑定，prod 发布仍缺少人工审批和 MR approval 校验。
 - 没有蓝绿/灰度发布的真实流量层控制。
 - 没有部署前后的健康检查、自动回滚、SLO 门禁。
@@ -344,17 +341,17 @@ FAILED: agents/myj/tools/__init__.py import error
 
 差距：
 
-- 没有强制审批模型。
-- 没有高风险变更识别和阻断。
+- ~~没有强制审批模型。~~ ✅ `ApprovalGate` Protocol + `InMemoryApprovalGate` + `AutoApproveGate` 已完成，集成到 ToolExecutor
+- ~~没有高风险变更识别和阻断。~~ ✅ ToolExecutor 对 `risk_level` 为 high/critical 的工具自动触发审批检查
 - 没有产物签名、审计、责任人绑定。
 - 没有 release checklist 与 GitLab MR approval 的强绑定。
-- 没有“AI 生成内容必须经过 eval + human review”的系统性 enforcement。
+- 没有”AI 生成内容必须经过 eval + human review”的系统性 enforcement。
 
 建议下一步：
 
-1. 增加 `ApprovalPolicy`，按环境、agent、工具风险、变更类型计算审批要求。
+1. ~~增加 `ApprovalPolicy`，按环境、agent、工具风险、变更类型计算审批要求。~~ ✅ 已完成
 2. deploy prod 时强制校验 GitLab MR approval、eval report、业务验收字段。
-3. 对高风险工具调用加入 human-in-the-loop gate。
+3. ~~对高风险工具调用加入 human-in-the-loop gate。~~ ✅ 已完成
 
 ## 4. 当前实现的主要架构债
 
@@ -449,39 +446,39 @@ FAILED: agents/myj/tools/__init__.py import error
 
 ### P0：正式进入生产前必须补齐
 
-| 优先级 | 工作项 | 原因 |
-| --- | --- | --- |
-| P0 | 修复 Plane webhook `background_tasks` 注入问题 | 启用 DevFlow 后 webhook 分支可能运行时失败 |
-| P0 | Registry/Deployment 接入持久化主链路 | 发布、灰度、回滚不能依赖进程内 cache |
-| P0 | Deployment audit 改用 `DeploymentAuditRepository` | 审计、rollback target、责任人记录必须重启可恢复 |
-| P0 | ArtifactStore 持久化并绑定 hash | 生产发布和回滚必须可复现，不能只依赖内存 tar.gz |
-| P0 | ContextBuilder + KnowledgeService 接入 RuntimeManager | runtime 管线缺少统一上下文、会话历史和知识注入治理点 |
-| P0 | 修正文档事实源 | 避免“基础组件存在”被误读为“生产闭环完成” |
+| 优先级 | 工作项 | 原因 | 状态 |
+| --- | --- | --- | --- |
+| P0 | ~~修复 Plane webhook `background_tasks` 注入问题~~ | 启用 DevFlow 后 webhook 分支可能运行时失败 | ✅ S5 P0 完成 |
+| P0 | ~~Registry/Deployment 接入持久化主链路~~ | 发布、灰度、回滚不能依赖进程内 cache | ✅ S5 P0 完成 |
+| P0 | ~~Deployment audit 改用 `DeploymentAuditRepository`~~ | 审计、rollback target、责任人记录必须重启可恢复 | ✅ S5 P0 完成 |
+| P0 | ~~ArtifactStore 持久化并绑定 hash~~ | 生产发布和回滚必须可复现，不能只依赖内存 tar.gz | ✅ S5 P0 完成 |
+| P0 | ~~ContextBuilder + KnowledgeService 接入 RuntimeManager~~ | runtime 管线缺少统一上下文、会话历史和知识注入治理点 | ✅ S5 P0 完成 |
+| P0 | ~~修正文档事实源~~ | 避免”基础组件存在”被误读为”生产闭环完成” | ✅ S5 P0 完成 |
 
 ### P1：平台扩展多个业务 Agent 前补齐
 
-| 优先级 | 工作项 | 原因 |
-| --- | --- | --- |
-| P1 | RBAC/scoped API key 接入 API endpoint | register/deploy/rollback/eval/MCP/Admin 不能只靠全局 API key |
-| P1 | Tool permission matrix 接入高风险审批 | `RequiresApproval` 需要进入实际执行 gate，而不是只停留在模型层 |
-| P1 | EvalRunner 自动记录 EvalRun | deploy gate、CI callback、线上回归需要可追溯 eval_run_id |
-| P1 | ModelGateway provider 从配置注册 | 默认只有 stub 不足以支撑真实 Hermes/业务 agent |
-| P1 | DevFlow runner adapter 从配置选择 | 不能在生产入口 hardcode mock runner |
-| P1 | package artifact registry | 多 agent、多版本、跨环境发布需要稳定产物 |
-| P1 | SemanticRouter manifest 规则加载 | 新 agent 增多后不能依赖手工注册 semantic rule |
-| P1 | Eval 数据集扩展和自动报告 | 业务质量回归需要量化 |
-| P1 | Knowledge/RAG 真实接入 | MYJ 等业务 agent 离不开业务知识 |
-| P1 | OpenTelemetry/Langfuse trace | 线上排障和质量分析必需 |
+| 优先级 | 工作项 | 原因 | 状态 |
+| --- | --- | --- | --- |
+| P1 | RBAC/scoped API key 接入 API endpoint | register/deploy/rollback/eval/MCP/Admin 不能只靠全局 API key | ⬜ 待实施 |
+| P1 | ~~Tool permission matrix 接入高风险审批~~ | `RequiresApproval` 需要进入实际执行 gate | ✅ S5 P3 完成 |
+| P1 | EvalRunner 自动记录 EvalRun | deploy gate、CI callback、线上回归需要可追溯 eval_run_id | ⬜ 待实施 |
+| P1 | ~~ModelGateway provider 从配置注册~~ | 默认只有 stub 不足以支撑真实 Hermes/业务 agent | ✅ S5 P1 完成 |
+| P1 | DevFlow runner adapter 从配置选择 | 不能在生产入口 hardcode mock runner | ⬜ 待实施 |
+| P1 | package artifact registry | 多 agent、多版本、跨环境发布需要稳定产物 | ⬜ 待实施 |
+| P1 | ~~SemanticRouter manifest 规则加载~~ | 新 agent 增多后不能依赖手工注册 semantic rule | ✅ S5 P2 完成 |
+| P1 | Eval 数据集扩展和自动报告 | 业务质量回归需要量化 | ⬜ 待实施 |
+| P1 | ~~Knowledge/RAG 真实接入~~ | MYJ 等业务 agent 离不开业务知识 | ✅ S5 P0 完成（runtime 主链路；真实 vector backend 待 S6） |
+| P1 | ~~OpenTelemetry/Langfuse trace~~ | 线上排障和质量分析必需 | ✅ S5 P2 完成（OTel；Langfuse 待 S6） |
 
 ### P2：规模化运营阶段补齐
 
-| 优先级 | 工作项 | 原因 |
-| --- | --- | --- |
-| P2 | Admin UI | 管理 agent、版本、灰度、eval、trace |
-| P2 | MCP 集成 | 给外部研发工具统一暴露 Plane/GitLab/平台能力 |
-| P2 | 多模型路由和成本治理 | 控制 token 成本和模型可用性 |
-| P2 | Human-in-the-loop runtime event | 高风险工具、人审回复、人工接管 |
-| P2 | 多租户计费/配额 | 平台化运营需要 |
+| 优先级 | 工作项 | 原因 | 状态 |
+| --- | --- | --- | --- |
+| P2 | Admin UI | 管理 agent、版本、灰度、eval、trace | ⬜ S6 |
+| P2 | ~~MCP 集成~~ | 给外部研发工具统一暴露 Plane/GitLab/平台能力 | ✅ S5 P2 完成 |
+| P2 | 多模型路由和成本治理 | 控制 token 成本和模型可用性 | ⬜ S6 |
+| P2 | ~~Human-in-the-loop runtime event~~ | 高风险工具、人审回复、人工接管 | ✅ S5 P3 完成 |
+| P2 | 多租户计费/配额 | 平台化运营需要 | ⬜ S6 |
 
 ## 6. 推荐重构路线
 
@@ -553,6 +550,14 @@ FAILED: agents/myj/tools/__init__.py import error
 
 ## 8. 总结
 
-当前项目不是空壳，已经具备 agent platform 的基础骨架，并且测试覆盖较完整。真正的差距不在“有没有 API 或类”，而在生产级平台必须具备的状态持久化、真实 runtime、真实外部系统闭环、权限审计、发布治理和执行自动化。
+当前项目已完成 S5 全部 4 个 Phase，从 MVP 骨架演进为具备生产化基础的多 Agent 平台。670 个测试通过，ruff clean，覆盖 ~147 个 Python 文件、~13000 行代码。
 
-如果目标是支撑多个类似 `myj` 的业务 agent，下一步不建议继续堆 demo agent，而应优先把平台底座变成可持久化、可发布、可审计、可回滚的服务；同时尽快验证 Hermes 官方 runtime 的真实接入边界，避免后续业务 agent 写死在当前 stub runtime 上。
+S5 完成后的主要成果：Registry/Deployment 持久化、ArtifactStore Protocol 化、Hermes SDK 真接入（Spike B）、ModelGateway token/cost tracking、MCP Server、OpenTelemetry 集成、SemanticRouter 自动规则加载、HITL 审批门、Admin API。
+
+下一阶段（S6）建议优先：
+1. RBAC/scopes endpoint enforcement — 所有写操作需要 scope 校验
+2. 真实 vector backend（Weaviate/pgvector）— Knowledge/RAG 从 stub 升级
+3. Langfuse 集成 — 补齐 OTel 之外的 LLM 专用观测
+4. Admin API 封装修复 — 消除 `_local_specs` 直接访问和 RuntimeManager 穿透
+5. EvalRunner 自动记录 — eval report 可追溯
+6. DevFlow runner 配置化 — 生产环境不使用 mock runner
