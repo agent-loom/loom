@@ -1,9 +1,11 @@
 # Agent Package Artifact 与发布设计
 
-> Status: Draft
+> Status: Partially Implemented
 > Stage: S2
 > Owner: platform
-> Last verified against code: 2026-05-15
+> Last verified against code: 2026-05-16
+
+> 当前实现校准：`ArtifactStoreProtocol`、`InMemoryArtifactStore`、`LocalArtifactStore` 和 manifest hash 相关代码已出现在工作树中，单元测试通过；但当前 ruff 与 manifest validate 质量门禁未通过，不能标记为生产发布闭环完成。S3/GitLab Registry 等远程后端仍未实现。
 
 ## 1. 背景与问题
 

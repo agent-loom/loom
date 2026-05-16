@@ -16,10 +16,10 @@
 | --- | --- | --- | --- |
 | S0 | 架构基线 | 冻结平台边界、MVP、核心契约 | 已完成，持续维护 |
 | S1 | MVP 骨架 | 跑通多 Agent、统一 API、manifest、runtime、eval、DevFlow 骨架 | 已基本实现 |
-| S2 | 生产化底座 | 持久化、artifact、发布审计、回滚、权限、观测 | 部分完成；repository/DI 基础已实现，Registry/Deployment/Audit/Artifact 主链路仍需校准 |
+| S2 | 生产化底座 | 持久化、artifact、发布审计、回滚、权限、观测 | 部分完成；Registry/Deployment/Audit/Artifact/Knowledge 相关接线已在工作树中实现，但 ruff/manifest 质量门禁未通过 |
 | S3 | Hermes 真接入 | 从 stub/adapter 原型变成真实 Hermes runtime 能力 | 部分完成；Spike A 已完成，官方 Hermes SDK Spike B 待实施 |
 | S4 | AI 研发闭环 | CodingAgentRunner、workspace、path guard、Plane/GitLab 状态同步 | 部分完成；runner/workspace/path guard 基础已实现，真实 runner 配置、job 持久化、失败恢复待补 |
-| S5 | 平台生产化与规模化 | 主链路可靠性校准、semantic routing、model gateway、knowledge/RAG、admin API、MCP、治理 | 计划中，入口为 `development-plan-s5.md` |
+| S5 | 平台生产化与规模化 | 主链路可靠性校准、semantic routing、model gateway、knowledge/RAG、admin API、MCP、治理 | 实施中；pytest 通过，ruff/manifest validate 未通过，入口为 `development-plan-s5.md` |
 
 ## 2. 文档状态定义
 
@@ -61,9 +61,9 @@
 | --- | --- | --- |
 | `next-stage-design-plan.md` | Baseline | 下一阶段设计清单和顺序 |
 | `development-plan-s2.md` | Historical Plan | S2-S4 开发计划和任务跟踪；记录基础组件实现历史，不作为当前完成度事实源 |
-| `development-plan-s5.md` | Planned | S5 平台生产化与规模化执行计划，先做主链路可靠性校准 |
-| `05-production/persistence-storage-design.md` | Partially Implemented | repository/migration 基础已实现；Registry/Deployment/Audit/Eval 主链路仍需校准 |
-| `05-production/package-artifact-release-design.md` | Partially Implemented | agent artifact、manifest snapshot、发布回滚设计；当前仅有 in-memory ArtifactStore 原型 |
+| `development-plan-s5.md` | In Progress | S5 平台生产化与规模化执行计划；Phase 0 代码实施中但质量门禁未通过 |
+| `05-production/persistence-storage-design.md` | Partially Implemented | repository/migration 基础已实现；Registry/Deployment/Audit 接线已在工作树中实现但待质量门禁确认；Eval 主链路仍需校准 |
+| `05-production/package-artifact-release-design.md` | Partially Implemented | agent artifact、manifest snapshot、发布回滚设计；LocalArtifactStore 代码已出现但待质量门禁确认，远程 registry 未实现 |
 | `05-production/security-tenant-policy-design.md` | Partially Implemented | 鉴权、租户、tool policy、secret、脱敏设计；RBAC/scopes endpoint enforcement 和高风险审批待补 |
 | `05-production/observability-eval-feedback-design.md` | Planned | trace、metrics、eval report、反馈闭环设计 |
 
@@ -87,7 +87,7 @@
 
 | 文档 | 状态 | 用途 |
 | --- | --- | --- |
-| `development-plan-s5.md` | Planned | S5 执行入口：Phase 0 主链路校准，Phase 1-3 扩展 runtime、平台集成和治理 |
+| `development-plan-s5.md` | In Progress | S5 执行入口：Phase 0 主链路校准实施中，Phase 1-3 部分实验代码已出现但未完成质量门禁 |
 | `06-scale/semantic-routing-policy-design.md` | Planned | semantic routing rule schema 和 manifest 自动加载 |
 | `06-scale/model-gateway-design.md` | Planned | 模型 provider、profile、fallback、成本统计 |
 | `06-scale/knowledge-rag-design.md` | Planned | knowledge source、RAG、同步和租户过滤 |

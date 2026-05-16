@@ -1,8 +1,8 @@
 # 实现与设计差距分析
 
-> Last verified against code: 2026-05-16 (Phase 0 完成后更新)
+> Last verified against code: 2026-05-16 (S5 Phase 0 实施中)
 >
-> S5 Phase 0 校准已完成。Registry/Deployment/Audit 已全面接入持久化 Repository，ArtifactStore 已 Protocol 化并实现 LocalArtifactStore，Knowledge/ContextBuilder 已接入 RuntimeManager 主链路，Webhook 已改为 BackgroundTasks 异步分发。
+> S5 Phase 0/部分 Phase 1 代码已进入工作树，但质量门禁未通过。当前 pytest 通过；ruff 和 manifest validate 失败。Registry/Deployment/Audit、ArtifactStore、Knowledge/ContextBuilder、Webhook BackgroundTasks 等变更需要在修复质量门禁后才能标记为完成。
 
 本文档对齐以下两份设计文档和当前代码实现：
 
@@ -39,16 +39,22 @@
 
 ```text
 .venv/bin/python -m pytest
-559 passed, 1 skipped
+670 passed, 1 skipped
 
 .venv/bin/ruff check src tests scripts alembic
-All checks passed
+FAILED: 8 errors
 
 .venv/bin/python scripts/validate_manifest.py
-3 个内置 agent manifest 全部通过
+FAILED: agents/myj/tools/__init__.py import error
 ```
 
-已消除 pytest collection warning，当前存在 DeprecationWarning（旧字段名 `store_id`/`retailer_id`/`store` 的向后兼容告警，符合预期）。Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参数化，66 个测试覆盖 7 个 Repository 的 InMemory 和 SQL 实现（含 4 个租户隔离测试）。
+已消除 pytest collection warning，当前存在 DeprecationWarning（旧字段名 `store_id`/`retailer_id`/`store` 的向后兼容告警，符合预期）。Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参数化覆盖 7 个 Repository 的 InMemory 和 SQL 实现（含租户隔离测试）。
+
+当前阻塞项：
+
+- `scripts/validate_manifest.py` 失败：`agents/myj/tools/__init__.py` 使用 `from agents.myj...` 绝对导入，但动态工具加载路径未正确支持该包路径。
+- `ruff check` 失败：`runtime/hermes.py` 存在循环变量闭包问题，另有长行、尾随空白和测试变量命名问题。
+- `implementation-gap.md` 中的完成状态必须等上述质量门禁通过后再升级。
 
 ### 1.3 代码审查校准结论（2026-05-16）
 
@@ -62,24 +68,24 @@ All checks passed
 | 层级 | 当前成熟度 | 主要缺口 |
 | --- | --- | --- |
 | API 层 | 75% | RBAC/scopes、WebSocket 鉴权/背压、capability negotiation |
-| Agent Contract / Manifest | 80% | tool handler import、adapter entrypoint import |
+| Agent Contract / Manifest | 75% | manifest validate 当前失败；tool handler import、adapter entrypoint import 待补强 |
 | Routing | 70% | semantic rules 自动加载、route decision 持久化、DB 化路由配置 |
-| Runtime 抽象 | 70% | Hermes 官方 SDK 真接入、ResponseBuilder 完整串联 |
+| Runtime 抽象 | 65% | Hermes SDK path 实施中但 lint 未过；ResponseBuilder 完整串联待补 |
 | Tool 执行 | 65% | 高风险审批、审计持久化、完整 JSON Schema 校验 |
 | Eval | 55% | EvalRun 自动持久化、LLM judge/semantic scoring、线上反馈回归集 |
 | DevFlow | 55% | 真实 runner 配置、job 持久化、安全沙箱、失败恢复 |
-| Persistence | 75% | Registry/Deployment/Audit 已接入 repo 主链路；Eval 主链路待完善 |
-| Artifact / Release | 60% | LocalArtifactStore + Protocol 已完成；S3/远程后端待实现 |
+| Persistence | 70% | Registry/Deployment/Audit 接入已实现但待质量门禁确认；Eval 主链路待完善 |
+| Artifact / Release | 55% | LocalArtifactStore + Protocol 已实现但待质量门禁确认；S3/远程后端待实现 |
 | Security / Tenant / Policy | 40% | endpoint RBAC/scopes、多租户强隔离、高危操作审批 |
-| Hermes 真接入 | 35% | Spike B 实现中，SDK 工具桥接 + fallback 进行中 |
+| Hermes 真接入 | 35% | Spike B 实现中，SDK 工具桥接有 lint/闭包问题 |
 | Observability | 45% | OTel/Langfuse、结构化 span/event、dashboard、alerting |
-| Knowledge / RAG | 45% | 已接 runtime 主链路 + ContextBuilder；真实 vector backend 待实现 |
+| Knowledge / RAG | 40% | runtime 主链路接入已实现但待质量门禁确认；真实 vector backend 待实现 |
 
 需要特别避免的文档误判：
 
-- ~~”持久化层完成”只能表示 repository/interface 基础较完整，不能表示 Registry/Deployment/Audit/Eval 等业务状态已经全部生产持久化。~~ → **Phase 0 已校准**：Registry/Deployment/Audit 主链路已接入 Repository，DI 条件注入 SQL/InMemory。
-- “Hermes 真接入”当前只能表示 Spike A 的平台自研 conversation loop 已接 ModelGateway/ToolExecutor，不能表示接入了 Hermes 官方 runtime/planner/memory/event stream。→ **Spike B 进行中**
-- ~~”ArtifactStore 完成”当前只能表示内存 tar.gz/checksum 原型可用，不能表示生产 artifact registry 完成。~~ → **Phase 0 已校准**：ArtifactStore Protocol 化 + LocalArtifactStore + manifest_sha256 绑定已完成。
+- “持久化层完成”当前只能表示 repository/interface 基础较完整。Registry/Deployment/Audit 接入已经实现，但未通过全部质量门禁，不能标记为生产闭环完成。
+- “Hermes 真接入”当前只能表示 Spike A 已可用、Spike B 代码实施中。官方 Hermes runtime/planner/memory/event stream 尚未通过质量门禁。
+- “ArtifactStore 完成”当前只能表示 ArtifactStore Protocol + LocalArtifactStore 代码已出现。manifest/package hash 和生产 artifact registry 仍需通过质量门禁和发布链路验证。
 - “租户隔离完成”当前只能表示部分 repo 支持 tenant filter，不能表示所有 API/list/registry/runtime 路径都强制租户隔离。
 - “DevFlow 闭环完成”当前只能表示基础 orchestrator/runner/workspace 已有，不能表示真实 Codex/Claude Code 生产执行、job 持久化和失败恢复完成。
 

@@ -1,6 +1,6 @@
 # 下一阶段开发计划（S5：平台生产化与规模化）
 
-> Status: Planning
+> Status: In Progress
 > Last updated: 2026-05-16
 
 本计划基于 S2-S4 已完成的基础和 2026-05-16 代码审查校准结论，将 S5 阶段拆成 4 个 Phase。每个 Phase 内的任务按依赖关系排序。
@@ -11,16 +11,16 @@
 
 | 指标 | 值 |
 |---|---|
-| 测试 | 516 passed, ruff clean |
+| 测试 | pytest: 670 passed, 1 skipped；ruff: failed；manifest validate: failed |
 | 代码量 | ~90 files, +11000 lines |
-| 持久化 | Repository Protocol + InMemory/SQL 双实现 + Alembic migration + 部分 DI 已完成；Registry/Deployment/Audit/Eval 主链路仍需校准 |
+| 持久化 | Repository Protocol + InMemory/SQL 双实现 + Alembic migration + 部分 DI 已完成；Registry/Deployment/Audit 接线已在工作树中实现但未过质量门禁，Eval 主链路仍需校准 |
 | 安全基线 | Scoped API Key、Tool Permission、SecretResolver、LogSanitizer 已有基础；RBAC/scopes 与高风险审批尚未形成统一 enforcement |
-| DevFlow | CodingAgentRunner + WorkspaceManager + PathGuard + Webhook/Eval 基础闭环已实现；真实 runner 配置、job 持久化和失败恢复仍需补齐 |
-| Hermes | Spike A 完成（平台自研 ConversationEngine + model_gateway 注入 + hermes_echo）；Spike B 官方 Hermes SDK 真接入待实施 |
-| Knowledge | Stub 实现（KnowledgeBackend Protocol + WeaviateKnowledgeBackend placeholder） |
-| MCP | 无代码 |
-| Admin UI | 无代码 |
-| 观测 | MetricsCollector + /metrics 端点 + LogSanitizer；无 OpenTelemetry/Langfuse |
+| DevFlow | CodingAgentRunner + WorkspaceManager + PathGuard + Webhook/Eval 基础闭环已实现；Webhook BackgroundTasks 变更已在工作树中实现但未过质量门禁 |
+| Hermes | Spike A 完成；Spike B 官方 Hermes SDK 接入代码已出现，但 ruff 存在闭包和格式问题 |
+| Knowledge | KnowledgeBackend Protocol + runtime 主链路接入代码已出现；真实 vector backend 待实现 |
+| MCP | 实验性代码已出现，尚未决定是否纳入当前提交范围 |
+| Admin API | 实验性代码已出现，尚未决定是否纳入当前提交范围 |
+| 观测 | MetricsCollector + /metrics + LogSanitizer；tracing/OTel 实验性代码已出现，尚未过质量门禁 |
 
 ---
 
@@ -35,15 +35,23 @@
 
 ### 任务列表
 
-| # | 任务 | 设计来源 | 验收标准 |
-|---|---|---|---|
-| 0.1 | 重新确认测试与 warning 基线 | implementation-gap §1.2 | 记录 `pytest`、`ruff`、manifest validate 的真实输出；warning 要么消除，要么形成 warning budget |
-| 0.2 | 修复 Plane webhook 后台任务注入 | plane/devflow-state-sync | webhook 启用 DevFlow 分支时不再依赖未定义变量；新增覆盖该路径的测试 |
-| 0.3 | Registry/Deployment 持久化接线 | persistence-storage §5 | `AgentDefinitionRepository`、`AgentDeploymentRepository` 接入 register/deploy/list/resolve 主链路，或在代码和文档中明确 dev-only fallback |
-| 0.4 | Deployment audit 主链路校准 | persistence-storage §4.4 | deploy/rollback/audit endpoint 不再只依赖进程内 `DeploymentAuditLog`，审计记录重启可恢复 |
-| 0.5 | ArtifactStore 生产化切入点 | package-artifact-release §4-8 | 至少落地 LocalArtifactStore + manifest/package hash 绑定；S3/GitLab Registry 后移到 Phase 3 |
-| 0.6 | ContextBuilder/Knowledge 主链路接入点确认 | agent-platform-core-design §3.2/3.8 | 明确 RuntimeManager 是直接调用 ContextBuilder，还是先在 Hermes/ConversationEngine 内部接入 |
-| 0.7 | 文档事实源同步 | document-stage-map / implementation-gap | `implementation-gap.md`、`document-stage-map.md`、本计划对当前状态描述一致 |
+| # | 任务 | 设计来源 | 当前状态 | 验收标准 |
+|---|---|---|---|---|
+| 0.1 | 重新确认测试与 warning 基线 | implementation-gap §1.2 | pytest 通过；ruff/manifest 失败 | `pytest`、`ruff`、manifest validate 全部通过，或 blockers 明确记录 |
+| 0.2 | 修复 Plane webhook 后台任务注入 | plane/devflow-state-sync | 代码已出现，测试通过，待 ruff/整体门禁 | webhook 启用 DevFlow 分支时不再依赖未定义变量；新增覆盖该路径的测试 |
+| 0.3 | Registry/Deployment 持久化接线 | persistence-storage §5 | 代码已出现，待 ruff/manifest/文档一致性确认 | `AgentDefinitionRepository`、`AgentDeploymentRepository` 接入 register/deploy/list/resolve 主链路，或在代码和文档中明确 dev-only fallback |
+| 0.4 | Deployment audit 主链路校准 | persistence-storage §4.4 | 代码已出现，测试通过，待质量门禁 | deploy/rollback/audit endpoint 不再只依赖进程内 `DeploymentAuditLog`，审计记录重启可恢复 |
+| 0.5 | ArtifactStore 生产化切入点 | package-artifact-release §4-8 | Protocol/LocalArtifactStore 代码已出现，待质量门禁 | 至少落地 LocalArtifactStore + manifest/package hash 绑定；S3/GitLab Registry 后移到 Phase 3 |
+| 0.6 | ContextBuilder/Knowledge 主链路接入点确认 | agent-platform-core-design §3.2/3.8 | 代码已出现，测试通过，待质量门禁 | 明确 RuntimeManager 是直接调用 ContextBuilder，还是先在 Hermes/ConversationEngine 内部接入 |
+| 0.7 | 文档事实源同步 | document-stage-map / implementation-gap | 实施中 | `implementation-gap.md`、`document-stage-map.md`、本计划对当前状态描述一致 |
+
+### 当前质量门禁 Blockers
+
+| Blocker | 影响 | 处理要求 |
+|---|---|---|
+| `scripts/validate_manifest.py` 失败 | Agent package/tool 动态加载链路不稳定 | 修复 `agents.myj...` 包路径导入问题 |
+| `ruff check` 失败 | 不能提交 | 修复 Hermes 闭包变量、长行、尾随空白、测试变量名 |
+| MCP/Admin/Approval 已有实验代码 | 提交范围不清 | 决定纳入当前提交，或标记为实验性并隔离默认路径 |
 
 ### 输出文档
 
