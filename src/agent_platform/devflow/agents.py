@@ -1,3 +1,5 @@
+"""开发流程中的架构分析和测试生成 Agent。"""
+
 from __future__ import annotations
 
 import logging
@@ -9,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class DesignBrief(BaseModel):
+    """架构设计分析的输出摘要。"""
     decision: str
     reason: str
     components: list[str] = Field(default_factory=list)
@@ -17,6 +20,7 @@ class DesignBrief(BaseModel):
 
 
 class GeneratedTestPlan(BaseModel):
+    """自动生成的测试计划。"""
     agent_id: str
     test_files: list[str] = Field(default_factory=list)
     eval_cases: list[dict[str, Any]] = Field(default_factory=list)
@@ -64,6 +68,7 @@ class ArchitectureDesignAgent:
     ]
 
     def analyze(self, requirement_text: str, context: dict[str, Any] | None = None) -> DesignBrief:
+        """分析需求文本并返回架构落地建议。"""
         landing_type = "agent:change"
         components: list[str] = []
         risks: list[str] = []
@@ -108,6 +113,7 @@ class TestGenerationAgent:
         change_type: str,
         changed_files: list[str] | None = None,
     ) -> GeneratedTestPlan:
+        """根据变更类型生成测试文件和评测用例。"""
         test_files: list[str] = []
         eval_cases: list[dict[str, Any]] = []
 

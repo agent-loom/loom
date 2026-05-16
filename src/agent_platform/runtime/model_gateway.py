@@ -1,3 +1,5 @@
+"""模型网关层，统一管理多种 LLM 提供商的调用与路由。"""
+
 from __future__ import annotations
 
 import json
@@ -11,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 
 class ModelMessage(BaseModel):
+    """模型对话消息，包含角色、内容及可选的工具调用信息。"""
+
     tool_calls: list[Any] | None = None
     tool_call_id: str | None = None
     role: str
@@ -18,12 +22,16 @@ class ModelMessage(BaseModel):
 
 
 class ToolCall(BaseModel):
+    """模型返回的工具调用请求。"""
+
     id: str = ""
     name: str
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
 class ModelResponse(BaseModel):
+    """模型推理响应，包含文本内容、工具调用和用量统计。"""
+
     content: str = ""
     tool_calls: list[ToolCall] = Field(default_factory=list)
     finish_reason: str = "stop"
@@ -33,6 +41,8 @@ class ModelResponse(BaseModel):
 
 @runtime_checkable
 class ModelProvider(Protocol):
+    """模型提供商协议，定义统一的 chat 接口。"""
+
     name: str
 
     async def chat(
@@ -62,6 +72,7 @@ class StubModelProvider:
         tools: list[dict[str, Any]] | None = None,
         stop: list[str] | None = None,
     ) -> ModelResponse:
+        """返回固定格式的存根响应，不调用真实 LLM。"""
         last_user = ""
         for m in reversed(messages):
             if m.role == "user":
@@ -87,6 +98,7 @@ class OpenAICompatibleProvider:
         default_model: str = "gpt-4o-mini",
         timeout: float = 30.0,
     ):
+        """初始化 OpenAI 兼容提供商，配置 HTTP 客户端。"""
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             headers={"Authorization": f"Bearer {api_key}"},
@@ -104,6 +116,7 @@ class OpenAICompatibleProvider:
         tools: list[dict[str, Any]] | None = None,
         stop: list[str] | None = None,
     ) -> ModelResponse:
+        """调用 OpenAI 兼容 API 进行对话补全。"""
         # Build request body
         body: dict[str, Any] = {
             "model": model or self._default_model,
@@ -160,6 +173,7 @@ class OpenAICompatibleProvider:
         )
 
     async def close(self) -> None:
+        """关闭底层 HTTP 客户端连接。"""
         await self._client.aclose()
 
 
@@ -167,6 +181,7 @@ class ModelGateway:
     """Routes model calls to the appropriate provider based on agent manifest config."""
 
     def __init__(self) -> None:
+        """初始化模型网关，创建空的提供商注册表。"""
         self._providers: dict[str, ModelProvider] = {}
 
     @classmethod
@@ -177,9 +192,11 @@ class ModelGateway:
         return gateway
 
     def register(self, provider: ModelProvider) -> None:
+        """注册一个模型提供商。"""
         self._providers[provider.name] = provider
 
     def get_provider(self, name: str) -> ModelProvider:
+        """按名称获取已注册的提供商，未找到时抛出 LookupError。"""
         try:
             return self._providers[name]
         except KeyError as exc:
@@ -195,6 +212,7 @@ class ModelGateway:
         max_tokens: int = 1024,
         tools: list[dict[str, Any]] | None = None,
     ) -> ModelResponse:
+        """通过指定提供商发起模型对话请求。"""
         provider = self.get_provider(provider_name)
         return await provider.chat(
             messages,
@@ -205,4 +223,5 @@ class ModelGateway:
         )
 
     def list_providers(self) -> list[str]:
+        """返回所有已注册提供商的名称列表。"""
         return list(self._providers.keys())

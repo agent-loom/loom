@@ -1,3 +1,5 @@
+"""部署审计日志：记录部署事件，支持回滚追踪。"""
+
 from __future__ import annotations
 
 import logging
@@ -12,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class DeploymentEvent(BaseModel):
+    """单条部署事件记录。"""
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     event_type: str
     agent_id: str
@@ -29,6 +32,7 @@ class DeploymentAuditLog:
     """Records all deployment events for audit trail and rollback support."""
 
     def __init__(self) -> None:
+        """初始化审计日志。"""
         self._events: list[DeploymentEvent] = []
         self._rollback_targets: dict[str, tuple[str, str | None]] = {}
 
@@ -39,6 +43,7 @@ class DeploymentAuditLog:
         actor: str = "system",
         artifact_id: str | None = None,
     ) -> DeploymentEvent:
+        """记录一次部署事件，并保存回滚目标版本。"""
         event = DeploymentEvent(
             event_type="deploy",
             agent_id=deployment.agent_id,
@@ -75,6 +80,7 @@ class DeploymentAuditLog:
         to_version: str,
         actor: str = "system",
     ) -> DeploymentEvent:
+        """记录一次回滚事件。"""
         event = DeploymentEvent(
             event_type="rollback",
             agent_id=agent_id,
@@ -105,6 +111,7 @@ class DeploymentAuditLog:
         channel: str | None = None,
         limit: int = 50,
     ) -> list[DeploymentEvent]:
+        """按条件筛选并返回最近的部署事件列表。"""
         events = self._events
         if agent_id:
             events = [e for e in events if e.agent_id == agent_id]
@@ -113,5 +120,6 @@ class DeploymentAuditLog:
         return events[-limit:]
 
     def clear(self) -> None:
+        """清空所有事件和回滚目标。"""
         self._events.clear()
         self._rollback_targets.clear()

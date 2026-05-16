@@ -1,3 +1,5 @@
+"""运行时上下文构建器，组装系统提示、消息历史、工具定义和知识片段。"""
+
 from __future__ import annotations
 
 import logging
@@ -10,6 +12,8 @@ from agent_platform.domain.models import AgentRequest, AgentSpec, SessionMessage
 logger = logging.getLogger(__name__)
 
 class RuntimeContext(BaseModel):
+    """运行时上下文数据，包含提示词、消息、工具和元数据。"""
+
     system_prompt: str = ""
     messages: list[dict[str, str]] = Field(default_factory=list)
     tools: list[dict[str, Any]] = Field(default_factory=list)
@@ -26,6 +30,7 @@ class ContextBuilder:
         session_history: list[SessionMessage] | None = None,
         knowledge_results: list[str] | None = None,
     ) -> RuntimeContext:
+        """从请求、会话历史和知识库结果构建完整的运行时上下文。"""
         # 1. Load system prompt from manifest prompts
         system_prompt = self._load_system_prompt(spec)
 

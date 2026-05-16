@@ -1,3 +1,5 @@
+"""Agent 评测运行器，加载用例并生成评测报告。"""
+
 import json
 from typing import Any
 
@@ -9,18 +11,21 @@ from agent_platform.runtime.manager import RuntimeManager
 
 
 class EvalCase(BaseModel):
+    """单个评测用例，包含输入和预期输出。"""
     id: str
     input: dict[str, Any]
     expected: dict[str, Any] = Field(default_factory=dict)
 
 
 class EvalCaseResult(BaseModel):
+    """单个评测用例的执行结果。"""
     id: str
     passed: bool
     reason: str | None = None
 
 
 class EvalReport(BaseModel):
+    """评测报告，汇总通过率和质量门禁结果。"""
     agent_id: str
     agent_version: str = ""
     total: int
@@ -32,10 +37,14 @@ class EvalReport(BaseModel):
 
 
 class EvalRunner:
+    """评测运行器，执行评测用例并生成报告。"""
+
     def __init__(self, runtime_manager: RuntimeManager | None = None):
+        """初始化评测运行器。"""
         self.runtime_manager = runtime_manager or RuntimeManager()
 
     async def run_agent(self, spec: AgentSpec) -> EvalReport:
+        """运行指定 Agent 的全部评测用例并返回报告。"""
         cases = self._load_cases(spec)
         results: list[EvalCaseResult] = []
 
@@ -100,6 +109,7 @@ class EvalRunner:
         )
 
     async def run_agent_to_file(self, spec: AgentSpec, report_path: str) -> EvalReport:
+        """运行评测并将报告写入 JSON 文件。"""
         report = await self.run_agent(spec)
         with open(report_path, "w", encoding="utf-8") as file:
             json.dump(report.model_dump(mode="json"), file, ensure_ascii=False, indent=2)

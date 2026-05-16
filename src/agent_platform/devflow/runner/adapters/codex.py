@@ -1,3 +1,5 @@
+"""Codex CLI 适配器，通过子进程调用 Codex 执行编码任务。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -24,8 +26,10 @@ def _build_safe_env() -> dict[str, str]:
 
 
 class CodexAdapter:
+    """Codex CLI 适配器。"""
 
     def __init__(self, *, cli_path: str = "codex", model: str | None = None):
+        """初始化 Codex 适配器。"""
         self.cli_path = cli_path
         self.model = model
         self._process: asyncio.subprocess.Process | None = None
@@ -41,6 +45,7 @@ class CodexAdapter:
         task: DevelopmentTask,
         timeout_seconds: int = 600,
     ) -> RunnerAdapterResult:
+        """执行编码任务，超时则取消并返回错误。"""
         prompt = self._build_prompt(task)
         cmd = [self.cli_path, "--approval-mode", "full-auto", "--quiet"]
         if self.model:
@@ -72,10 +77,12 @@ class CodexAdapter:
             )
 
     async def cancel(self) -> None:
+        """取消正在运行的子进程。"""
         if self._process and self._process.returncode is None:
             self._process.terminate()
 
     async def health_check(self) -> bool:
+        """检查 Codex CLI 是否可用。"""
         try:
             proc = await asyncio.create_subprocess_exec(
                 self.cli_path, "--version",

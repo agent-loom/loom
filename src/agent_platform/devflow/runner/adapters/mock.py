@@ -1,3 +1,5 @@
+"""Mock 适配器，用于测试场景的虚拟 Runner。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,8 +9,10 @@ from agent_platform.devflow.task_pack import DevelopmentTask
 
 
 class MockRunnerAdapter:
+    """用于测试的模拟 Runner 适配器。"""
 
     def __init__(self, *, should_fail: bool = False):
+        """初始化 Mock 适配器。"""
         self.should_fail = should_fail
         self._cancelled = False
 
@@ -23,6 +27,7 @@ class MockRunnerAdapter:
         task: DevelopmentTask,
         timeout_seconds: int = 600,
     ) -> RunnerAdapterResult:
+        """模拟执行编码任务，根据配置返回成功或失败。"""
         if self.should_fail:
             return RunnerAdapterResult(
                 exit_code=1,
@@ -47,7 +52,9 @@ class MockRunnerAdapter:
         )
 
     async def cancel(self) -> None:
+        """标记任务为已取消。"""
         self._cancelled = True
 
     async def health_check(self) -> bool:
+        """始终返回健康状态。"""
         return True

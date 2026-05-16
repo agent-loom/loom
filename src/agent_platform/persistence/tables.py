@@ -1,3 +1,5 @@
+"""SQLAlchemy ORM 表定义，包含审计 Mixin 和各领域实体的行模型。"""
+
 from __future__ import annotations
 
 import uuid
@@ -18,6 +20,7 @@ from agent_platform.storage.base import Base
 
 
 class AuditMixin:
+    """审计字段 Mixin，提供 id、tenant_id、操作人和时间戳列。"""
     id: Mapped[str] = mapped_column(
         String(64), primary_key=True, default=lambda: uuid.uuid4().hex
     )
@@ -42,6 +45,7 @@ class AuditMixin:
 
 
 class AgentDefinitionRow(AuditMixin, Base):
+    """Agent 定义表行模型。"""
     __tablename__ = "agent_definitions"
 
     agent_id: Mapped[str] = mapped_column(
@@ -59,6 +63,7 @@ class AgentDefinitionRow(AuditMixin, Base):
 
 
 class AgentDeploymentRow(AuditMixin, Base):
+    """Agent 部署表行模型。"""
     __tablename__ = "agent_deployments"
 
     deployment_id: Mapped[str] = mapped_column(
@@ -82,6 +87,7 @@ class AgentDeploymentRow(AuditMixin, Base):
 
 
 class DeploymentAuditEventRow(AuditMixin, Base):
+    """部署审计事件表行模型。"""
     __tablename__ = "deployment_audit_events"
 
     event_type: Mapped[str] = mapped_column(
@@ -117,6 +123,7 @@ class DeploymentAuditEventRow(AuditMixin, Base):
 
 
 class AgentRunRow(AuditMixin, Base):
+    """Agent 运行记录表行模型。"""
     __tablename__ = "agent_runs"
 
     run_id: Mapped[str] = mapped_column(
@@ -158,6 +165,7 @@ class AgentRunRow(AuditMixin, Base):
 
 
 class AgentSessionRow(AuditMixin, Base):
+    """Agent 会话表行模型。"""
     __tablename__ = "agent_sessions"
 
     session_id: Mapped[str] = mapped_column(
@@ -184,6 +192,7 @@ class AgentSessionRow(AuditMixin, Base):
 
 
 class WebhookDeliveryRow(AuditMixin, Base):
+    """Webhook 投递记录表行模型。"""
     __tablename__ = "webhook_deliveries"
 
     delivery_id: Mapped[str] = mapped_column(
@@ -207,6 +216,7 @@ class WebhookDeliveryRow(AuditMixin, Base):
 
 
 class EvalRunRow(AuditMixin, Base):
+    """评估运行记录表行模型。"""
     __tablename__ = "eval_runs"
 
     agent_id: Mapped[str] = mapped_column(

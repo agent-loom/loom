@@ -1,3 +1,5 @@
+"""原生运行时后端，支持编排器模式和自定义适配器加载。"""
+
 from __future__ import annotations
 
 import importlib
@@ -26,11 +28,14 @@ logger = logging.getLogger(__name__)
 
 
 class NativeRuntimeBackend:
+    """原生运行时后端，内置编排器和适配器加载机制。"""
+
     name = "native"
 
     def __init__(
         self, tool_executor: ToolExecutor | None = None,
     ):
+        """初始化原生后端，可选注入工具执行器。"""
         self.tool_executor = tool_executor or ToolExecutor(
             create_default_tool_registry()
         )
@@ -56,6 +61,7 @@ class NativeRuntimeBackend:
     async def run(
         self, request: RuntimeRequest,
     ) -> RuntimeResponse:
+        """根据 Agent 入口模式分发请求到编排器或适配器。"""
         self._ensure_agent_tools(request.agent_spec)
         entry_mode = request.agent_spec.manifest.entry.mode
 

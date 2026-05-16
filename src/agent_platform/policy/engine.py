@@ -1,3 +1,5 @@
+"""策略引擎：安全规则、路由规则和输出管控的加载与执行。"""
+
 from __future__ import annotations
 
 import logging
@@ -14,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class PolicyViolation(BaseModel):
+    """策略违规记录。"""
     policy_type: str
     rule_id: str
     message: str
@@ -21,6 +24,7 @@ class PolicyViolation(BaseModel):
 
 
 class SafetyRule(BaseModel):
+    """安全规则定义，支持 PII 检测、拒绝模式等。"""
     id: str
     type: str
     description: str = ""
@@ -30,6 +34,7 @@ class SafetyRule(BaseModel):
 
 
 class RoutingRule(BaseModel):
+    """意图路由规则，基于关键词匹配将请求分发给对应 Worker。"""
     intent: str
     keywords: list[str] = Field(default_factory=list)
     worker: str = ""
@@ -38,6 +43,7 @@ class RoutingRule(BaseModel):
 
 
 class PolicySet(BaseModel):
+    """策略集合，包含安全规则、路由规则和输出配置。"""
     safety_rules: list[SafetyRule] = Field(default_factory=list)
     routing_rules: list[RoutingRule] = Field(default_factory=list)
     output_config: dict[str, Any] = Field(default_factory=dict)
@@ -47,9 +53,11 @@ class PolicyEngine:
     """Loads and enforces agent policies (safety, routing, output) at runtime."""
 
     def __init__(self) -> None:
+        """初始化策略引擎。"""
         self._cache: dict[str, PolicySet] = {}
 
     def load_policies(self, spec: AgentSpec) -> PolicySet:
+        """加载 Agent 的策略集，结果会被缓存。"""
         cache_key = f"{spec.agent_id}@{spec.version}"
         if cache_key in self._cache:
             return self._cache[cache_key]
@@ -72,6 +80,7 @@ class PolicyEngine:
         return policy_set
 
     def check_input(self, text: str, policy_set: PolicySet) -> list[PolicyViolation]:
+        """检查输入文本是否违反安全规则。"""
         violations: list[PolicyViolation] = []
         for rule in policy_set.safety_rules:
             if rule.type == "pii_guard" and rule.pattern:
@@ -91,6 +100,7 @@ class PolicyEngine:
         return violations
 
     def check_output(self, text: str, policy_set: PolicySet) -> list[PolicyViolation]:
+        """检查输出文本是否违反安全规则。"""
         violations: list[PolicyViolation] = []
         for rule in policy_set.safety_rules:
             if rule.type == "deny_output_pattern" and rule.pattern:
@@ -113,6 +123,7 @@ class PolicyEngine:
     def check_commands(
         self, commands: list[dict[str, Any]], allowlist: list[str],
     ) -> list[PolicyViolation]:
+        """检查命令列表是否符合白名单策略。"""
         if not allowlist:
             return []
         violations: list[PolicyViolation] = []
@@ -127,6 +138,7 @@ class PolicyEngine:
         return violations
 
     def check_tool_allowed(self, tool_name: str, policy_set: PolicySet) -> list[PolicyViolation]:
+        """检查指定工具是否被安全策略拒绝。"""
         violations: list[PolicyViolation] = []
         for rule in policy_set.safety_rules:
             if rule.type == "deny_tools" and tool_name in rule.tools:
@@ -138,6 +150,7 @@ class PolicyEngine:
         return violations
 
     def route_intent(self, query: str, policy_set: PolicySet) -> RoutingRule | None:
+        """根据关键词匹配路由用户意图，返回最佳匹配规则。"""
         best: RoutingRule | None = None
         best_score = 0.0
         for rule in policy_set.routing_rules:

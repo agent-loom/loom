@@ -1,3 +1,5 @@
+"""基于令牌桶的 API 限流中间件。"""
+
 from __future__ import annotations
 
 import time
@@ -20,6 +22,7 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         requests_per_minute: int = 60,
         burst: int = 10,
     ):
+        """初始化限流中间件。"""
         super().__init__(app)
         self.rate = requests_per_minute / 60.0
         self.burst = burst
@@ -28,6 +31,7 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         )
 
     async def dispatch(self, request: Request, call_next):
+        """拦截请求并执行令牌桶限流检查。"""
         if request.url.path in {"/health", "/docs", "/openapi.json", "/redoc"}:
             return await call_next(request)
 
@@ -62,13 +66,17 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
 
 
 class _TokenBucket:
+    """令牌桶算法实现，用于单客户端限流。"""
+
     def __init__(self, rate: float, burst: int):
+        """初始化令牌桶。"""
         self.rate = rate
         self.burst = burst
         self.tokens = float(burst)
         self.last_refill = time.monotonic()
 
     def consume(self) -> bool:
+        """尝试消费一个令牌，成功返回 True。"""
         now = time.monotonic()
         elapsed = now - self.last_refill
         self.tokens = min(self.burst, self.tokens + elapsed * self.rate)

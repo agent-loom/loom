@@ -26,6 +26,7 @@ class EnvSecretBackend:
     """
 
     def get(self, key: str, *, tenant_id: str | None = None) -> str | None:
+        """获取密钥值，优先匹配租户作用域的环境变量。"""
         if tenant_id is not None:
             scoped_key = f"{tenant_id.replace('-', '_').upper()}_{key}"
             value = os.environ.get(scoped_key)
@@ -34,6 +35,7 @@ class EnvSecretBackend:
         return os.environ.get(key)
 
     def exists(self, key: str, *, tenant_id: str | None = None) -> bool:
+        """检查密钥是否存在。"""
         return self.get(key, tenant_id=tenant_id) is not None
 
 
@@ -43,6 +45,7 @@ class SecretResolver:
     SECRET_PATTERN = re.compile(r"^\$secret:([A-Z0-9_]+(?:/[A-Z0-9_]+)?)$")
 
     def __init__(self, backend: SecretBackend) -> None:
+        """初始化解析器，绑定密钥后端。"""
         self._backend = backend
 
     def resolve_config(

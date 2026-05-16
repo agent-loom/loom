@@ -1,3 +1,5 @@
+"""Agent Manifest 加载器：解析、校验 manifest.yaml 并生成 AgentSpec。"""
+
 import re
 from pathlib import Path
 from typing import Any
@@ -11,7 +13,7 @@ from agent_platform.tools import create_default_tool_registry, load_agent_tools
 
 
 class ManifestError(ValueError):
-    pass
+    """Manifest 格式或内容校验失败时抛出。"""
 
 
 _AGENT_ID_PATTERN = re.compile(r"^[a-z0-9_-]+$")
@@ -28,7 +30,10 @@ _SUPPORTED_OUTPUT_CAPABILITIES = {"text", "tts", "cards", "commands", "debug"}
 
 
 class ManifestLoader:
+    """加载并校验 Agent manifest.yaml，返回 AgentSpec。"""
+
     def __init__(self, registered_tools: set[str] | None = None):
+        """初始化加载器，可选传入已注册工具集合。"""
         self._explicit_tools = registered_tools
         # When None, tools are discovered dynamically per-package
         # via load_agent_tools in load_file().
@@ -37,6 +42,7 @@ class ManifestLoader:
         )
 
     def load_file(self, path: Path) -> AgentSpec:
+        """从指定路径加载 manifest.yaml 并返回校验后的 AgentSpec。"""
         manifest_path = path.resolve()
         if not manifest_path.exists():
             raise ManifestError(f"manifest not found: {path}")

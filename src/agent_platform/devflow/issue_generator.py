@@ -1,3 +1,5 @@
+"""根据解析后的需求自动生成 Issue。"""
+
 from __future__ import annotations
 
 import logging
@@ -11,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class GeneratedIssue(BaseModel):
+    """自动生成的 Issue 数据模型。"""
     title: str
     type: str
     description: str
@@ -21,6 +24,7 @@ class GeneratedIssue(BaseModel):
 
 
 class IssueGenerator:
+    """根据解析后的需求生成结构化 Issue 列表。"""
     ISSUE_TEMPLATE = """## 背景
 
 {background}
@@ -65,6 +69,7 @@ staging → eval gate → human review → prod canary → prod
         requirement: ParsedRequirement,
         project_context: dict[str, Any] | None = None,
     ) -> list[GeneratedIssue]:
+        """根据需求类型生成对应的 Issue 列表。"""
         project_context = project_context or {}
         issues: list[GeneratedIssue] = []
 

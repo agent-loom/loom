@@ -1,3 +1,5 @@
+"""基于关键词和正则的语义路由器。"""
+
 from __future__ import annotations
 
 import logging
@@ -9,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SemanticMatch:
+    """语义路由的匹配结果。"""
     agent_id: str
     confidence: float
     matched_keywords: list[str] = field(default_factory=list)
@@ -17,6 +20,7 @@ class SemanticMatch:
 
 @dataclass
 class SemanticRule:
+    """语义路由规则，包含关键词和正则模式。"""
     agent_id: str
     keywords: list[str] = field(default_factory=list)
     patterns: list[str] = field(default_factory=list)
@@ -31,13 +35,16 @@ class SemanticRouter:
     """
 
     def __init__(self, confidence_threshold: float = 0.85) -> None:
+        """初始化语义路由器。"""
         self.confidence_threshold = confidence_threshold
         self._rules: list[SemanticRule] = []
 
     def add_rule(self, rule: SemanticRule) -> None:
+        """添加一条语义路由规则。"""
         self._rules.append(rule)
 
     def match(self, query: str) -> SemanticMatch | None:
+        """匹配查询文本，返回置信度最高且超过阈值的结果。"""
         best: SemanticMatch | None = None
         best_score = 0.0
 
@@ -66,4 +73,5 @@ class SemanticRouter:
         return None
 
     def clear(self) -> None:
+        """清空所有路由规则。"""
         self._rules.clear()

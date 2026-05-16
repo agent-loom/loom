@@ -44,14 +44,20 @@ class ToolPermissionDecision(BaseModel):
 
 
 class Allowed(ToolPermissionDecision):
+    """允许使用工具。"""
+
     allowed: bool = True
 
 
 class Denied(ToolPermissionDecision):
+    """拒绝使用工具。"""
+
     allowed: bool = False
 
 
 class RequiresApproval(ToolPermissionDecision):
+    """需要人工审批后方可使用工具。"""
+
     allowed: bool = False
     requires_approval: bool = True
 

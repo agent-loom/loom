@@ -1,3 +1,5 @@
+"""各 Repository 协议的 SQLAlchemy 异步实现。"""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -46,14 +48,18 @@ def _fill_audit(row: Any) -> None:
 
 
 class SqlAgentDefinitionRepository:
+    """Agent 定义的 SQL 存储实现。"""
+
     def __init__(
         self, session_factory: async_sessionmaker[AsyncSession]
     ) -> None:
+        """初始化，注入异步数据库会话工厂。"""
         self._sf = session_factory
 
     async def save(
         self, definition: AgentDefinition
     ) -> None:
+        """将 Agent 定义持久化到数据库。"""
         row = AgentDefinitionRow(
             agent_id=definition.agent_id,
             version=definition.version,
@@ -72,6 +78,7 @@ class SqlAgentDefinitionRepository:
     async def get(
         self, agent_id: str, version: str
     ) -> AgentDefinition | None:
+        """按 agent_id 和版本查询定义。"""
         stmt = select(AgentDefinitionRow).where(
             AgentDefinitionRow.agent_id == agent_id,
             AgentDefinitionRow.version == version,
@@ -86,6 +93,7 @@ class SqlAgentDefinitionRepository:
     async def get_latest(
         self, agent_id: str
     ) -> AgentDefinition | None:
+        """获取指定 agent 的最新版本定义。"""
         stmt = (
             select(AgentDefinitionRow)
             .where(AgentDefinitionRow.agent_id == agent_id)
@@ -102,6 +110,7 @@ class SqlAgentDefinitionRepository:
     async def list_all(
         self, *, status: str | None = None
     ) -> list[AgentDefinition]:
+        """列出所有定义，可按状态过滤。"""
         stmt = select(AgentDefinitionRow)
         if status is not None:
             stmt = stmt.where(
@@ -115,6 +124,7 @@ class SqlAgentDefinitionRepository:
     async def update_status(
         self, agent_id: str, version: str, status: str
     ) -> None:
+        """更新指定定义的状态字段。"""
         stmt = select(AgentDefinitionRow).where(
             AgentDefinitionRow.agent_id == agent_id,
             AgentDefinitionRow.version == version,
@@ -153,14 +163,18 @@ class SqlAgentDefinitionRepository:
 
 
 class SqlAgentDeploymentRepository:
+    """Agent 部署记录的 SQL 存储实现。"""
+
     def __init__(
         self, session_factory: async_sessionmaker[AsyncSession]
     ) -> None:
+        """初始化，注入异步数据库会话工厂。"""
         self._sf = session_factory
 
     async def save(
         self, deployment: AgentDeployment
     ) -> None:
+        """将部署记录持久化到数据库。"""
         row = AgentDeploymentRow(
             deployment_id=deployment.deployment_id,
             agent_id=deployment.agent_id,
@@ -179,6 +193,7 @@ class SqlAgentDeploymentRepository:
     async def get(
         self, deployment_id: str
     ) -> AgentDeployment | None:
+        """按 deployment_id 获取部署记录。"""
         stmt = select(AgentDeploymentRow).where(
             AgentDeploymentRow.deployment_id == deployment_id
         )
@@ -196,6 +211,7 @@ class SqlAgentDeploymentRepository:
         channel: str,
         tenant_id: str | None = None,
     ) -> AgentDeployment | None:
+        """按 agent_id、渠道和租户解析部署记录。"""
         stmt = select(AgentDeploymentRow).where(
             AgentDeploymentRow.agent_id == agent_id,
             AgentDeploymentRow.channel == channel,
@@ -218,6 +234,7 @@ class SqlAgentDeploymentRepository:
         agent_id: str | None = None,
         tenant_id: str | None = None,
     ) -> list[AgentDeployment]:
+        """列出所有部署，可按 agent_id 或租户过滤。"""
         stmt = select(AgentDeploymentRow)
         if agent_id is not None:
             stmt = stmt.where(
@@ -233,6 +250,7 @@ class SqlAgentDeploymentRepository:
             return [self._to_domain(r) for r in rows]
 
     async def delete(self, deployment_id: str) -> None:
+        """删除指定部署记录。"""
         stmt = select(AgentDeploymentRow).where(
             AgentDeploymentRow.deployment_id == deployment_id
         )
@@ -264,14 +282,18 @@ class SqlAgentDeploymentRepository:
 
 
 class SqlDeploymentAuditRepository:
+    """部署审计事件的 SQL 存储实现。"""
+
     def __init__(
         self, session_factory: async_sessionmaker[AsyncSession]
     ) -> None:
+        """初始化，注入异步数据库会话工厂。"""
         self._sf = session_factory
 
     async def record(
         self, event: DeploymentEvent
     ) -> None:
+        """将审计事件持久化到数据库。"""
         row = DeploymentAuditEventRow(
             event_type=event.event_type,
             agent_id=event.agent_id,
@@ -298,6 +320,7 @@ class SqlDeploymentAuditRepository:
         tenant_id: str | None = None,
         limit: int = 50,
     ) -> list[DeploymentEvent]:
+        """列出审计事件，可按条件过滤。"""
         stmt = select(DeploymentAuditEventRow)
         if agent_id is not None:
             stmt = stmt.where(
@@ -322,6 +345,7 @@ class SqlDeploymentAuditRepository:
     async def get_rollback_version(
         self, agent_id: str, channel: str
     ) -> str | None:
+        """查询可回滚的上一版本号。"""
         stmt = (
             select(DeploymentAuditEventRow)
             .where(
@@ -368,12 +392,16 @@ class SqlDeploymentAuditRepository:
 
 
 class SqlAgentRunRepository:
+    """Agent 运行记录的 SQL 存储实现。"""
+
     def __init__(
         self, session_factory: async_sessionmaker[AsyncSession]
     ) -> None:
+        """初始化，注入异步数据库会话工厂。"""
         self._sf = session_factory
 
     async def record(self, run: AgentRun) -> None:
+        """将运行记录持久化到数据库。"""
         row = AgentRunRow(
             run_id=run.run_id,
             request_id=run.request_id,
@@ -403,6 +431,7 @@ class SqlAgentRunRepository:
     async def get(
         self, run_id: str
     ) -> AgentRun | None:
+        """按 run_id 获取运行记录。"""
         stmt = select(AgentRunRow).where(
             AgentRunRow.run_id == run_id
         )
@@ -421,6 +450,7 @@ class SqlAgentRunRepository:
         tenant_id: str | None = None,
         limit: int = 100,
     ) -> list[AgentRun]:
+        """列出运行记录，可按条件过滤。"""
         stmt = select(AgentRunRow)
         if agent_id is not None:
             stmt = stmt.where(
@@ -475,14 +505,18 @@ class SqlAgentRunRepository:
 
 
 class SqlAgentSessionRepository:
+    """Agent 会话的 SQL 存储实现。"""
+
     def __init__(
         self, session_factory: async_sessionmaker[AsyncSession]
     ) -> None:
+        """初始化，注入异步数据库会话工厂。"""
         self._sf = session_factory
 
     async def save(
         self, session: AgentSession
     ) -> None:
+        """将会话持久化到数据库。"""
         row = AgentSessionRow(
             session_id=session.session_id,
             agent_id=session.agent_id,
@@ -507,6 +541,7 @@ class SqlAgentSessionRepository:
     async def load(
         self, session_id: str
     ) -> AgentSession | None:
+        """按 session_id 加载会话。"""
         stmt = select(AgentSessionRow).where(
             AgentSessionRow.session_id == session_id
         )
@@ -518,6 +553,7 @@ class SqlAgentSessionRepository:
             return self._to_domain(row)
 
     async def delete(self, session_id: str) -> None:
+        """删除指定会话。"""
         stmt = select(AgentSessionRow).where(
             AgentSessionRow.session_id == session_id
         )
@@ -534,6 +570,7 @@ class SqlAgentSessionRepository:
         agent_id: str | None = None,
         tenant_id: str | None = None,
     ) -> list[AgentSession]:
+        """列出会话，可按 agent_id 或租户过滤。"""
         stmt = select(AgentSessionRow)
         if agent_id is not None:
             stmt = stmt.where(
@@ -576,12 +613,16 @@ class SqlAgentSessionRepository:
 
 
 class SqlWebhookDeliveryRepository:
+    """Webhook 投递记录的 SQL 存储实现。"""
+
     def __init__(
         self, session_factory: async_sessionmaker[AsyncSession]
     ) -> None:
+        """初始化，注入异步数据库会话工厂。"""
         self._sf = session_factory
 
     async def exists(self, delivery_id: str) -> bool:
+        """判断投递记录是否已存在。"""
         stmt = select(WebhookDeliveryRow).where(
             WebhookDeliveryRow.delivery_id == delivery_id
         )
@@ -599,6 +640,7 @@ class SqlWebhookDeliveryRepository:
         payload: dict[str, Any] | None = None,
         error_message: str | None = None,
     ) -> None:
+        """将 Webhook 投递记录持久化到数据库。"""
         row = WebhookDeliveryRow(
             delivery_id=delivery_id,
             source=source,
@@ -619,9 +661,12 @@ class SqlWebhookDeliveryRepository:
 
 
 class SqlEvalRunRepository:
+    """评估运行记录的 SQL 存储实现。"""
+
     def __init__(
         self, session_factory: async_sessionmaker[AsyncSession]
     ) -> None:
+        """初始化，注入异步数据库会话工厂。"""
         self._sf = session_factory
 
     async def record(
@@ -637,6 +682,7 @@ class SqlEvalRunRepository:
         results: list[dict[str, Any]],
         trigger: str = "manual",
     ) -> None:
+        """将评估记录持久化到数据库。"""
         row = EvalRunRow(
             agent_id=agent_id,
             agent_version=agent_version,
@@ -656,6 +702,7 @@ class SqlEvalRunRepository:
     async def get_latest(
         self, agent_id: str
     ) -> dict[str, Any] | None:
+        """获取指定 agent 最近一次评估结果。"""
         stmt = (
             select(EvalRunRow)
             .where(EvalRunRow.agent_id == agent_id)
@@ -676,6 +723,7 @@ class SqlEvalRunRepository:
         tenant_id: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
+        """列出评估记录，可按条件过滤。"""
         stmt = select(EvalRunRow)
         if agent_id is not None:
             stmt = stmt.where(

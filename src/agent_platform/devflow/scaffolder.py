@@ -1,3 +1,5 @@
+"""Agent Package 脚手架，从模板创建新 Agent 目录结构。"""
+
 from __future__ import annotations
 
 import logging
@@ -141,6 +143,7 @@ class AgentScaffolder:
     """Creates a new Agent Package directory structure from templates."""
 
     def __init__(self, agents_root: str | Path = "agents"):
+        """初始化脚手架，指定 Agent 包的根目录。"""
         self.agents_root = Path(agents_root)
 
     def create(
@@ -152,6 +155,7 @@ class AgentScaffolder:
         domain: str = "general",
         mode: str = "single_worker",
     ) -> Path:
+        """创建完整的 Agent Package 目录结构和模板文件。"""
         agent_dir = self.agents_root / agent_id
         if agent_dir.exists():
             raise FileExistsError(f"agent directory already exists: {agent_dir}")
@@ -201,4 +205,5 @@ class AgentScaffolder:
         return agent_dir
 
     def list_templates(self) -> list[str]:
+        """返回可用的 Agent 模板列表。"""
         return ["single_worker", "orchestrator_workers", "graph"]

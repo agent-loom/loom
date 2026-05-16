@@ -1,3 +1,5 @@
+"""Runner 适配器协议定义。"""
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
@@ -7,6 +9,7 @@ from agent_platform.devflow.task_pack import DevelopmentTask
 
 @runtime_checkable
 class RunnerAdapter(Protocol):
+    """Runner 适配器协议，定义执行、取消和健康检查接口。"""
 
     @property
     def adapter_type(self) -> str: ...
@@ -25,6 +28,7 @@ class RunnerAdapter(Protocol):
 
 
 class RunnerAdapterResult:
+    """Runner 适配器的执行结果。"""
 
     def __init__(
         self,
@@ -35,6 +39,7 @@ class RunnerAdapterResult:
         stderr: str = "",
         error_message: str | None = None,
     ):
+        """初始化执行结果。"""
         self.exit_code = exit_code
         self.changed_files = changed_files or []
         self.stdout = stdout

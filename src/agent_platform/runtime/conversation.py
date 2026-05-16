@@ -1,3 +1,5 @@
+"""对话引擎，管理 LLM 调用与工具执行的迭代循环。"""
+
 from __future__ import annotations
 
 import logging
@@ -18,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 
 class ConversationResult:
+    """对话执行结果，包含展示文本、工具调用追踪和迭代次数。"""
+
     def __init__(
         self,
         display: str,
@@ -25,6 +29,7 @@ class ConversationResult:
         model_used: str | None = None,
         total_iterations: int = 0,
     ):
+        """初始化对话结果。"""
         self.display = display
         self.tool_traces = tool_traces or []
         self.model_used = model_used
@@ -39,6 +44,7 @@ class ConversationEngine:
         model_gateway: ModelGateway,
         tool_executor: ToolExecutor,
     ):
+        """初始化对话引擎，注入模型网关和工具执行器。"""
         self.model_gateway = model_gateway
         self.tool_executor = tool_executor
 
@@ -48,6 +54,7 @@ class ConversationEngine:
         spec: AgentSpec,
         request: RuntimeRequest,
     ) -> ConversationResult:
+        """执行对话循环：LLM 推理 -> 工具调用 -> 结果汇总。"""
         max_iterations = spec.manifest.runtime.max_iterations
         model_config = spec.manifest.models.get("default")
         if not model_config:

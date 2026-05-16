@@ -1,3 +1,5 @@
+"""WebSocket 实时通信管理器。"""
+
 from __future__ import annotations
 
 import json
@@ -22,11 +24,13 @@ class AgentWebSocketManager:
         router: AgentRouter,
         runtime_manager: RuntimeManager,
     ):
+        """初始化 WebSocket 管理器。"""
         self.router = router
         self.runtime_manager = runtime_manager
         self._connections: dict[str, WebSocket] = {}
 
     async def handle(self, websocket: WebSocket, session_id: str | None = None) -> None:
+        """处理 WebSocket 连接的完整生命周期。"""
         await websocket.accept()
         ws_id = session_id or f"ws_{id(websocket)}"
         self._connections[ws_id] = websocket

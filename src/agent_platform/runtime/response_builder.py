@@ -1,3 +1,5 @@
+"""响应构建器，将运行时执行结果组装为协议兼容的 AgentResponse。"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -30,6 +32,7 @@ class ResponseBuilder:
         trace: ResponseTrace | None = None,
         debug: dict[str, Any] | None = None,
     ) -> AgentResponse:
+        """根据执行结果构建标准 AgentResponse。"""
         agent = request.agent_spec
 
         # Filter commands against allowlist
@@ -60,6 +63,7 @@ class ResponseBuilder:
         )
 
     def build_handoff(self, request: RuntimeRequest, reason: str) -> AgentResponse:
+        """构建转人工响应。"""
         return self.build(
             request,
             display=reason,
@@ -68,6 +72,7 @@ class ResponseBuilder:
         )
 
     def build_clarification(self, request: RuntimeRequest, question: str) -> AgentResponse:
+        """构建澄清追问响应。"""
         return self.build(
             request,
             display=question,

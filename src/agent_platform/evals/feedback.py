@@ -1,3 +1,5 @@
+"""评测结果反馈，将报告推送到 GitLab MR 和 Plane 工作项。"""
+
 from __future__ import annotations
 
 import logging
@@ -11,12 +13,15 @@ logger = logging.getLogger(__name__)
 
 
 class EvalFeedback:
+    """将评测报告发布到 GitLab、Plane 并持久化。"""
+
     def __init__(
         self,
         gitlab: GitLabAdapter | None = None,
         plane: PlaneAdapter | None = None,
         eval_repo: EvalRunRepository | None = None,
     ):
+        """初始化评测反馈服务。"""
         self.gitlab = gitlab
         self.plane = plane
         self.eval_repo = eval_repo
@@ -29,6 +34,7 @@ class EvalFeedback:
         *,
         commit_sha: str | None = None,
     ) -> None:
+        """将评测报告作为评论发布到 GitLab MR。"""
         if not self.gitlab:
             return
         body = self.format_report_markdown(report)
@@ -47,6 +53,7 @@ class EvalFeedback:
                 logger.warning("Failed to set commit status for %s", commit_sha)
 
     async def persist(self, report: EvalReport, *, trigger: str = "ci") -> None:
+        """将评测报告持久化到数据库。"""
         if not self.eval_repo:
             return
         await self.eval_repo.record(
@@ -69,6 +76,7 @@ class EvalFeedback:
         *,
         review_state_id: str,
     ) -> None:
+        """将评测结果同步到 Plane 工作项并更新状态。"""
         if not self.plane:
             return
         comment = self.format_report_markdown(report)
@@ -79,6 +87,7 @@ class EvalFeedback:
 
     @staticmethod
     def format_report_markdown(report: EvalReport) -> str:
+        """将评测报告格式化为 Markdown 文本。"""
         status = "PASSED" if report.gate_passed else "FAILED"
         lines = [
             f"## Eval Report: {report.agent_id}",

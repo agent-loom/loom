@@ -1,3 +1,5 @@
+"""平台全局配置，通过环境变量加载。"""
+
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -6,6 +8,8 @@ from pydantic import BaseModel, Field
 
 
 class Settings(BaseModel):
+    """平台配置项，包含注册中心、数据库及第三方集成设置。"""
+
     env: str = "dev"
     registry_root: Path = Field(default=Path("agents"))
     default_agent_id: str | None = None
@@ -24,6 +28,7 @@ class Settings(BaseModel):
 
 @lru_cache
 def get_settings() -> Settings:
+    """获取全局配置单例，从环境变量初始化。"""
     return Settings(
         env=os.getenv("AGENT_PLATFORM_ENV", "dev"),
         registry_root=Path(os.getenv("AGENT_PLATFORM_REGISTRY_ROOT", "agents")),

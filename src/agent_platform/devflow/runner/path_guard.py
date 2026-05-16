@@ -1,3 +1,5 @@
+"""文件路径安全守卫，检查变更文件是否在允许范围内。"""
+
 from __future__ import annotations
 
 import fnmatch
@@ -8,12 +10,14 @@ from agent_platform.devflow.task_pack import DevelopmentTask
 
 @dataclass(frozen=True)
 class PathViolation:
+    """路径违规记录，包含路径和违规原因。"""
     path: str
     reason: str
 
 
 @dataclass
 class PathGuard:
+    """基于白名单/黑名单模式的文件路径守卫。"""
     write_allowed: list[str] = field(default_factory=list)
     write_denied: list[str] = field(default_factory=list)
 
@@ -25,6 +29,7 @@ class PathGuard:
         )
 
     def check(self, changed_files: list[str]) -> list[PathViolation]:
+        """批量检查变更文件，返回违规列表。"""
         violations: list[PathViolation] = []
         for file_path in changed_files:
             violation = self._check_single(file_path)
@@ -50,4 +55,5 @@ class PathGuard:
         )
 
     def is_allowed(self, file_path: str) -> bool:
+        """判断单个文件路径是否被允许修改。"""
         return self._check_single(file_path) is None

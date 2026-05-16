@@ -1,3 +1,5 @@
+"""Agent 注册中心：发现、注册、部署管理。"""
+
 from pathlib import Path
 
 from agent_platform.domain.models import AgentDeployment, AgentDeploymentStatus, AgentSpec
@@ -5,17 +7,21 @@ from agent_platform.registry.loader import ManifestLoader
 
 
 class AgentNotFoundError(LookupError):
-    pass
+    """在注册中心中未找到指定 Agent 时抛出。"""
 
 
 class AgentRegistry:
+    """Agent 注册中心，提供发现、注册和部署管理功能。"""
+
     def __init__(self, root: Path, loader: ManifestLoader | None = None):
+        """初始化注册中心。"""
         self.root = root
         self.loader = loader or ManifestLoader()
         self._cache: dict[str, AgentSpec] = {}
         self._deployments: dict[str, AgentDeployment] = {}
 
     def discover(self) -> dict[str, AgentSpec]:
+        """扫描 root 目录下的 manifest.yaml，发现并注册所有 Agent。"""
         self._cache.clear()
         if not self.root.exists():
             return self._cache
@@ -26,6 +32,7 @@ class AgentRegistry:
         return dict(self._cache)
 
     def register(self, spec: AgentSpec) -> AgentSpec:
+        """注册一个 AgentSpec 并创建对应的 dev 部署记录。"""
         self._cache[spec.agent_id] = spec
         self.deploy(
             agent_id=spec.agent_id,
@@ -36,11 +43,13 @@ class AgentRegistry:
         return spec
 
     def list_agents(self) -> list[AgentSpec]:
+        """列出所有已注册的 Agent，必要时自动触发发现。"""
         if not self._cache:
             self.discover()
         return list(self._cache.values())
 
     def get(self, agent_id: str) -> AgentSpec:
+        """根据 agent_id 获取 AgentSpec，未找到时抛出 AgentNotFoundError。"""
         if not self._cache:
             self.discover()
         try:
@@ -58,6 +67,7 @@ class AgentRegistry:
         tenant_id: str | None = None,
         traffic_percent: int = 100,
     ) -> AgentDeployment:
+        """创建或更新一条部署记录。"""
         if agent_id not in self._cache:
             self.get(agent_id)
 
@@ -78,6 +88,7 @@ class AgentRegistry:
         return deployment
 
     def list_deployments(self) -> list[AgentDeployment]:
+        """列出所有部署记录。"""
         if not self._cache:
             self.discover()
         return list(self._deployments.values())
@@ -89,6 +100,7 @@ class AgentRegistry:
         channel: str = "dev",
         tenant_id: str | None = None,
     ) -> AgentDeployment | None:
+        """解析指定 Agent 在给定 channel 的部署，优先匹配租户级别。"""
         if not self._cache:
             self.discover()
 
@@ -104,6 +116,7 @@ class AgentRegistry:
         channel: str = "prod",
         tenant_id: str | None = None,
     ) -> AgentDeployment | None:
+        """解析指定 Agent 的金丝雀部署。"""
         if not self._cache:
             self.discover()
 

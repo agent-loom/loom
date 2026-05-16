@@ -1,3 +1,5 @@
+"""Worker 编排器，包含多种 Worker 实现和基于评分的路由机制。"""
+
 from __future__ import annotations
 
 import logging
@@ -20,14 +22,16 @@ logger = logging.getLogger(__name__)
 
 
 class DirectReplyWorker:
-    """Fallback worker that returns a simple text response."""
+    """兜底 Worker，返回简单的文本直接回复。"""
 
     name = "direct_reply"
 
     def can_handle(self, task: AgentTask) -> RouteScore:
+        """返回最低优先级评分作为兜底。"""
         return RouteScore(worker_name=self.name, score=0.1, reason="fallback")
 
     async def run(self, task: AgentTask) -> WorkerResult:
+        """生成直接回复文本。"""
         prompt_path = task.metadata.get("direct_reply_prompt")
         if prompt_path:
             from pathlib import Path
@@ -47,20 +51,23 @@ class DirectReplyWorker:
 
 
 class HandoffWorker:
-    """Worker that handles human handoff requests."""
+    """转人工 Worker，处理用户的人工客服转接请求。"""
 
     name = "handoff"
 
     def __init__(self, handoff_intents: list[str] | None = None):
+        """初始化转人工 Worker，配置触发意图关键词。"""
         self.handoff_intents = handoff_intents or ["转人工"]
 
     def can_handle(self, task: AgentTask) -> RouteScore:
+        """检测用户消息中是否包含转人工关键词。"""
         for intent in self.handoff_intents:
             if intent in task.query:
                 return RouteScore(worker_name=self.name, score=1.0, reason="handoff_keyword")
         return RouteScore(worker_name=self.name, score=0.0, reason="no_match")
 
     async def run(self, task: AgentTask) -> WorkerResult:
+        """执行转人工流程，返回转接提示和指令。"""
         return WorkerResult(
             worker_name=self.name,
             display="正在为您转接人工客服，请稍候...",
@@ -70,7 +77,7 @@ class HandoffWorker:
 
 
 class ToolWorker:
-    """Generic worker that routes to a specific tool based on keywords."""
+    """基于关键词匹配的工具调用 Worker。"""
 
     def __init__(
         self,
@@ -79,12 +86,14 @@ class ToolWorker:
         keywords: list[str],
         tool_executor: ToolExecutor | None = None,
     ):
+        """初始化工具 Worker，配置关键词和工具执行器。"""
         self.name = name
         self.tool_name = tool_name
         self.keywords = keywords
         self.tool_executor = tool_executor
 
     def can_handle(self, task: AgentTask) -> RouteScore:
+        """根据关键词匹配比例计算路由评分。"""
         matches = sum(1 for kw in self.keywords if kw in task.query)
         if not self.keywords:
             return RouteScore(worker_name=self.name, score=0.0, reason="no_keywords")
@@ -96,6 +105,7 @@ class ToolWorker:
         )
 
     async def run(self, task: AgentTask) -> WorkerResult:
+        """执行关联工具并返回结果。"""
         if self.tool_executor:
             result = await self.tool_executor.execute(
                 self.tool_name,
@@ -117,20 +127,22 @@ class ToolWorker:
 
 
 class WorkerOrchestrator:
-    """Orchestrates multiple AgentWorkers for the orchestrator_workers entry mode.
+    """Worker 编排器，基于评分路由将任务分发给最佳 Worker。
 
-    Routes incoming tasks to the best-scoring worker based on can_handle() scores.
-    Falls back to default_worker if no worker scores above threshold.
+    当没有 Worker 评分超过阈值时回退到默认 Worker。
     """
 
     def __init__(self, default_worker_name: str = "direct_reply"):
+        """初始化编排器，指定默认回退 Worker 名称。"""
         self._workers: dict[str, AgentWorker] = {}
         self._default_worker_name = default_worker_name
 
     def register(self, worker: AgentWorker) -> None:
+        """注册一个 Worker 到编排器。"""
         self._workers[worker.name] = worker
 
     async def route_and_run(self, request: RuntimeRequest) -> RuntimeResponse:
+        """评分路由请求到最佳 Worker 并执行，返回运行时响应。"""
         spec = request.agent_spec
         query = request.request.input.query
 

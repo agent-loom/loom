@@ -1,3 +1,5 @@
+"""编码任务运行器的数据模型定义。"""
+
 from __future__ import annotations
 
 import enum
@@ -11,6 +13,7 @@ def _utc_now() -> datetime:
 
 
 class JobState(enum.StrEnum):
+    """编码任务的生命周期状态。"""
     PENDING = "pending"
     WORKSPACE_CREATING = "workspace_creating"
     RUNNING = "running"
@@ -23,6 +26,7 @@ class JobState(enum.StrEnum):
 
 
 class ResultStatus(enum.StrEnum):
+    """运行结果的状态枚举。"""
     SUCCESS = "success"
     VALIDATION_FAILED = "validation_failed"
     RUNNER_ERROR = "runner_error"
@@ -32,6 +36,7 @@ class ResultStatus(enum.StrEnum):
 
 
 class CommandResult(BaseModel):
+    """单条验证命令的执行结果。"""
     command: str
     exit_code: int
     stdout: str = ""
@@ -40,12 +45,14 @@ class CommandResult(BaseModel):
 
 
 class ValidationResult(BaseModel):
+    """验证阶段的汇总结果。"""
     commands_executed: list[CommandResult] = Field(default_factory=list)
     all_passed: bool = False
     report_paths: list[str] = Field(default_factory=list)
 
 
 class RunnerInvocation(BaseModel):
+    """Runner 的单次调用记录。"""
     invocation_id: str
     attempt: int = 1
     adapter_type: str = ""
@@ -57,6 +64,7 @@ class RunnerInvocation(BaseModel):
 
 
 class RunnerResult(BaseModel):
+    """Runner 的最终执行结果。"""
     status: ResultStatus
     changed_files: list[str] = Field(default_factory=list)
     validation: ValidationResult = Field(default_factory=ValidationResult)
@@ -66,6 +74,7 @@ class RunnerResult(BaseModel):
 
 
 class CodingJob(BaseModel):
+    """编码任务的完整状态，包含调用记录和结果。"""
     job_id: str
     task_id: str
     state: JobState = JobState.PENDING

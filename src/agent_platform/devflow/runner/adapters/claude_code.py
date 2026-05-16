@@ -1,3 +1,5 @@
+"""Claude Code CLI 适配器，通过子进程调用 Claude Code 执行编码任务。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -24,6 +26,7 @@ def _build_safe_env() -> dict[str, str]:
 
 
 class ClaudeCodeAdapter:
+    """Claude Code CLI 适配器。"""
 
     def __init__(
         self,
@@ -32,6 +35,7 @@ class ClaudeCodeAdapter:
         max_turns: int = 30,
         model: str | None = None,
     ):
+        """初始化 Claude Code 适配器。"""
         self.cli_path = cli_path
         self.max_turns = max_turns
         self.model = model
@@ -48,6 +52,7 @@ class ClaudeCodeAdapter:
         task: DevelopmentTask,
         timeout_seconds: int = 600,
     ) -> RunnerAdapterResult:
+        """执行编码任务，超时则取消并返回错误。"""
         prompt = self._build_prompt(task)
 
         cmd = [
@@ -90,6 +95,7 @@ class ClaudeCodeAdapter:
             )
 
     async def cancel(self) -> None:
+        """取消正在运行的子进程。"""
         if self._process and self._process.returncode is None:
             self._process.terminate()
             try:
@@ -98,6 +104,7 @@ class ClaudeCodeAdapter:
                 self._process.kill()
 
     async def health_check(self) -> bool:
+        """检查 Claude Code CLI 是否可用。"""
         try:
             proc = await asyncio.create_subprocess_exec(
                 self.cli_path, "--version",

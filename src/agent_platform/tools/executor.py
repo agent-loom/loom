@@ -1,3 +1,5 @@
+"""工具执行器：权限检查、输入校验、超时重试、生命周期 Hook。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -15,12 +17,15 @@ logger = logging.getLogger(__name__)
 
 
 class ToolExecutionResult(BaseModel):
+    """工具执行结果，包含输出数据和调用追踪信息。"""
     tool_name: str
     output: dict[str, Any] = Field(default_factory=dict)
     trace: ToolCallTrace
 
 
 class ToolExecutor:
+    """工具执行器，负责权限检查、输入校验及带重试的异步执行。"""
+
     def __init__(
         self,
         registry: ToolRegistry,
@@ -28,6 +33,7 @@ class ToolExecutor:
         hook_registry: Any | None = None,
         metrics_collector: Any | None = None,
     ):
+        """初始化执行器，注入注册中心、策略引擎及可选的 Hook 与指标收集器。"""
         self.registry = registry
         self.policy_engine = policy_engine
         self.hook_registry = hook_registry
@@ -42,6 +48,7 @@ class ToolExecutor:
         timeout_ms: int = 3000,
         agent_spec: Any | None = None,
     ) -> ToolExecutionResult:
+        """异步执行指定工具，返回执行结果与追踪信息。"""
         started = perf_counter()
         if tool_name not in allowed_tools:
             latency_ms = self._latency_ms(started)

@@ -1,3 +1,5 @@
+"""工具注册中心：定义、注册、发现与动态加载 Agent 工具。"""
+
 from __future__ import annotations
 
 import importlib
@@ -17,6 +19,7 @@ ToolHandler = Callable[
 
 
 class ToolDefinition(BaseModel):
+    """工具定义，包含名称、Schema、超时、权限及处理函数。"""
     name: str
     description: str
     input_schema: dict[str, Any] = Field(default_factory=dict)
@@ -33,10 +36,14 @@ class ToolDefinition(BaseModel):
 
 
 class ToolRegistry:
+    """工具注册中心，管理工具的注册、查找和按所有者过滤。"""
+
     def __init__(self) -> None:
+        """初始化空的工具注册中心。"""
         self._tools: dict[str, ToolDefinition] = {}
 
     def register(self, definition: ToolDefinition) -> None:
+        """注册一个工具定义。"""
         self._tools[definition.name] = definition
 
     def unregister(self, name: str) -> None:
@@ -44,12 +51,14 @@ class ToolRegistry:
         self._tools.pop(name, None)
 
     def get(self, name: str) -> ToolDefinition:
+        """根据名称获取工具定义，未找到时抛出 LookupError。"""
         try:
             return self._tools[name]
         except KeyError as exc:
             raise LookupError(f"tool not found: {name}") from exc
 
     def list_tools(self) -> list[ToolDefinition]:
+        """列出所有已注册的工具。"""
         return list(self._tools.values())
 
     def list_by_owner(self, owner: str) -> list[ToolDefinition]:

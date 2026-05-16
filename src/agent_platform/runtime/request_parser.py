@@ -1,3 +1,5 @@
+"""请求解析器，负责协议版本检测与请求格式归一化。"""
+
 from __future__ import annotations
 
 import logging
@@ -25,6 +27,7 @@ class RequestParser:
         return AgentRequest.model_validate(raw)
 
     def detect_version(self, raw: dict[str, Any]) -> str:
+        """检测请求的协议版本号。"""
         return raw.get("protocol_version", "agent-chat/v1")
 
     def _normalize_v2(self, raw: dict[str, Any]) -> dict[str, Any]:

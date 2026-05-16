@@ -1,3 +1,5 @@
+"""SSE (Server-Sent Events) 流式响应支持。"""
+
 from __future__ import annotations
 
 import json
@@ -9,11 +11,15 @@ from agent_platform.runtime.manager import RuntimeManager
 
 
 class SSEEvent:
+    """表示一个 SSE 事件，包含事件类型和数据负载。"""
+
     def __init__(self, event: str, data: dict[str, Any]) -> None:
+        """初始化 SSE 事件。"""
         self.event = event
         self.data = data
 
     def encode(self) -> str:
+        """将事件编码为 SSE 文本格式。"""
         payload = json.dumps(self.data, ensure_ascii=False)
         return f"event: {self.event}\ndata: {payload}\n\n"
 
@@ -22,6 +28,7 @@ async def stream_agent_response(
     runtime_manager: RuntimeManager,
     runtime_request: RuntimeRequest,
 ) -> AsyncGenerator[str, None]:
+    """以 SSE 流的方式输出 Agent 运行结果。"""
     agent = runtime_request.agent_spec
     yield SSEEvent("run.started", {
         "agent_id": agent.agent_id,

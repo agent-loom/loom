@@ -1,3 +1,5 @@
+"""会话存储层，提供内存和文件两种持久化实现。"""
+
 from __future__ import annotations
 
 import json
@@ -12,6 +14,8 @@ logger = logging.getLogger(__name__)
 
 @runtime_checkable
 class SessionStore(Protocol):
+    """会话存储协议，定义 CRUD 接口。"""
+
     def load(self, session_id: str) -> AgentSession | None: ...
     def save(self, session: AgentSession) -> None: ...
     def delete(self, session_id: str) -> None: ...
@@ -19,19 +23,26 @@ class SessionStore(Protocol):
 
 
 class InMemorySessionStore:
+    """基于内存字典的会话存储实现。"""
+
     def __init__(self) -> None:
+        """初始化空的内存存储。"""
         self._store: dict[str, AgentSession] = {}
 
     def load(self, session_id: str) -> AgentSession | None:
+        """按 ID 加载会话，不存在时返回 None。"""
         return self._store.get(session_id)
 
     def save(self, session: AgentSession) -> None:
+        """保存或更新会话。"""
         self._store[session.session_id] = session
 
     def delete(self, session_id: str) -> None:
+        """删除指定会话。"""
         self._store.pop(session_id, None)
 
     def list_sessions(self, agent_id: str | None = None) -> list[AgentSession]:
+        """列出所有会话，可按 agent_id 过滤。"""
         sessions = list(self._store.values())
         if agent_id:
             sessions = [s for s in sessions if s.agent_id == agent_id]
@@ -42,6 +53,7 @@ class FileSessionStore:
     """File-based session persistence. Each session is a JSON file."""
 
     def __init__(self, base_dir: str | Path = ".sessions") -> None:
+        """初始化文件存储，自动创建目录。"""
         self._base_dir = Path(base_dir)
         self._base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -50,6 +62,7 @@ class FileSessionStore:
         return self._base_dir / f"{safe_id}.json"
 
     def load(self, session_id: str) -> AgentSession | None:
+        """从文件加载会话，解析失败返回 None。"""
         path = self._path(session_id)
         if not path.exists():
             return None
@@ -61,16 +74,19 @@ class FileSessionStore:
             return None
 
     def save(self, session: AgentSession) -> None:
+        """将会话序列化为 JSON 文件。"""
         path = self._path(session.session_id)
         data = session.model_dump(mode="json")
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def delete(self, session_id: str) -> None:
+        """删除指定会话的文件。"""
         path = self._path(session_id)
         if path.exists():
             path.unlink()
 
     def list_sessions(self, agent_id: str | None = None) -> list[AgentSession]:
+        """列出目录下所有会话，可按 agent_id 过滤。"""
         sessions: list[AgentSession] = []
         for path in self._base_dir.glob("*.json"):
             try:

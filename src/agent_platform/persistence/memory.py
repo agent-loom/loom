@@ -1,3 +1,5 @@
+"""各 Repository 协议的内存实现，用于测试和开发环境。"""
+
 from __future__ import annotations
 
 import uuid
@@ -14,7 +16,10 @@ from agent_platform.registry.deployment import DeploymentEvent
 
 
 class InMemoryAgentDefinitionRepository:
+    """Agent 定义的内存存储实现。"""
+
     def __init__(self) -> None:
+        """初始化内存字典存储。"""
         self._store: dict[str, AgentDefinition] = {}
 
     @staticmethod
@@ -24,17 +29,20 @@ class InMemoryAgentDefinitionRepository:
     async def save(
         self, definition: AgentDefinition
     ) -> None:
+        """保存 Agent 定义到内存。"""
         key = self._key(definition.agent_id, definition.version)
         self._store[key] = definition
 
     async def get(
         self, agent_id: str, version: str
     ) -> AgentDefinition | None:
+        """按 agent_id 和版本获取定义。"""
         return self._store.get(self._key(agent_id, version))
 
     async def get_latest(
         self, agent_id: str
     ) -> AgentDefinition | None:
+        """获取指定 agent 的最新版本定义。"""
         matches = [
             d
             for d in self._store.values()
@@ -47,6 +55,7 @@ class InMemoryAgentDefinitionRepository:
     async def list_all(
         self, *, status: str | None = None
     ) -> list[AgentDefinition]:
+        """列出所有定义，可按状态过滤。"""
         items = list(self._store.values())
         if status is not None:
             items = [d for d in items if d.status == status]
@@ -55,6 +64,7 @@ class InMemoryAgentDefinitionRepository:
     async def update_status(
         self, agent_id: str, version: str, status: str
     ) -> None:
+        """更新指定定义的状态。"""
         key = self._key(agent_id, version)
         defn = self._store.get(key)
         if defn is not None:
@@ -63,17 +73,22 @@ class InMemoryAgentDefinitionRepository:
 
 
 class InMemoryAgentDeploymentRepository:
+    """Agent 部署记录的内存存储实现。"""
+
     def __init__(self) -> None:
+        """初始化内存字典存储。"""
         self._store: dict[str, AgentDeployment] = {}
 
     async def save(
         self, deployment: AgentDeployment
     ) -> None:
+        """保存部署记录。"""
         self._store[deployment.deployment_id] = deployment
 
     async def get(
         self, deployment_id: str
     ) -> AgentDeployment | None:
+        """按 deployment_id 获取部署记录。"""
         return self._store.get(deployment_id)
 
     async def resolve(
@@ -83,6 +98,7 @@ class InMemoryAgentDeploymentRepository:
         channel: str,
         tenant_id: str | None = None,
     ) -> AgentDeployment | None:
+        """按 agent_id、渠道和租户解析部署记录。"""
         for dep in self._store.values():
             if dep.agent_id != agent_id:
                 continue
@@ -99,6 +115,7 @@ class InMemoryAgentDeploymentRepository:
         agent_id: str | None = None,
         tenant_id: str | None = None,
     ) -> list[AgentDeployment]:
+        """列出所有部署，可按 agent_id 或租户过滤。"""
         items = list(self._store.values())
         if agent_id is not None:
             items = [
@@ -111,17 +128,22 @@ class InMemoryAgentDeploymentRepository:
         return items
 
     async def delete(self, deployment_id: str) -> None:
+        """删除指定部署记录。"""
         self._store.pop(deployment_id, None)
 
 
 class InMemoryDeploymentAuditRepository:
+    """部署审计事件的内存存储实现。"""
+
     def __init__(self) -> None:
+        """初始化事件列表和回滚版本映射。"""
         self._events: list[DeploymentEvent] = []
         self._rollback: dict[str, str] = {}
 
     async def record(
         self, event: DeploymentEvent
     ) -> None:
+        """记录一条部署审计事件。"""
         self._events.append(event)
         if event.previous_version:
             key = f"{event.agent_id}:{event.channel}"
@@ -135,6 +157,7 @@ class InMemoryDeploymentAuditRepository:
         tenant_id: str | None = None,
         limit: int = 50,
     ) -> list[DeploymentEvent]:
+        """列出审计事件，可按条件过滤。"""
         result = self._events
         if agent_id is not None:
             result = [
@@ -149,20 +172,26 @@ class InMemoryDeploymentAuditRepository:
     async def get_rollback_version(
         self, agent_id: str, channel: str
     ) -> str | None:
+        """获取可回滚的上一版本号。"""
         key = f"{agent_id}:{channel}"
         return self._rollback.get(key)
 
 
 class InMemoryAgentRunRepository:
+    """Agent 运行记录的内存存储实现。"""
+
     def __init__(self) -> None:
+        """初始化内存字典存储。"""
         self._store: dict[str, AgentRun] = {}
 
     async def record(self, run: AgentRun) -> None:
+        """保存一条运行记录。"""
         self._store[run.run_id] = run
 
     async def get(
         self, run_id: str
     ) -> AgentRun | None:
+        """按 run_id 获取运行记录。"""
         return self._store.get(run_id)
 
     async def list_runs(
@@ -173,6 +202,7 @@ class InMemoryAgentRunRepository:
         tenant_id: str | None = None,
         limit: int = 100,
     ) -> list[AgentRun]:
+        """列出运行记录，可按条件过滤。"""
         items = list(self._store.values())
         if agent_id is not None:
             items = [
@@ -187,20 +217,26 @@ class InMemoryAgentRunRepository:
 
 
 class InMemoryAgentSessionRepository:
+    """Agent 会话的内存存储实现。"""
+
     def __init__(self) -> None:
+        """初始化内存字典存储。"""
         self._store: dict[str, AgentSession] = {}
 
     async def save(
         self, session: AgentSession
     ) -> None:
+        """保存会话。"""
         self._store[session.session_id] = session
 
     async def load(
         self, session_id: str
     ) -> AgentSession | None:
+        """按 session_id 加载会话。"""
         return self._store.get(session_id)
 
     async def delete(self, session_id: str) -> None:
+        """删除指定会话。"""
         self._store.pop(session_id, None)
 
     async def list_sessions(
@@ -209,6 +245,7 @@ class InMemoryAgentSessionRepository:
         agent_id: str | None = None,
         tenant_id: str | None = None,
     ) -> list[AgentSession]:
+        """列出会话，可按 agent_id 或租户过滤。"""
         items = list(self._store.values())
         if agent_id is not None:
             items = [
@@ -222,10 +259,14 @@ class InMemoryAgentSessionRepository:
 
 
 class InMemoryWebhookDeliveryRepository:
+    """Webhook 投递记录的内存存储实现。"""
+
     def __init__(self) -> None:
+        """初始化内存字典存储。"""
         self._store: dict[str, dict[str, Any]] = {}
 
     async def exists(self, delivery_id: str) -> bool:
+        """判断投递记录是否已存在。"""
         return delivery_id in self._store
 
     async def record(
@@ -238,6 +279,7 @@ class InMemoryWebhookDeliveryRepository:
         payload: dict[str, Any] | None = None,
         error_message: str | None = None,
     ) -> None:
+        """记录一条 Webhook 投递。"""
         self._store[delivery_id] = {
             "delivery_id": delivery_id,
             "source": source,
@@ -250,7 +292,10 @@ class InMemoryWebhookDeliveryRepository:
 
 
 class InMemoryEvalRunRepository:
+    """评估运行记录的内存存储实现。"""
+
     def __init__(self) -> None:
+        """初始化内存列表存储。"""
         self._runs: list[dict[str, Any]] = []
 
     async def record(
@@ -266,6 +311,7 @@ class InMemoryEvalRunRepository:
         results: list[dict[str, Any]],
         trigger: str = "manual",
     ) -> None:
+        """记录一次评估运行。"""
         self._runs.append({
             "id": uuid.uuid4().hex,
             "agent_id": agent_id,
@@ -283,6 +329,7 @@ class InMemoryEvalRunRepository:
     async def get_latest(
         self, agent_id: str
     ) -> dict[str, Any] | None:
+        """获取指定 agent 最近一次评估结果。"""
         matches = [
             r for r in self._runs
             if r["agent_id"] == agent_id
@@ -296,6 +343,7 @@ class InMemoryEvalRunRepository:
         tenant_id: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
+        """列出评估记录，可按条件过滤。"""
         items = self._runs
         if agent_id is not None:
             items = [

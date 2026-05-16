@@ -1,3 +1,5 @@
+"""LangGraph 风格运行时后端，基于状态图实现节点路由和工具调用循环。"""
+
 from __future__ import annotations
 
 import logging
@@ -27,7 +29,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 class GraphState(TypedDict, total=False):
-    """State that flows through every node in the graph."""
+    """状态图中流转的状态数据。"""
 
     messages: list[dict[str, Any]]
     query: str
@@ -44,15 +46,16 @@ class GraphState(TypedDict, total=False):
 # ---------------------------------------------------------------------------
 
 class _Edge:
-    """A simple edge: source -> destination (always taken)."""
+    """简单边：从源节点到目标节点的无条件连接。"""
 
     def __init__(self, source: str, destination: str) -> None:
+        """初始化边，指定源节点和目标节点。"""
         self.source = source
         self.destination = destination
 
 
 class _ConditionalEdge:
-    """A conditional edge: source -> one-of-many destinations via *router*."""
+    """条件边：通过路由函数从源节点选择目标节点。"""
 
     def __init__(
         self,
@@ -60,6 +63,7 @@ class _ConditionalEdge:
         router: Any,
         mapping: dict[str, str],
     ) -> None:
+        """初始化条件边，配置路由函数和目标映射。"""
         self.source = source
         self.router = router
         self.mapping = mapping  # router-return-value -> node name
@@ -70,13 +74,14 @@ END = "__end__"
 
 
 class StateGraph:
-    """Minimal state-graph executor that mirrors the LangGraph API surface.
+    """轻量级状态图执行器，兼容 LangGraph API 接口。
 
-    Nodes are async callables ``(state) -> state``.
-    Edges connect nodes; conditional edges select the next node at runtime.
+    节点为异步函数 ``(state) -> state``，边连接节点，
+    条件边在运行时动态选择下一节点。
     """
 
     def __init__(self) -> None:
+        """初始化空的状态图。"""
         self._nodes: dict[str, Any] = {}
         self._edges: list[_Edge] = []
         self._conditional_edges: list[_ConditionalEdge] = []
@@ -85,9 +90,11 @@ class StateGraph:
     # -- building API -------------------------------------------------------
 
     def add_node(self, name: str, func: Any) -> None:
+        """注册一个命名节点及其处理函数。"""
         self._nodes[name] = func
 
     def add_edge(self, source: str, destination: str) -> None:
+        """添加从源节点到目标节点的静态边。"""
         if source == START:
             self._entry_point = destination
         else:
@@ -99,12 +106,13 @@ class StateGraph:
         router: Any,
         mapping: dict[str, str],
     ) -> None:
+        """添加条件边，通过路由函数动态选择目标节点。"""
         self._conditional_edges.append(
             _ConditionalEdge(source, router, mapping)
         )
 
     def compile(self) -> StateGraph:
-        """Validate wiring and return self (mirrors LangGraph .compile())."""
+        """校验图的连接关系并返回自身（兼容 LangGraph .compile()）。"""
         if self._entry_point is None:
             raise ValueError("No entry point: add an edge from START.")
         return self
@@ -112,7 +120,7 @@ class StateGraph:
     # -- execution ----------------------------------------------------------
 
     async def ainvoke(self, state: dict[str, Any]) -> dict[str, Any]:
-        """Execute the graph asynchronously, mutating *state* in-place."""
+        """异步执行状态图，沿边遍历直到到达终止节点。"""
         current = self._entry_point
         if current is None:
             raise RuntimeError("Graph has no entry point.")
@@ -153,10 +161,9 @@ class StateGraph:
 # ---------------------------------------------------------------------------
 
 async def classify_intent(state: GraphState) -> GraphState:
-    """Determine which tool (if any) should handle the query.
+    """意图分类节点，通过关键词匹配确定应调用的工具。
 
-    Uses simple keyword matching against the tool registry keywords for the
-    MVP.  Sets ``matched_tool`` and ``pending_tool_calls`` in state.
+    设置 state 中的 matched_tool 和 pending_tool_calls。
     """
     query = state.get("query", "")
     allowed_tools = state.get("allowed_tools", [])
@@ -180,7 +187,7 @@ async def classify_intent(state: GraphState) -> GraphState:
 
 
 async def call_tool(state: GraphState) -> GraphState:
-    """Execute the tool identified by ``classify_intent``."""
+    """工具调用节点，执行 classify_intent 匹配到的工具。"""
     tool_executor: ToolExecutor | None = state.get("_tool_executor")  # type: ignore[assignment]
     tool_name = state.get("matched_tool")
     query = state.get("query", "")
@@ -216,7 +223,7 @@ async def call_tool(state: GraphState) -> GraphState:
 
 
 async def generate_response(state: GraphState) -> GraphState:
-    """Format a final answer from accumulated tool results."""
+    """响应生成节点，将工具执行结果格式化为最终回答。"""
     tool_results = state.get("tool_results") or []
 
     if tool_results:
@@ -236,10 +243,10 @@ async def generate_response(state: GraphState) -> GraphState:
 
 
 def should_continue(state: GraphState) -> str:
-    """Conditional edge router.
+    """条件边路由函数。
 
-    Returns ``"continue"`` when there are still pending tool calls *and* we
-    have not exceeded the maximum iteration budget.  Otherwise ``"end"``.
+    有待处理工具调用且未超出迭代上限时返回 "continue"，
+    否则返回 "end"。
     """
     max_iterations = state.get("_max_iterations", 4)  # type: ignore[arg-type]
     iteration_count = state.get("iteration_count", 0)
@@ -258,13 +265,10 @@ def should_continue(state: GraphState) -> str:
 # ---------------------------------------------------------------------------
 
 class LangGraphRuntimeBackend:
-    """LangGraph-based runtime backend.
+    """基于状态图的 LangGraph 运行时后端。
 
-    Implements a self-contained state-graph executor that follows the LangGraph
-    paradigm (nodes as async functions, edges as routing) without importing
-    any external graph library.
-
-    Supports the ``graph`` entry mode from the agent manifest.
+    内置状态图执行器，遵循 LangGraph 范式（节点为异步函数，
+    边为路由），无需引入外部图库。
     """
 
     name = "langgraph"
@@ -272,6 +276,7 @@ class LangGraphRuntimeBackend:
     def __init__(
         self, tool_executor: ToolExecutor | None = None,
     ) -> None:
+        """初始化 LangGraph 后端，可选注入工具执行器。"""
         self.tool_executor = tool_executor or ToolExecutor(
             create_default_tool_registry()
         )
@@ -323,6 +328,7 @@ class LangGraphRuntimeBackend:
     # -- execution ----------------------------------------------------------
 
     async def run(self, request: RuntimeRequest) -> RuntimeResponse:
+        """构建状态图并执行请求，返回运行时响应。"""
         self._ensure_agent_tools(request.agent_spec)
         agent = request.agent_spec
         query = request.request.input.query

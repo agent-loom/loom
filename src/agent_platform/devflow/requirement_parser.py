@@ -1,3 +1,5 @@
+"""需求文本解析器，将自然语言需求转化为结构化数据。"""
+
 from __future__ import annotations
 
 import logging
@@ -9,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class ParsedRequirement(BaseModel):
+    """解析后的结构化需求。"""
     title: str
     goal: str
     users: list[str] = Field(default_factory=list)
@@ -22,12 +25,14 @@ class ParsedRequirement(BaseModel):
 
 
 class RequirementParser:
+    """基于关键词的需求解析器，推断任务类型和目标 Agent。"""
     KEYWORDS_NEW_AGENT = {"新增", "新建", "创建", "新的", "new"}
     KEYWORDS_CHANGE = {"修改", "更新", "改", "change", "update"}
     KEYWORDS_TOOL = {"工具", "tool", "接口", "API"}
     KEYWORDS_KNOWLEDGE = {"知识", "knowledge", "数据", "同步"}
 
     def parse(self, raw_text: str, context: dict[str, Any] | None = None) -> ParsedRequirement:
+        """解析原始需求文本并返回结构化需求。"""
         context = context or {}
         lines = [line.strip() for line in raw_text.strip().split("\n") if line.strip()]
         title = lines[0] if lines else "Untitled"

@@ -11,6 +11,7 @@ class MetricsCollector:
     """Tracks counters, histograms and gauges, and formats them as Prometheus text."""
 
     def __init__(self) -> None:
+        """初始化计数器、仪表盘和观测值存储。"""
         self._lock = threading.Lock()
 
         # Counters: (metric_name, frozen_label_tuple) -> float
@@ -82,15 +83,19 @@ class MetricsCollector:
     # ------------------------------------------------------------------
 
     def record_request(self, agent_id: str, status: str) -> None:
+        """记录一次 Agent 请求（按 agent_id 和状态分类）。"""
         self.inc_counter("agent_requests_total", {"agent_id": agent_id, "status": status})
 
     def record_duration(self, agent_id: str, duration: float) -> None:
+        """记录一次 Agent 请求耗时（秒）。"""
         self.observe("agent_request_duration_seconds", duration, {"agent_id": agent_id})
 
     def record_tool_call(self, tool_name: str, status: str) -> None:
+        """记录一次工具调用（按工具名和状态分类）。"""
         self.inc_counter("tool_calls_total", {"tool_name": tool_name, "status": status})
 
     def set_active_sessions(self, count: int) -> None:
+        """设置当前活跃会话数。"""
         self.set_gauge("active_sessions", float(count))
 
     # ------------------------------------------------------------------

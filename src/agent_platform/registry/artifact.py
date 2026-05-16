@@ -1,3 +1,5 @@
+"""Agent 制品存储：打包、校验和版本管理。"""
+
 from __future__ import annotations
 
 import hashlib
@@ -13,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class ArtifactMetadata(BaseModel):
+    """制品元数据，包含校验和与文件清单。"""
     artifact_id: str
     agent_id: str
     version: str
@@ -26,6 +29,7 @@ class ArtifactStore:
     """In-memory store for agent artifacts (tar.gz packages with metadata and checksums)."""
 
     def __init__(self) -> None:
+        """初始化内存制品存储。"""
         self._artifacts: dict[str, ArtifactMetadata] = {}
         self._artifact_data: dict[str, bytes] = {}
 
@@ -68,18 +72,22 @@ class ArtifactStore:
         return metadata
 
     def get_metadata(self, artifact_id: str) -> ArtifactMetadata | None:
+        """根据制品 ID 获取元数据，不存在时返回 None。"""
         return self._artifacts.get(artifact_id)
 
     def get_data(self, artifact_id: str) -> bytes | None:
+        """获取制品的原始 tar.gz 数据。"""
         return self._artifact_data.get(artifact_id)
 
     def list_artifacts(self, agent_id: str | None = None) -> list[ArtifactMetadata]:
+        """列出所有制品，可按 agent_id 过滤。"""
         artifacts = list(self._artifacts.values())
         if agent_id:
             artifacts = [a for a in artifacts if a.agent_id == agent_id]
         return artifacts
 
     def verify_checksum(self, artifact_id: str) -> bool:
+        """校验制品数据的 SHA256 是否与元数据一致。"""
         metadata = self._artifacts.get(artifact_id)
         data = self._artifact_data.get(artifact_id)
         if not metadata or not data:

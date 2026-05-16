@@ -1,9 +1,12 @@
+"""GitLab API 适配器，封装 GitLab REST API 常用操作。"""
+
 from typing import Any
 
 import httpx
 
 
 class GitLabAdapter:
+    """GitLab API 异步适配器，支持分支、MR、Pipeline 等操作。"""
     def __init__(
         self,
         base_url: str,
@@ -11,6 +14,7 @@ class GitLabAdapter:
         *,
         transport: httpx.AsyncBaseTransport | None = None,
     ):
+        """初始化 GitLab 适配器。"""
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.transport = transport
@@ -25,6 +29,7 @@ class GitLabAdapter:
         branch: str,
         ref: str = "main",
     ) -> dict[str, Any]:
+        """基于指定 ref 创建新分支。"""
         return await self._request(
             "POST",
             f"/api/v4/projects/{project_id}/repository/branches",
@@ -41,6 +46,7 @@ class GitLabAdapter:
         labels: list[str] | None = None,
         reviewer_ids: list[int] | None = None,
     ) -> dict[str, Any]:
+        """创建合并请求 (Merge Request)。"""
         payload: dict[str, Any] = {
             "source_branch": source_branch,
             "target_branch": target_branch,
@@ -63,6 +69,7 @@ class GitLabAdapter:
         project_id: str,
         mr_iid: int,
     ) -> dict[str, Any]:
+        """获取指定 MR 的详情。"""
         return await self._request(
             "GET",
             f"/api/v4/projects/{project_id}/merge_requests/{mr_iid}",
@@ -74,6 +81,7 @@ class GitLabAdapter:
         mr_iid: int,
         body: str,
     ) -> dict[str, Any]:
+        """在 MR 上添加评论。"""
         return await self._request(
             "POST",
             f"/api/v4/projects/{project_id}/merge_requests/{mr_iid}/notes",
@@ -81,6 +89,7 @@ class GitLabAdapter:
         )
 
     async def get_latest_pipeline(self, project_id: str, ref: str) -> dict[str, Any] | None:
+        """获取指定 ref 上最新的 Pipeline 信息。"""
         pipelines = await self._request(
             "GET",
             f"/api/v4/projects/{project_id}/pipelines",
@@ -91,6 +100,7 @@ class GitLabAdapter:
         return pipelines[0]
 
     async def get_pipeline_status(self, project_id: str, ref: str) -> str | None:
+        """获取指定 ref 上最新 Pipeline 的状态字符串。"""
         pipeline = await self.get_latest_pipeline(project_id, ref)
         if not pipeline:
             return None
@@ -106,6 +116,7 @@ class GitLabAdapter:
         description: str = "",
         target_url: str | None = None,
     ) -> dict[str, Any]:
+        """更新指定 commit 的构建状态。"""
         payload: dict[str, Any] = {
             "state": state,
             "name": name,
@@ -124,6 +135,7 @@ class GitLabAdapter:
         project_id: str,
         job_id: int,
     ) -> bytes:
+        """下载指定 Job 的构建产物。"""
         async with httpx.AsyncClient(
             base_url=self.base_url,
             headers=self.headers,
