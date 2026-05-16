@@ -6,7 +6,9 @@ from typing import Any
 
 import pytest
 
+from agent_platform.observability.metrics import MetricsCollector
 from agent_platform.runtime.model_gateway import (
+    ChatResult,
     ModelGateway,
     ModelMessage,
     ModelProvider,
@@ -64,6 +66,64 @@ class TestModelResponse:
 
 
 # ---------------------------------------------------------------------------
+# ChatResult tests
+# ---------------------------------------------------------------------------
+
+
+class TestChatResult:
+    def test_defaults(self):
+        r = ChatResult()
+        assert r.content == ""
+        assert r.input_tokens == 0
+        assert r.output_tokens == 0
+        assert r.estimated_cost_usd == 0.0
+        assert r.model == ""
+        assert r.tool_calls == []
+        assert r.finish_reason == "stop"
+
+    def test_fields_populated(self):
+        r = ChatResult(
+            content="hello world",
+            input_tokens=100,
+            output_tokens=50,
+            estimated_cost_usd=0.0025,
+            model="gpt-4o",
+            finish_reason="stop",
+        )
+        assert r.content == "hello world"
+        assert r.input_tokens == 100
+        assert r.output_tokens == 50
+        assert r.estimated_cost_usd == 0.0025
+        assert r.model == "gpt-4o"
+
+    def test_from_model_response(self):
+        resp = ModelResponse(
+            content="answer",
+            prompt_tokens=200,
+            completion_tokens=80,
+            total_tokens=280,
+            estimated_cost_usd=0.005,
+            model="gpt-4o-mini",
+            finish_reason="stop",
+            tool_calls=[ToolCall(name="calc", arguments={"x": 1})],
+        )
+        cr = ChatResult.from_model_response(resp)
+        assert cr.content == "answer"
+        assert cr.input_tokens == 200
+        assert cr.output_tokens == 80
+        assert cr.estimated_cost_usd == 0.005
+        assert cr.model == "gpt-4o-mini"
+        assert cr.finish_reason == "stop"
+        assert len(cr.tool_calls) == 1
+        assert cr.tool_calls[0].name == "calc"
+
+    def test_from_model_response_null_cost(self):
+        resp = ModelResponse(content="ok", estimated_cost_usd=None)
+        cr = ChatResult.from_model_response(resp)
+        assert cr.estimated_cost_usd == 0.0
+
+
+# ---------------------------------------------------------------------------
 # StubModelProvider tests
 # ---------------------------------------------------------------------------
 
@@ -116,7 +176,7 @@ class TestStubModelProvider:
 
 
 # ---------------------------------------------------------------------------
-# Mock provider for gateway tests
+# Mock providers for gateway tests
 # ---------------------------------------------------------------------------
 
 
@@ -137,6 +197,34 @@ class MockProvider:
             content=f"mock reply from {model}",
             model=model,
             finish_reason="stop",
+            prompt_tokens=10,
+            completion_tokens=5,
+            total_tokens=15,
+            estimated_cost_usd=0.001,
+        )
+
+
+class AltProvider:
+    """A second provider to test multi-provider routing."""
+
+    name = "alt"
+
+    async def chat(
+        self,
+        messages: list[ModelMessage],
+        *,
+        model: str = "alt-model",
+        temperature: float = 0.2,
+        max_tokens: int = 1024,
+        tools: list[dict[str, Any]] | None = None,
+        stop: list[str] | None = None,
+    ) -> ModelResponse:
+        return ModelResponse(
+            content=f"alt reply from {model}",
+            model=model,
+            finish_reason="stop",
+            prompt_tokens=20,
+            completion_tokens=10,
         )
 
 
@@ -203,3 +291,141 @@ class TestModelGateway:
         providers = gw.list_providers()
         assert "stub" in providers
         assert "mock" in providers
+
+
+# ---------------------------------------------------------------------------
+# ChatResult fields populated correctly
+# ---------------------------------------------------------------------------
+
+
+class TestChatResultFromGateway:
+    @pytest.mark.asyncio
+    async def test_chat_returns_chat_result(self):
+        gw = ModelGateway()
+        gw.register(MockProvider())
+
+        result = await gw.chat("mock", [ModelMessage(role="user", content="hi")], model="gpt-4o")
+        assert isinstance(result, ChatResult)
+        assert result.content == "mock reply from gpt-4o"
+        assert result.input_tokens == 10
+        assert result.output_tokens == 5
+        assert result.estimated_cost_usd == 0.001
+        assert result.model == "gpt-4o"
+
+    @pytest.mark.asyncio
+    async def test_stub_returns_zero_tokens(self):
+        gw = ModelGateway.create_default()
+        result = await gw.chat("stub", [ModelMessage(role="user", content="x")], model="stub")
+        assert isinstance(result, ChatResult)
+        assert result.input_tokens == 0
+        assert result.output_tokens == 0
+        assert result.estimated_cost_usd == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Multi-provider routing
+# ---------------------------------------------------------------------------
+
+
+class TestMultiProviderRouting:
+    @pytest.mark.asyncio
+    async def test_routes_to_correct_provider(self):
+        gw = ModelGateway()
+        gw.register(MockProvider())
+        gw.register(AltProvider())
+
+        mock_result = await gw.chat("mock", [ModelMessage(role="user", content="hi")], model="m1")
+        assert mock_result.content == "mock reply from m1"
+
+        alt_result = await gw.chat("alt", [ModelMessage(role="user", content="hi")], model="m2")
+        assert alt_result.content == "alt reply from m2"
+
+    @pytest.mark.asyncio
+    async def test_model_override(self):
+        gw = ModelGateway()
+        gw.register(MockProvider())
+
+        r1 = await gw.chat("mock", [ModelMessage(role="user", content="hi")], model="model-a")
+        assert r1.model == "model-a"
+
+        r2 = await gw.chat("mock", [ModelMessage(role="user", content="hi")], model="model-b")
+        assert r2.model == "model-b"
+
+
+# ---------------------------------------------------------------------------
+# Default provider fallback
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultProviderFallback:
+    @pytest.mark.asyncio
+    async def test_uses_default_when_no_provider_name(self):
+        gw = ModelGateway(default_provider="mock")
+        gw.register(MockProvider())
+
+        result = await gw.chat(messages=[ModelMessage(role="user", content="hi")], model="m")
+        assert result.content == "mock reply from m"
+
+    @pytest.mark.asyncio
+    async def test_explicit_provider_overrides_default(self):
+        gw = ModelGateway(default_provider="mock")
+        gw.register(MockProvider())
+        gw.register(AltProvider())
+
+        result = await gw.chat("alt", [ModelMessage(role="user", content="hi")], model="m")
+        assert result.content == "alt reply from m"
+
+    @pytest.mark.asyncio
+    async def test_raises_when_no_provider_and_no_default(self):
+        gw = ModelGateway()
+        gw.register(MockProvider())
+
+        with pytest.raises(LookupError, match="no provider_name supplied"):
+            await gw.chat(messages=[ModelMessage(role="user", content="hi")], model="m")
+
+    @pytest.mark.asyncio
+    async def test_create_default_sets_stub_as_default(self):
+        gw = ModelGateway.create_default()
+        result = await gw.chat(messages=[ModelMessage(role="user", content="hi")], model="stub")
+        assert "[Stub LLM]" in result.content
+
+
+# ---------------------------------------------------------------------------
+# Metrics collector integration
+# ---------------------------------------------------------------------------
+
+
+class TestMetricsIntegration:
+    @pytest.mark.asyncio
+    async def test_records_metrics_on_chat(self):
+        mc = MetricsCollector()
+        gw = ModelGateway(default_provider="mock", metrics_collector=mc)
+        gw.register(MockProvider())
+
+        await gw.chat(messages=[ModelMessage(role="user", content="hi")], model="test-model")
+
+        prom = mc.format_prometheus()
+        assert "llm_calls_total" in prom
+        assert "llm_input_tokens_total" in prom
+        assert "llm_output_tokens_total" in prom
+        assert "llm_cost_usd_total" in prom
+        assert 'provider="mock"' in prom
+        assert 'model="test-model"' in prom
+
+    @pytest.mark.asyncio
+    async def test_no_metrics_without_collector(self):
+        gw = ModelGateway(default_provider="mock")
+        gw.register(MockProvider())
+        result = await gw.chat(messages=[ModelMessage(role="user", content="hi")], model="m")
+        assert isinstance(result, ChatResult)
+
+    @pytest.mark.asyncio
+    async def test_skips_cost_metric_when_zero(self):
+        mc = MetricsCollector()
+        gw = ModelGateway.create_default(metrics_collector=mc)
+
+        await gw.chat(messages=[ModelMessage(role="user", content="hi")], model="stub")
+
+        prom = mc.format_prometheus()
+        assert "llm_calls_total" in prom
+        assert "llm_cost_usd_total" not in prom

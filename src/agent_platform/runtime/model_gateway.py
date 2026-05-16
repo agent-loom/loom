@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import httpx
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from agent_platform.observability.metrics import MetricsCollector
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +40,34 @@ class ModelResponse(BaseModel):
     finish_reason: str = "stop"
     model: str = ""
     usage: dict[str, int] = Field(default_factory=dict)
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float | None = None
+
+
+class ChatResult(BaseModel):
+    """High-level result from ModelGateway.chat(), exposing content, token counts and cost."""
+
+    content: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+    model: str = ""
+    tool_calls: list[ToolCall] = Field(default_factory=list)
+    finish_reason: str = "stop"
+
+    @classmethod
+    def from_model_response(cls, resp: ModelResponse) -> ChatResult:
+        return cls(
+            content=resp.content,
+            input_tokens=resp.prompt_tokens,
+            output_tokens=resp.completion_tokens,
+            estimated_cost_usd=resp.estimated_cost_usd or 0.0,
+            model=resp.model,
+            tool_calls=resp.tool_calls,
+            finish_reason=resp.finish_reason,
+        )
 
 
 @runtime_checkable
@@ -164,12 +195,31 @@ class OpenAICompatibleProvider:
                 )
             )
 
+        usage = data.get("usage", {})
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+        total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
+        
+        # Super simple cost estimator (example pricing for typical models)
+        _cost_usd: float | None = None
+        _used_model = data.get("model", model or self._default_model)
+        if "gpt-4o-mini" in _used_model:
+            _cost_usd = (prompt_tokens / 1_000_000) * 0.150 + (completion_tokens / 1_000_000) * 0.600
+        elif "gpt-4o" in _used_model:
+            _cost_usd = (prompt_tokens / 1_000_000) * 5.00 + (completion_tokens / 1_000_000) * 15.00
+        elif "claude-3-5" in _used_model:
+            _cost_usd = (prompt_tokens / 1_000_000) * 3.00 + (completion_tokens / 1_000_000) * 15.00
+
         return ModelResponse(
             content=message.get("content", ""),
             tool_calls=tool_calls,
             finish_reason=choice.get("finish_reason", "stop"),
-            model=data.get("model", ""),
-            usage=data.get("usage", {}),
+            model=_used_model,
+            usage=usage,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            estimated_cost_usd=_cost_usd,
         )
 
     async def close(self) -> None:
@@ -180,48 +230,80 @@ class OpenAICompatibleProvider:
 class ModelGateway:
     """Routes model calls to the appropriate provider based on agent manifest config."""
 
-    def __init__(self) -> None:
-        """初始化模型网关，创建空的提供商注册表。"""
+    def __init__(
+        self,
+        *,
+        default_provider: str | None = None,
+        metrics_collector: MetricsCollector | None = None,
+    ) -> None:
         self._providers: dict[str, ModelProvider] = {}
+        self._default_provider = default_provider
+        self._metrics: MetricsCollector | None = metrics_collector
 
     @classmethod
-    def create_default(cls) -> ModelGateway:
+    def create_default(
+        cls,
+        *,
+        metrics_collector: MetricsCollector | None = None,
+    ) -> ModelGateway:
         """Create a gateway pre-loaded with the stub provider for testing/dev."""
-        gateway = cls()
+        gateway = cls(default_provider="stub", metrics_collector=metrics_collector)
         gateway.register(StubModelProvider())
         return gateway
 
     def register(self, provider: ModelProvider) -> None:
-        """注册一个模型提供商。"""
         self._providers[provider.name] = provider
 
     def get_provider(self, name: str) -> ModelProvider:
-        """按名称获取已注册的提供商，未找到时抛出 LookupError。"""
         try:
             return self._providers[name]
         except KeyError as exc:
             raise LookupError(f"model provider not found: {name}") from exc
 
+    def _resolve_provider(self, provider_name: str | None) -> ModelProvider:
+        name = provider_name or self._default_provider
+        if name is None:
+            raise LookupError(
+                "no provider_name supplied and no default_provider configured"
+            )
+        return self.get_provider(name)
+
     async def chat(
         self,
-        provider_name: str,
-        messages: list[ModelMessage],
+        provider_name: str | None = None,
+        messages: list[ModelMessage] | None = None,
         *,
-        model: str,
+        model: str = "",
         temperature: float = 0.2,
         max_tokens: int = 1024,
         tools: list[dict[str, Any]] | None = None,
-    ) -> ModelResponse:
-        """通过指定提供商发起模型对话请求。"""
-        provider = self.get_provider(provider_name)
-        return await provider.chat(
-            messages,
+    ) -> ChatResult:
+        provider = self._resolve_provider(provider_name)
+        resp = await provider.chat(
+            messages or [],
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
             tools=tools,
         )
 
+        result = ChatResult.from_model_response(resp)
+
+        if self._metrics:
+            labels = {"provider": provider.name, "model": result.model}
+            self._metrics.inc_counter("llm_calls_total", labels)
+            self._metrics.inc_counter(
+                "llm_input_tokens_total", labels, value=float(result.input_tokens),
+            )
+            self._metrics.inc_counter(
+                "llm_output_tokens_total", labels, value=float(result.output_tokens),
+            )
+            if result.estimated_cost_usd:
+                self._metrics.inc_counter(
+                    "llm_cost_usd_total", labels, value=result.estimated_cost_usd,
+                )
+
+        return result
+
     def list_providers(self) -> list[str]:
-        """返回所有已注册提供商的名称列表。"""
         return list(self._providers.keys())

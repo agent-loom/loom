@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from agent_platform.domain.models import (
@@ -22,12 +24,16 @@ from agent_platform.runtime.model_gateway import ModelMessage
 
 logger = logging.getLogger(__name__)
 
+try:
+    from hermes_agent import AIAgent as _HermesAIAgent
+
+    HERMES_AVAILABLE = True
+except ImportError:
+    HERMES_AVAILABLE = False
+    _HermesAIAgent = None
+
 
 class ManifestMapper:
-    """Agent 清单映射器。
-    
-    用于将 Agent 的规范（AgentSpec）转换为 Hermes 引擎可识别的配置。
-    """
     @staticmethod
     def to_hermes_config(spec: AgentSpec) -> dict[str, Any]:
         manifest = spec.manifest
@@ -68,12 +74,8 @@ class ManifestMapper:
 
 
 class ToolBridge:
-    """工具桥接器。
-    
-    负责将平台注册的工具转换为 Hermes/LLM 要求的工具 Schema 格式。
-    """
     @staticmethod
-    def wrap_platform_tools(tool_names: list[str], tool_executor) -> list[dict[str, Any]]:
+    def wrap_platform_tools(tool_names: list[str], tool_executor: Any) -> list[dict[str, Any]]:
         tools = []
         for name in tool_names:
             try:
@@ -89,10 +91,6 @@ class ToolBridge:
 
 
 class SessionBridge:
-    """会话桥接器。
-    
-    用于在平台会话 ID 与 Hermes 会话配置之间建立映射。
-    """
     @staticmethod
     def map_session(session_id: str | None, hermes_config: dict) -> dict[str, Any]:
         return {
@@ -102,49 +100,51 @@ class SessionBridge:
 
 
 class ResponseMapper:
-    """响应映射器。
-    
-    将 Hermes 引擎执行后的结果字典转换为平台标准的 RuntimeResponse。
-    """
     @staticmethod
     def to_platform_response(
         hermes_result: dict[str, Any],
         request: RuntimeRequest,
     ) -> RuntimeResponse:
-        display = hermes_result.get("text", "Hermes response")
-        tool_calls = [
-            ToolCallTrace(
-                tool_name=tc.get("name", ""),
-                status=tc.get("status", "success"),
-                latency_ms=tc.get("latency_ms"),
+        return RuntimeResponse(
+            response=AgentResponse(
+                request_id=request.request.request_id,
+                session_id=request.request.session_id,
+                agent=AgentIdentity(
+                    agent_id=request.agent_spec.agent_id,
+                    agent_version=request.agent_spec.version,
+                    deployment_id=request.deployment_id,
+                ),
+                output=AgentOutput(
+                    text=ResponseText(
+                        display=hermes_result.get("text", "Hermes response"),
+                        tts=hermes_result.get("text", "Hermes response"),
+                    ),
+                ),
+                trace=ResponseTrace(
+                    route_reason=request.route_reason,
+                    tool_calls=[
+                        ToolCallTrace(
+                            tool_name=tc.get("name", ""),
+                            status=tc.get("status", "success"),
+                            latency_ms=tc.get("latency_ms"),
+                        )
+                        for tc in hermes_result.get("tool_calls", [])
+                    ],
+                    model=hermes_result.get("model"),
+                    prompt_tokens=hermes_result.get("prompt_tokens", 0),
+                    completion_tokens=hermes_result.get("completion_tokens", 0),
+                    total_tokens=hermes_result.get("total_tokens", 0),
+                    estimated_cost_usd=hermes_result.get("estimated_cost_usd"),
+                ),
+                debug={
+                    "runtime_backend": "hermes",
+                    **hermes_result.get("debug_extra", {}),
+                },
             )
-            for tc in hermes_result.get("tool_calls", [])
-        ]
-        response = AgentResponse(
-            request_id=request.request.request_id,
-            session_id=request.request.session_id,
-            agent=AgentIdentity(
-                agent_id=request.agent_spec.agent_id,
-                agent_version=request.agent_spec.version,
-                deployment_id=request.deployment_id,
-            ),
-            output=AgentOutput(
-                text=ResponseText(display=display, tts=display),
-            ),
-            trace=ResponseTrace(
-                route_reason=request.route_reason,
-                tool_calls=tool_calls,
-            ),
-            debug={"runtime_backend": "hermes"},
         )
-        return RuntimeResponse(response=response)
 
 
 class TraceBridge:
-    """调用追踪桥接器。
-    
-    提取 Hermes 执行过程中产生的追踪信息（如迭代次数、模型调用次数等）。
-    """
     @staticmethod
     def extract_trace(hermes_result: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -155,10 +155,6 @@ class TraceBridge:
 
 
 class PolicyEnforcer:
-    """策略执行器。
-    
-    在运行时执行前的校验逻辑，例如检查被允许和被拒绝的工具列表是否存在冲突。
-    """
     @staticmethod
     def check_pre_run(spec: AgentSpec) -> list[str]:
         violations: list[str] = []
@@ -170,13 +166,144 @@ class PolicyEnforcer:
         return violations
 
 
-class ConversationEngine:
-    """轻量级对话引擎。
-    
-    负责调用模型网关并执行相关的工具。当模型网关（model_gateway）为 None 时，
-    引擎会返回默认的存根（stub）响应，以便在无真实 LLM 连接的情况下仍能测试管道。
-    """
+# ---------------------------------------------------------------------------
+# P1-2: Hermes tool bridging
+# ---------------------------------------------------------------------------
 
+def register_platform_tools_to_hermes(
+    tool_executor: Any,
+    agent_id: str,
+) -> Callable[[], None]:
+    """Register every tool from *tool_executor* into the Hermes SDK global
+    registry, prefixed by *agent_id* to avoid name collisions.
+
+    Returns a zero-arg **deregister** callable that removes all registered
+    tools — intended to be called in a ``finally`` block after the Hermes run.
+
+    If the Hermes SDK is not installed the function is a no-op and the
+    returned deregister callable is also a no-op.
+    """
+    if not HERMES_AVAILABLE:
+        return lambda: None
+
+    try:
+        from hermes_agent.tools.registry import global_registry
+    except ImportError:
+        return lambda: None
+
+    registered_names: list[str] = []
+
+    for defn in tool_executor.registry.list_tools():
+        hermes_name = f"{agent_id}__{defn.name}"
+
+        def _make_handler(tool_name: str) -> Callable[[dict[str, Any]], str]:
+            def handler(args: dict[str, Any], **_kw: Any) -> str:
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+
+                result = loop.run_until_complete(
+                    tool_executor.execute(
+                        tool_name,
+                        args,
+                        allowed_tools=[tool_name],
+                        timeout_ms=defn.timeout_ms,
+                    )
+                )
+                return str(result.output)
+
+            return handler
+
+        global_registry.register(
+            name=hermes_name,
+            toolset=f"platform_{agent_id}",
+            schema={
+                "name": hermes_name,
+                "description": defn.description,
+                "parameters": defn.input_schema,
+            },
+            handler=_make_handler(defn.name),
+            is_async=False,
+            description=defn.description,
+            emoji="",
+        )
+        registered_names.append(hermes_name)
+
+    def deregister() -> None:
+        for name in registered_names:
+            try:
+                global_registry.deregister(name)
+            except Exception:
+                pass
+
+    return deregister
+
+
+# ---------------------------------------------------------------------------
+# P1-4: Hermes result normalization
+# ---------------------------------------------------------------------------
+
+def normalize_hermes_result(hermes_result: Any) -> dict[str, Any]:
+    """Convert a raw Hermes SDK response into a flat dict consumable by
+    ``ResponseMapper.to_platform_response``.
+
+    Handles both dict-like and object-attribute access patterns so the code
+    is resilient to SDK version changes.
+    """
+    if isinstance(hermes_result, dict):
+        raw = hermes_result
+    else:
+        raw = getattr(hermes_result, "__dict__", {}) or {}
+
+    final_response = raw.get("final_response") or raw.get("response") or str(hermes_result)
+
+    api_calls = raw.get("api_calls", [])
+    input_tokens = raw.get("input_tokens") or raw.get("prompt_tokens", 0)
+    output_tokens = raw.get("output_tokens") or raw.get("completion_tokens", 0)
+    total_tokens = raw.get("total_tokens", input_tokens + output_tokens)
+    estimated_cost = raw.get("estimated_cost_usd")
+
+    raw_tool_calls = raw.get("tool_calls", [])
+    tool_calls: list[dict[str, Any]] = []
+    for tc in raw_tool_calls:
+        if isinstance(tc, dict):
+            tool_calls.append({
+                "name": tc.get("name", tc.get("tool_name", "")),
+                "status": tc.get("status", "success"),
+                "latency_ms": tc.get("latency_ms"),
+            })
+        else:
+            tool_calls.append({
+                "name": getattr(tc, "name", getattr(tc, "tool_name", "")),
+                "status": getattr(tc, "status", "success"),
+                "latency_ms": getattr(tc, "latency_ms", None),
+            })
+
+    return {
+        "text": str(final_response),
+        "tool_calls": tool_calls,
+        "run_id": raw.get("run_id"),
+        "iterations": len(raw.get("messages", [])) if "messages" in raw else raw.get("iterations", 0),
+        "model_calls": len(api_calls) if api_calls else raw.get("model_calls", 0),
+        "model": raw.get("model"),
+        "prompt_tokens": input_tokens,
+        "completion_tokens": output_tokens,
+        "total_tokens": total_tokens,
+        "estimated_cost_usd": estimated_cost,
+        "debug_extra": {
+            "hermes_run_id": raw.get("run_id"),
+            "api_calls_count": len(api_calls) if api_calls else 0,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Spike A conversation engine (kept for fallback)
+# ---------------------------------------------------------------------------
+
+class ConversationEngine:
     def __init__(
         self,
         model_gateway: Any | None = None,
@@ -195,15 +322,8 @@ class ConversationEngine:
         max_iterations: int = 4,
         session_config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """运行多轮带工具调用的对话循环并返回结果字典。
-
-        返回的字典包含键: text（生成的文本）, tool_calls（工具调用记录）,
-        iterations（迭代次数）, model_calls（模型调用次数）。
-        """
         if self.model_gateway is None:
-            return self._stub_response(
-                system_prompt, user_query, model_config,
-            )
+            return self._stub_response(system_prompt, user_query, model_config)
 
         messages: list[ModelMessage] = [
             ModelMessage(role="system", content=system_prompt),
@@ -219,16 +339,11 @@ class ConversationEngine:
                 provider,
                 messages,
                 model=model_config.get("model", "native-demo"),
-                temperature=model_config.get(
-                    "temperature", 0.2,
-                ),
-                max_tokens=model_config.get(
-                    "max_tokens", 1024,
-                ),
+                temperature=model_config.get("temperature", 0.2),
+                max_tokens=model_config.get("max_tokens", 1024),
                 tools=tools or None,
             )
 
-            # 如果模型没有请求任何工具调用，则循环结束。
             if not model_response.tool_calls:
                 return {
                     "text": model_response.content,
@@ -237,48 +352,31 @@ class ConversationEngine:
                     "model_calls": total_model_calls,
                 }
 
-            # 执行每一个被请求的工具，并将结果反馈给模型。
             for tc in model_response.tool_calls:
                 tool_name = tc.name
                 tool_input = tc.arguments
                 if self.tool_executor:
-                    tool_result = (
-                        await self.tool_executor.execute(
-                            tool_name,
-                            tool_input,
-                            allowed_tools=[
-                                t["name"] for t in tools
-                            ],
-                            timeout_ms=3000,
-                        )
+                    tool_result = await self.tool_executor.execute(
+                        tool_name,
+                        tool_input,
+                        allowed_tools=[t["name"] for t in tools],
+                        timeout_ms=3000,
                     )
                     tool_output = tool_result.output
                     tool_call_traces.append({
                         "name": tool_name,
                         "status": tool_result.trace.status,
-                        "latency_ms": (
-                            tool_result.trace.latency_ms
-                        ),
+                        "latency_ms": tool_result.trace.latency_ms,
                     })
                 else:
-                    tool_output = {
-                        "result": (
-                            f"[stub] {tool_name} not executed"
-                        ),
-                    }
+                    tool_output = {"result": f"[stub] {tool_name} not executed"}
                     tool_call_traces.append({
                         "name": tool_name,
                         "status": "skipped",
                     })
 
-                messages.append(
-                    ModelMessage(
-                        role="tool",
-                        content=str(tool_output),
-                    ),
-                )
+                messages.append(ModelMessage(role="tool", content=str(tool_output)))
 
-        # 达到了最大迭代次数 —— 进行最后一次调用以生成最终答案。
         total_model_calls += 1
         final = await self.model_gateway.chat(
             provider,
@@ -307,11 +405,11 @@ class ConversationEngine:
         }
 
 
+# ---------------------------------------------------------------------------
+# HermesRuntimeBackend (P1-3 / P1-5)
+# ---------------------------------------------------------------------------
+
 class HermesRuntimeBackend:
-    """Hermes 运行时后端实现。
-    
-    实现了对 Hermes 对话引擎的封装，提供从请求校验、配置转换、多轮对话到结果格式化的完整流程。
-    """
     name = "hermes"
 
     def __init__(
@@ -332,22 +430,32 @@ class HermesRuntimeBackend:
             tool_executor=tool_executor,
         )
 
+    # P1-5: fallback dispatch --------------------------------------------------
+
     async def run(self, request: RuntimeRequest) -> RuntimeResponse:
-        """执行运行时请求。
-        
-        首先进行策略前置检查，然后将请求转化为 Hermes 配置，接着调用会话引擎执行对话循环，
-        最后映射返回结果为平台标准格式。
-        """
         violations = self.policy_enforcer.check_pre_run(request.agent_spec)
         if violations:
             return self._policy_error(request, violations)
 
         hermes_config = self.manifest_mapper.to_hermes_config(request.agent_spec)
+
+        if HERMES_AVAILABLE:
+            try:
+                return await self._run_with_hermes(request, hermes_config)
+            except Exception as e:
+                logger.error("Hermes SDK run failed, falling back to engine: %s", e)
+
+        return await self._run_with_engine(request, hermes_config)
+
+    # Spike A path --------------------------------------------------------------
+
+    async def _run_with_engine(
+        self, request: RuntimeRequest, hermes_config: dict[str, Any]
+    ) -> RuntimeResponse:
         session_config = self.session_bridge.map_session(
             request.request.session_id, hermes_config
         )
 
-        # 为对话引擎构建工具定义列表
         tools: list[dict[str, Any]] = []
         if self.tool_executor:
             tools = self.tool_bridge.wrap_platform_tools(
@@ -364,6 +472,64 @@ class HermesRuntimeBackend:
         )
 
         return self.response_mapper.to_platform_response(hermes_result, request)
+
+    # P1-3: Hermes SDK path -----------------------------------------------------
+
+    async def _run_with_hermes(
+        self, request: RuntimeRequest, hermes_config: dict[str, Any]
+    ) -> RuntimeResponse:
+        import anyio
+
+        deregister = lambda: None  # noqa: E731
+        if self.tool_executor:
+            deregister = register_platform_tools_to_hermes(
+                self.tool_executor,
+                hermes_config.get("agent_id", "unknown"),
+            )
+
+        model_cfg = hermes_config.get("model", {})
+        agent_id = hermes_config.get("agent_id", "unknown")
+        toolset_name = f"platform_{agent_id}"
+
+        agent = _HermesAIAgent(
+            provider=model_cfg.get("provider", "openai"),
+            model=model_cfg.get("model", "native-demo"),
+            enabled_toolsets=[toolset_name] if self.tool_executor else [],
+        )
+
+        system_prompt = hermes_config.get("system_prompt", "")
+        if request.runtime_context and getattr(request.runtime_context, "knowledge_snippets", None):
+            knowledge_block = "\n\n".join(request.runtime_context.knowledge_snippets)
+            system_prompt += f"\n\n[Knowledge Context]\n{knowledge_block}"
+
+        conversation_history: list[dict[str, str]] = []
+        if request.runtime_context and getattr(request.runtime_context, "messages", None):
+            msgs = request.runtime_context.messages
+            if (
+                msgs
+                and msgs[-1].get("role") == "user"
+                and msgs[-1].get("content") == request.request.input.query
+            ):
+                msgs = msgs[:-1]
+            conversation_history = [
+                {"role": m["role"], "content": m["content"]} for m in msgs
+            ]
+
+        try:
+            hermes_result = await anyio.to_thread.run_sync(
+                lambda: agent.run_conversation(
+                    user_message=request.request.input.query,
+                    system_message=system_prompt,
+                    conversation_history=conversation_history,
+                )
+            )
+        finally:
+            deregister()
+
+        result_dict = normalize_hermes_result(hermes_result)
+        return self.response_mapper.to_platform_response(result_dict, request)
+
+    # Policy error helper -------------------------------------------------------
 
     @staticmethod
     def _policy_error(request: RuntimeRequest, violations: list[str]) -> RuntimeResponse:
