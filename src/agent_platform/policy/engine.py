@@ -171,10 +171,46 @@ class PolicyEngine:
             if not isinstance(data, dict):
                 return []
             rules = data.get("rules", [])
-            return [SafetyRule(**r) for r in rules if isinstance(r, dict)]
+            result: list[SafetyRule] = []
+            for r in rules:
+                if not isinstance(r, dict):
+                    continue
+                normalized = self._normalize_safety_rule(r)
+                result.append(SafetyRule(**normalized))
+            return result
         except Exception:
             logger.exception("failed to load safety policy: %s", path)
             return []
+
+    @staticmethod
+    def _normalize_safety_rule(raw: dict[str, Any]) -> dict[str, Any]:
+        """Normalize nested YAML safety rule format to flat SafetyRule fields."""
+        out: dict[str, Any] = {
+            "id": raw.get("id", ""),
+            "description": raw.get("description", ""),
+        }
+        action = raw.get("action", "deny")
+        match = raw.get("match", {})
+        if "type" in raw:
+            out["type"] = raw["type"]
+            out["pattern"] = raw.get("pattern")
+            out["tools"] = raw.get("tools", [])
+            out["commands"] = raw.get("commands", [])
+        elif match.get("tool_names"):
+            out["type"] = "deny_tools"
+            out["tools"] = match["tool_names"]
+        elif match.get("output_patterns") and action == "warn":
+            out["type"] = "pii_guard"
+            out["pattern"] = match["output_patterns"][0]
+        elif match.get("output_patterns"):
+            out["type"] = "deny_pattern"
+            out["pattern"] = match["output_patterns"][0]
+        elif match.get("output_commands"):
+            out["type"] = "command_allowlist"
+            out["commands"] = match["output_commands"]
+        else:
+            out["type"] = action
+        return out
 
     def _load_routing(self, path: Path) -> list[RoutingRule]:
         if not path.exists():

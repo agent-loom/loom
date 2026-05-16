@@ -147,10 +147,13 @@ def _try_load_module(
 ) -> None:
     """Attempt to import *py_file* and call its register function."""
     module_stem = py_file.stem
-    # Build a dotted module path relative to the project root.
-    # e.g. agents/myj/tools/__init__.py -> agents.myj.tools
-    #      agents/myj/tools/goods_search.py -> agents.myj.tools.goods_search
-    module_name = py_file.stem
+    try:
+        parts = list(py_file.relative_to(Path.cwd()).parts)
+        module_name = ".".join(
+            p[:-3] if p.endswith(".py") else p for p in parts
+        )
+    except ValueError:
+        module_name = f"_agent_tools_{agent_id}_{module_stem}"
     spec = importlib.util.spec_from_file_location(module_name, py_file)
     if spec and spec.loader:
         module = importlib.util.module_from_spec(spec)

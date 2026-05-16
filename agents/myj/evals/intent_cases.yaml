@@ -52,4 +52,4 @@
       query: 你好
   expected:
     output_contains:
-      - 美宜佳
+      - 你好

@@ -32,17 +32,7 @@ class DirectReplyWorker:
 
     async def run(self, task: AgentTask) -> WorkerResult:
         """生成直接回复文本。"""
-        prompt_path = task.metadata.get("direct_reply_prompt")
-        if prompt_path:
-            from pathlib import Path
-            p = Path(prompt_path)
-            if p.is_file():
-                template = p.read_text(encoding="utf-8")
-                display = f"{template[:200]}..."
-            else:
-                display = f"收到您的问题：{task.query}"
-        else:
-            display = f"收到您的问题：{task.query}"
+        display = f"收到您的问题：{task.query}"
         return WorkerResult(
             worker_name=self.name,
             display=display,

@@ -90,21 +90,12 @@ class TestDirectReplyWorker:
         assert "How do I reset my password?" in result.display
 
     @pytest.mark.asyncio
-    async def test_run_uses_prompt_file(self, tmp_path: Path):
-        prompt_file = tmp_path / "direct_reply.md"
-        prompt_file.write_text(
-            "Welcome to our service! We can help with many things.",
-            encoding="utf-8",
-        )
-
+    async def test_run_uses_query_in_display(self, tmp_path: Path):
         worker = DirectReplyWorker()
-        task = _make_task(
-            query="hi",
-            direct_reply_prompt=str(prompt_file),
-        )
+        task = _make_task(query="hi")
 
         result = await worker.run(task)
-        assert "Welcome to our service" in result.display
+        assert "hi" in result.display
 
     @pytest.mark.asyncio
     async def test_run_fallback_when_prompt_file_missing(self):

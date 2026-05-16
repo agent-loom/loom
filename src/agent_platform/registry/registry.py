@@ -54,6 +54,7 @@ class AgentRegistry:
         # We still keep a small cache to map agent_id to its local package_path
         # But all deployment/routing state goes to DB.
         self._local_specs: dict[str, AgentSpec] = {}
+        self._deleted_ids: set[str] = set()
 
     async def discover(self) -> dict[str, AgentSpec]:
         """扫描 root 目录下的 manifest.yaml，发现并注册所有 Agent（写 DB）。"""
@@ -63,6 +64,8 @@ class AgentRegistry:
 
         for manifest_path in sorted(self.root.glob("*/manifest.yaml")):
             spec = self.loader.load_file(manifest_path)
+            if spec.agent_id in self._deleted_ids:
+                continue
             await self.register(spec)
         return dict(self._local_specs)
 
@@ -79,6 +82,7 @@ class AgentRegistry:
 
     async def register(self, spec: AgentSpec) -> AgentSpec:
         """注册一个 AgentSpec 并创建对应的 dev 部署记录。"""
+        self._deleted_ids.discard(spec.agent_id)
         self._local_specs[spec.agent_id] = spec
         await self.persist_definition(spec)
         await self.deploy(
@@ -89,6 +93,11 @@ class AgentRegistry:
         )
         self._load_routing_rules(spec)
         return spec
+
+    async def unregister(self, agent_id: str) -> None:
+        """Unregister an agent, preventing resurrection from DB or disk."""
+        self._local_specs.pop(agent_id, None)
+        self._deleted_ids.add(agent_id)
 
     def _load_routing_rules(self, spec: AgentSpec) -> None:
         """Extract manifest routing rules and register them with the SemanticRouter."""
@@ -117,6 +126,8 @@ class AgentRegistry:
 
     async def get(self, agent_id: str) -> AgentSpec:
         """根据 agent_id 获取 AgentSpec，未找到时抛出 AgentNotFoundError。"""
+        if agent_id in self._deleted_ids:
+            raise AgentNotFoundError(f"agent not found: {agent_id}")
         if not self._local_specs:
             await self.discover()
 

@@ -73,14 +73,12 @@ async def delete_agent(agent_id: str, request: Request) -> dict[str, str]:
     """Soft-delete / unregister an agent (remove from local specs)."""
     deps = _deps(request)
     registry = deps.registry
-    if agent_id not in registry._local_specs:
-        # Try discovering first
-        if not registry._local_specs:
-            await registry.discover()
-        if agent_id not in registry._local_specs:
-            raise HTTPException(status_code=404, detail=f"agent not found: {agent_id}")
+    try:
+        await registry.get(agent_id)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=f"agent not found: {agent_id}") from exc
 
-    registry._local_specs.pop(agent_id, None)
+    await registry.unregister(agent_id)
     return {"status": "deleted", "agent_id": agent_id}
 
 

@@ -269,7 +269,8 @@ class RuntimeManager:
         """从存储中加载当前请求对应的会话。如果不存在则创建一个新会话。"""
         session_id = request.request.session_id
         if not session_id:
-            return None
+            session_id = f"ses_{uuid4().hex}"
+            request.request.session_id = session_id
         session = await self.session_store.load(session_id)
         if session is None:
             session = AgentSession(

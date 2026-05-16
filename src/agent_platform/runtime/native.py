@@ -40,7 +40,7 @@ class NativeRuntimeBackend:
             create_default_tool_registry()
         )
         self._adapters: dict[str, Any] = {}
-        self._orchestrator: WorkerOrchestrator | None = None
+        self._orchestrators: dict[str, WorkerOrchestrator] = {}
         self._loaded_agents: set[str] = set()
 
     def _ensure_agent_tools(
@@ -74,16 +74,17 @@ class NativeRuntimeBackend:
         return self._generic_response(request)
 
     async def _run_orchestrator(self, request: RuntimeRequest) -> RuntimeResponse:
-        if self._orchestrator is None:
+        agent_id = request.agent_spec.agent_id
+        if agent_id not in self._orchestrators:
             default_worker = request.agent_spec.manifest.entry.default_worker
-            self._orchestrator = WorkerOrchestrator(default_worker_name=default_worker)
+            orchestrator = WorkerOrchestrator(default_worker_name=default_worker)
 
-            self._orchestrator.register(DirectReplyWorker())
+            orchestrator.register(DirectReplyWorker())
             handoff_intents = (
                 request.agent_spec.manifest.routing.human_handoff_intents
                 or ["转人工"]
             )
-            self._orchestrator.register(
+            orchestrator.register(
                 HandoffWorker(handoff_intents=handoff_intents),
             )
 
@@ -91,7 +92,7 @@ class NativeRuntimeBackend:
                 try:
                     defn = self.tool_executor.registry.get(tool_name)
                     if defn.keywords:
-                        self._orchestrator.register(ToolWorker(
+                        orchestrator.register(ToolWorker(
                             name=tool_name,
                             tool_name=tool_name,
                             keywords=defn.keywords,
@@ -100,13 +101,14 @@ class NativeRuntimeBackend:
                 except LookupError:
                     pass
 
+            self._orchestrators[agent_id] = orchestrator
             logger.info(
                 "Initialized WorkerOrchestrator for agent %s with default_worker=%s",
-                request.agent_spec.agent_id,
+                agent_id,
                 default_worker,
             )
 
-        return await self._orchestrator.route_and_run(request)
+        return await self._orchestrators[agent_id].route_and_run(request)
 
     def _resolve_adapter(self, spec: AgentSpec):
         agent_id = spec.agent_id
