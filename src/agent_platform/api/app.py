@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -14,6 +15,7 @@ from starlette.responses import StreamingResponse
 
 from agent_platform.api.admin import router as admin_router
 from agent_platform.api.admin_deps import AdminDeps
+from agent_platform.api.auth import AuthIdentity, require_role, require_scope
 from agent_platform.api.rate_limiter import RateLimiterMiddleware
 from agent_platform.api.streaming import stream_agent_response
 from agent_platform.api.websocket import AgentWebSocketManager
@@ -80,6 +82,14 @@ from agent_platform.tools.executor import ToolExecutor
 from agent_platform.tools.registry import create_default_tool_registry
 
 logger = logging.getLogger(__name__)
+
+_SCOPE_CHAT = require_scope("chat")
+_SCOPE_DEPLOY = require_scope("deploy")
+_SCOPE_ADMIN = require_scope("admin")
+_SCOPE_EVAL = require_scope("eval")
+_SCOPE_REGISTER = require_scope("register")
+_SCOPE_ROLLBACK = require_scope("rollback")
+_ROLE_ADMIN = require_role("platform_admin")
 
 
 class RegisterAgentRequest(BaseModel):
@@ -167,27 +177,47 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
 
 class AuthMiddleware(BaseHTTPMiddleware):
     """身份验证中间件。
-    
-    用于校验传入请求的 API 密钥是否合法（支持 Bearer Token 和 x-api-key 头），
-    排除对健康检查和 API 文档端点的验证。
+
+    校验传入请求的 API 密钥并将 AuthIdentity 填入 request.state.auth，
+    使得下游 require_role()/require_scope() 依赖可正常工作。
     """
+
+    _ALL_SCOPES = ["chat", "deploy", "admin", "eval", "register", "rollback", "read"]
+    _SKIP_PATHS = {"/health", "/health/ready", "/docs", "/openapi.json", "/redoc"}
+
     def __init__(self, app, api_key: str | None = None):
         super().__init__(app)
         self.api_key = api_key
 
     async def dispatch(self, request: Request, call_next):
+        if request.url.path in self._SKIP_PATHS:
+            return await call_next(request)
+
         if not self.api_key:
+            request.state.auth = AuthIdentity(
+                subject="anonymous",
+                tenant_id=request.headers.get("x-tenant-id", "default"),
+                role="platform_admin",
+                scopes=self._ALL_SCOPES,
+            )
             return await call_next(request)
-        if request.url.path in {"/health", "/docs", "/openapi.json", "/redoc"}:
-            return await call_next(request)
+
+        token = None
         auth_header = request.headers.get("authorization")
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header[7:]
-            if token == self.api_key:
-                return await call_next(request)
-        api_key_header = request.headers.get("x-api-key")
-        if api_key_header == self.api_key:
+        if not token:
+            token = request.headers.get("x-api-key")
+
+        if token == self.api_key:
+            request.state.auth = AuthIdentity(
+                subject="api-key-user",
+                tenant_id=request.headers.get("x-tenant-id", "default"),
+                role="platform_admin",
+                scopes=self._ALL_SCOPES,
+            )
             return await call_next(request)
+
         return JSONResponse(
             status_code=401,
             content={
@@ -197,6 +227,62 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 }
             },
         )
+
+
+def _validate_startup_config(settings) -> None:
+    """Log warnings for common configuration issues at startup."""
+    if settings.devflow_runner_adapter == "mock":
+        logger.warning(
+            "DEVFLOW_RUNNER_ADAPTER=mock — DevFlow will not execute real AI coding tasks. "
+            "Set to 'claude_code' or 'codex' for production."
+        )
+    if settings.env == "production" and not settings.api_key:
+        logger.warning(
+            "No AGENT_PLATFORM_API_KEY configured in production — "
+            "all endpoints are unauthenticated"
+        )
+    if settings.cors_allowed_origins == "*":
+        if settings.env == "production":
+            logger.warning(
+                "CORS is open to all origins in production. "
+                "Set CORS_ALLOWED_ORIGINS to restrict access."
+            )
+    if settings.plane_base_url:
+        missing = [
+            f for f in (
+                "plane_ai_developing_state_id",
+                "plane_testing_state_id",
+                "plane_human_review_state_id",
+                "plane_staging_state_id",
+                "plane_done_state_id",
+            )
+            if not getattr(settings, f)
+        ]
+        if missing:
+            logger.warning(
+                "DevFlow state sync may be incomplete — missing: %s",
+                ", ".join(missing),
+            )
+
+
+@asynccontextmanager
+async def _app_lifespan(app: FastAPI):
+    """Application lifespan: startup validation and graceful shutdown."""
+    settings = getattr(app.state, "_settings", None)
+    if settings:
+        _validate_startup_config(settings)
+    logger.info("Agent Platform started (env=%s)", settings.env if settings else "unknown")
+    yield
+    for name, resource in getattr(app.state, "_closeables", []):
+        try:
+            if hasattr(resource, "close"):
+                await resource.close()
+            elif hasattr(resource, "dispose"):
+                await resource.dispose()
+            logger.info("Closed %s", name)
+        except Exception:
+            logger.warning("Failed to close %s", name, exc_info=True)
+    logger.info("Agent Platform shutdown complete")
 
 
 def create_app() -> FastAPI:
@@ -241,13 +327,14 @@ def create_app() -> FastAPI:
     )
 
     db_session_factory = None
+    db_engine = None
     _has_explicit_db = bool(os.getenv("DATABASE_URL"))
     if _has_explicit_db and settings.database_url:
         try:
             from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-            engine = create_async_engine(settings.database_url, echo=False)
-            db_session_factory = async_sessionmaker(engine, expire_on_commit=False)
+            db_engine = create_async_engine(settings.database_url, echo=False)
+            db_session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
             logger.info("SQL persistence enabled for %s", settings.database_url)
         except Exception:
             logger.exception("Failed to create SQL engine; falling back to InMemory repos")
@@ -311,7 +398,11 @@ def create_app() -> FastAPI:
     artifact_store = ArtifactStore()
     ws_manager = AgentWebSocketManager(router, runtime_manager)
 
-    app = FastAPI(title="Agent Platform", version="0.2.0")
+    app = FastAPI(title="Agent Platform", version="0.2.0", lifespan=_app_lifespan)
+    app.state._settings = settings
+    app.state._closeables = []
+    if db_engine:
+        app.state._closeables.append(("SQLAlchemy engine", db_engine))
     app.state.policy_engine = app_policy_engine
     app.state.knowledge_service = app_knowledge_service
     app.state.hook_registry = app_hook_registry
@@ -330,20 +421,43 @@ def create_app() -> FastAPI:
         tool_registry=tool_registry,
         metrics=app_metrics,
     )
-    app.include_router(admin_router)
+    app.include_router(
+        admin_router,
+        dependencies=[_ROLE_ADMIN],
+    )
 
-    if settings.api_key:
-        app.add_middleware(AuthMiddleware, api_key=settings.api_key)
-
+    app.add_middleware(AuthMiddleware, api_key=settings.api_key)
     app.add_middleware(RateLimiterMiddleware, requests_per_minute=120, burst=20)
 
+    cors_raw = settings.cors_allowed_origins
+    if cors_raw and cors_raw != "*":
+        cors_origins = [o.strip() for o in cors_raw.split(",") if o.strip()]
+    else:
+        cors_origins = ["*"]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=cors_origins,
         allow_methods=["*"],
         allow_headers=["*"],
     )
     app.add_middleware(RequestContextMiddleware)
+
+    @app.exception_handler(Exception)
+    async def _unhandled_exception_handler(request: Request, exc: Exception):
+        request_id = getattr(request.state, "request_id", "unknown")
+        logger.exception("Unhandled exception [request_id=%s]", request_id)
+        detail = str(exc) if settings.env != "production" else "internal server error"
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": {
+                    "code": "INTERNAL_ERROR",
+                    "message": detail,
+                    "request_id": request_id,
+                }
+            },
+        )
+
     devflow: DevFlowOrchestrator | None = None
     if (
         settings.plane_base_url
@@ -361,6 +475,8 @@ def create_app() -> FastAPI:
             base_url=settings.gitlab_base_url,
             token=settings.gitlab_token,
         )
+        app.state._closeables.append(("PlaneAdapter", plane_adapter))
+        app.state._closeables.append(("GitLabAdapter", gitlab_adapter))
         workspace_base = (
             Path(settings.devflow_workspace_base_dir)
             if settings.devflow_workspace_base_dir
@@ -412,6 +528,36 @@ def create_app() -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/health/ready")
+    async def health_ready() -> JSONResponse:
+        checks: dict[str, str] = {}
+        overall = True
+
+        if db_session_factory:
+            try:
+                from sqlalchemy import text as sa_text
+
+                async with db_session_factory() as session:
+                    await session.execute(sa_text("SELECT 1"))
+                checks["database"] = "ok"
+            except Exception as exc:
+                checks["database"] = f"error: {exc}"
+                overall = False
+        else:
+            checks["database"] = "in_memory"
+
+        checks["devflow"] = "enabled" if devflow is not None else "disabled"
+        checks["runner_adapter"] = settings.devflow_runner_adapter
+        checks["auth"] = "enabled" if settings.api_key else "open"
+
+        return JSONResponse(
+            status_code=200 if overall else 503,
+            content={
+                "status": "ready" if overall else "degraded",
+                "checks": checks,
+            },
+        )
+
     @app.get("/metrics")
     async def metrics() -> Response:
         return Response(
@@ -432,7 +578,10 @@ def create_app() -> FastAPI:
         ]
 
     @app.post("/api/v1/agent-packages/register")
-    async def register_agent(payload: RegisterAgentRequest) -> dict[str, str]:
+    async def register_agent(
+        payload: RegisterAgentRequest,
+        _auth: AuthIdentity = _SCOPE_REGISTER,
+    ) -> dict[str, str]:
         spec = registry.loader.load_file(Path(payload.manifest_path))
         await registry.register(spec)
         return {"agent_id": spec.agent_id, "version": spec.version, "status": "registered"}
@@ -459,7 +608,12 @@ def create_app() -> FastAPI:
         return session.model_dump(mode="json")
 
     @app.post("/api/v1/agent-packages/{agent_id}/versions/{version}/deploy")
-    async def deploy_agent(agent_id: str, version: str, payload: DeployAgentRequest) -> dict:
+    async def deploy_agent(
+        agent_id: str,
+        version: str,
+        payload: DeployAgentRequest,
+        _auth: AuthIdentity = _SCOPE_DEPLOY,
+    ) -> dict:
         try:
             spec = await registry.get(agent_id)
         except AgentNotFoundError as exc:
@@ -519,7 +673,10 @@ def create_app() -> FastAPI:
         return result
 
     @app.post("/api/v1/evals/run", response_model=EvalReport)
-    async def run_eval(payload: RunEvalRequest) -> EvalReport:
+    async def run_eval(
+        payload: RunEvalRequest,
+        _auth: AuthIdentity = _SCOPE_EVAL,
+    ) -> EvalReport:
         try:
             spec = await registry.get(payload.agent_id)
         except AgentNotFoundError as exc:
@@ -532,6 +689,7 @@ def create_app() -> FastAPI:
         project_id: str | None = None,
         mr_iid: int | None = None,
         work_item_id: str | None = None,
+        _auth: AuthIdentity = _SCOPE_EVAL,
     ) -> dict:
         try:
             spec = await registry.get(agent_id)
@@ -551,17 +709,26 @@ def create_app() -> FastAPI:
         return result
 
     @app.post("/api/v1/devflow/task-packs")
-    async def create_task_pack(payload: CreateTaskPackRequest):
+    async def create_task_pack(
+        payload: CreateTaskPackRequest,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ):
         return task_pack_generator.from_requirement(**payload.model_dump())
 
     @app.post("/api/v1/devflow/parse-requirement")
-    async def parse_requirement(payload: ParseRequirementRequest):
+    async def parse_requirement(
+        payload: ParseRequirementRequest,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ):
         return requirement_parser.parse(
             payload.text, payload.context or {},
         ).model_dump()
 
     @app.post("/api/v1/devflow/generate-issues")
-    async def generate_issues(payload: GenerateIssuesRequest):
+    async def generate_issues(
+        payload: GenerateIssuesRequest,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ):
         parsed = requirement_parser.parse(
             payload.text, payload.project_context or {},
         )
@@ -571,19 +738,28 @@ def create_app() -> FastAPI:
         return [i.model_dump() for i in issues]
 
     @app.post("/api/v1/devflow/scaffold-agent")
-    async def scaffold_agent(payload: ScaffoldAgentRequest):
+    async def scaffold_agent(
+        payload: ScaffoldAgentRequest,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ):
         path = scaffolder.create(**payload.model_dump())
         return {"agent_id": payload.agent_id, "path": str(path)}
 
     @app.post("/api/v1/devflow/design-analysis")
-    async def design_analysis(payload: DesignAnalysisRequest):
+    async def design_analysis(
+        payload: DesignAnalysisRequest,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ):
         brief = architect_agent.analyze(
             payload.requirement_text, payload.context,
         )
         return brief.model_dump()
 
     @app.post("/api/v1/devflow/test-plan")
-    async def test_plan(payload: TestPlanRequest):
+    async def test_plan(
+        payload: TestPlanRequest,
+        _auth: AuthIdentity = _SCOPE_EVAL,
+    ):
         plan = test_agent.generate_plan(
             payload.agent_id,
             payload.change_type,
@@ -622,7 +798,10 @@ def create_app() -> FastAPI:
         }
 
     @app.post("/api/v1/deployments/rollback")
-    async def rollback_deployment(payload: RollbackRequest):
+    async def rollback_deployment(
+        payload: RollbackRequest,
+        _auth: AuthIdentity = _SCOPE_ROLLBACK,
+    ):
         rollback_info = await audit_log.get_rollback_version(
             payload.agent_id, payload.channel,
         )
@@ -690,7 +869,11 @@ def create_app() -> FastAPI:
         await ws_manager.handle(websocket, session_id)
 
     @app.post("/api/v1/agent/chat", response_model=AgentResponse)
-    async def chat(request: AgentRequest, raw_request: Request) -> AgentResponse:
+    async def chat(
+        request: AgentRequest,
+        raw_request: Request,
+        _auth: AuthIdentity = _SCOPE_CHAT,
+    ) -> AgentResponse:
         if not request.request_id:
             req_id = getattr(raw_request.state, "request_id", None)
             request.request_id = req_id or f"req_{uuid4().hex}"
@@ -848,7 +1031,9 @@ def create_app() -> FastAPI:
 
     @app.post("/api/v1/approvals/{request_id}/resolve")
     async def resolve_approval(
-        request_id: str, body: ResolveApprovalRequest
+        request_id: str,
+        body: ResolveApprovalRequest,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
     ) -> dict:
         status_str = body.status.lower()
         if status_str not in ("approved", "rejected"):

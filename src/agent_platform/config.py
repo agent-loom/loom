@@ -31,6 +31,8 @@ class Settings(BaseModel):
     gitlab_project_id: str | None = None
     gitlab_webhook_secret: str | None = None
 
+    cors_allowed_origins: str = "*"
+
     devflow_runner_adapter: str = "mock"
     devflow_repo_url: str | None = None
     devflow_default_branch: str = "main"
@@ -61,6 +63,7 @@ def get_settings() -> Settings:
         gitlab_token=os.getenv("GITLAB_TOKEN"),
         gitlab_project_id=os.getenv("GITLAB_PROJECT_ID"),
         gitlab_webhook_secret=os.getenv("GITLAB_WEBHOOK_SECRET"),
+        cors_allowed_origins=os.getenv("CORS_ALLOWED_ORIGINS", "*"),
         devflow_runner_adapter=os.getenv("DEVFLOW_RUNNER_ADAPTER", "mock"),
         devflow_repo_url=os.getenv("DEVFLOW_REPO_URL"),
         devflow_default_branch=os.getenv("DEVFLOW_DEFAULT_BRANCH", "main"),
