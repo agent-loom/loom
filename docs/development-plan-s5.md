@@ -1,9 +1,11 @@
-# 下一阶段开发计划（S5）
+# 下一阶段开发计划（S5：平台生产化与规模化）
 
 > Status: Planning
 > Last updated: 2026-05-16
 
-本计划基于 S2-S4 已完成的基础，将 S5 阶段拆成 3 个 Phase。每个 Phase 内的任务按依赖关系排序。
+本计划基于 S2-S4 已完成的基础和 2026-05-16 代码审查校准结论，将 S5 阶段拆成 4 个 Phase。每个 Phase 内的任务按依赖关系排序。
+
+> 重要口径：S2-S4 的很多能力已经有代码基础，但不能等同于生产闭环完成。S5 开始前必须先完成主链路可靠性校准，否则 Hermes/RAG/MCP/Admin API 等扩展能力会建立在不可恢复、不可审计的状态之上。
 
 ## 当前起点
 
@@ -11,14 +13,45 @@
 |---|---|
 | 测试 | 516 passed, ruff clean |
 | 代码量 | ~90 files, +11000 lines |
-| 持久化 | ✅ 7 Repository Protocol + InMemory/SQL 双实现 + Alembic migration + DI 完成（DATABASE_URL 驱动） |
-| 安全基线 | ✅ Scoped API Key + 租户隔离 + Tool Permission + SecretResolver + LogSanitizer |
-| DevFlow | ✅ CodingAgentRunner + WorkspaceManager + PathGuard + Webhook 持久化 + Eval 回写 |
-| Hermes | ✅ Spike A 完成（ConversationEngine 修复 + model_gateway 注入 + hermes_echo）；Spike B 待实施 |
+| 持久化 | Repository Protocol + InMemory/SQL 双实现 + Alembic migration + 部分 DI 已完成；Registry/Deployment/Audit/Eval 主链路仍需校准 |
+| 安全基线 | Scoped API Key、Tool Permission、SecretResolver、LogSanitizer 已有基础；RBAC/scopes 与高风险审批尚未形成统一 enforcement |
+| DevFlow | CodingAgentRunner + WorkspaceManager + PathGuard + Webhook/Eval 基础闭环已实现；真实 runner 配置、job 持久化和失败恢复仍需补齐 |
+| Hermes | Spike A 完成（平台自研 ConversationEngine + model_gateway 注入 + hermes_echo）；Spike B 官方 Hermes SDK 真接入待实施 |
 | Knowledge | Stub 实现（KnowledgeBackend Protocol + WeaviateKnowledgeBackend placeholder） |
 | MCP | 无代码 |
 | Admin UI | 无代码 |
 | 观测 | MetricsCollector + /metrics 端点 + LogSanitizer；无 OpenTelemetry/Langfuse |
+
+---
+
+## Phase 0：主链路可靠性校准（预计 2-4 天）
+
+**目标**：把已经实现但未完全接入生产主链路的能力校准为可信状态。此阶段不追求新增大能力，优先修正会影响发布、回滚、审计、DevFlow 触发和后续扩展的基础问题。
+
+### 前置条件
+
+- 当前测试基线可复现：`pytest` 通过，`ruff` 通过。
+- 对 `implementation-gap.md` 的结论重新校准，区分“repo/模型/接口已实现”和“主链路已生产闭环”。
+
+### 任务列表
+
+| # | 任务 | 设计来源 | 验收标准 |
+|---|---|---|---|
+| 0.1 | 重新确认测试与 warning 基线 | implementation-gap §1.2 | 记录 `pytest`、`ruff`、manifest validate 的真实输出；warning 要么消除，要么形成 warning budget |
+| 0.2 | 修复 Plane webhook 后台任务注入 | plane/devflow-state-sync | webhook 启用 DevFlow 分支时不再依赖未定义变量；新增覆盖该路径的测试 |
+| 0.3 | Registry/Deployment 持久化接线 | persistence-storage §5 | `AgentDefinitionRepository`、`AgentDeploymentRepository` 接入 register/deploy/list/resolve 主链路，或在代码和文档中明确 dev-only fallback |
+| 0.4 | Deployment audit 主链路校准 | persistence-storage §4.4 | deploy/rollback/audit endpoint 不再只依赖进程内 `DeploymentAuditLog`，审计记录重启可恢复 |
+| 0.5 | ArtifactStore 生产化切入点 | package-artifact-release §4-8 | 至少落地 LocalArtifactStore + manifest/package hash 绑定；S3/GitLab Registry 后移到 Phase 3 |
+| 0.6 | ContextBuilder/Knowledge 主链路接入点确认 | agent-platform-core-design §3.2/3.8 | 明确 RuntimeManager 是直接调用 ContextBuilder，还是先在 Hermes/ConversationEngine 内部接入 |
+| 0.7 | 文档事实源同步 | document-stage-map / implementation-gap | `implementation-gap.md`、`document-stage-map.md`、本计划对当前状态描述一致 |
+
+### 输出文档
+
+```
+docs/implementation-gap.md        — 更新为 S5 开工事实源
+docs/document-stage-map.md        — 更新 S5 状态与入口
+docs/development-plan-s5.md       — 本计划作为执行入口
+```
 
 ---
 
@@ -28,21 +61,22 @@
 
 ### 前置条件
 
-- S4 全部完成 ✅
+- Phase 0 完成，且主链路可靠性风险已被关闭或显式接受。
+- Hermes SDK 版本和官方 API 已重新验证。`hermes-agent>=0.13.0,<0.14` 只是 Spike 假设，未验证前不得作为生产 pin。
 
 ### 任务列表
 
 | # | 任务 | 设计来源 | 验收标准 |
 |---|---|---|---|
 | **Hermes Spike B** | | | |
-| 1.1 | 添加 hermes-agent 可选依赖 | hermes-backend-spike §11 | `pyproject.toml` 增加 `hermes = ["hermes-agent>=0.13.0,<0.14"]`；无 SDK 时不影响启动 |
+| 1.1 | 添加 hermes-agent 可选依赖 | hermes-backend-spike §11 | 确认官方包名和版本后在 `pyproject.toml` 增加 `hermes` optional dependency；无 SDK 时不影响启动 |
 | 1.2 | 实现 Hermes 工具桥接 | hermes-backend-spike §11.3 | `register_platform_tools_to_hermes()` 将 ToolExecutor 包装为 Hermes global registry handler；agent_id 前缀防碰撞；run 结束后 deregister |
 | 1.3 | 实现 `_run_with_hermes()` | hermes-backend-spike §11.4 | `HermesRuntimeBackend` 在 SDK 可用时调用真实 `AIAgent.run_conversation()`；同步调用通过 `anyio.to_thread.run_sync()` 包装 |
 | 1.4 | Hermes 结果规范化 | hermes-backend-spike §11.5 | 提取 `final_response`、`api_calls`、`input_tokens`、`output_tokens`、`estimated_cost_usd`、tool_calls 并映射到 `AgentResponse` |
 | 1.5 | Hermes fallback 与测试 | hermes-backend-spike §11.6 | SDK 不可用时自动回退到 Spike A 路径；integration test 验证非 stub 响应（SDK 存在时）；unit test 验证 fallback（SDK 缺失时） |
 | **Knowledge/RAG 真实接入** | | | |
-| 1.6 | 设计 Knowledge/RAG 架构 | implementation-gap §P1 | 确定向量库选型（Weaviate vs Qdrant vs pgvector）；确定 embedding 模型；确定同步策略 |
-| 1.7 | 实现 WeaviateKnowledgeBackend | knowledge service 现有接口 | `retrieve()` 真实调用向量库 API；`sync()` 触发数据同步；添加 `weaviate-client` 依赖 |
+| 1.6 | 设计 Knowledge/RAG 架构 | implementation-gap §P1 | 新增 ADR 或设计小节，确定向量库选型（Weaviate vs Qdrant vs pgvector）、embedding 模型、同步策略和租户过滤 |
+| 1.7 | 实现首个真实 KnowledgeBackend | knowledge service 现有接口 | 按 1.6 选型实现，不预设必须是 Weaviate；`retrieve()` 真实调用后端，`sync()` 触发数据同步 |
 | 1.8 | Knowledge 数据同步 pipeline | — | 支持从本地文件/URL 导入文档；支持增量更新；支持 tenant 隔离 |
 | 1.9 | Knowledge 集成测试 | — | manifest 声明 knowledge source → runtime 注入 snippets → agent 可使用检索结果 |
 | **模型调用统计** | | | |
@@ -73,20 +107,21 @@ tests/integration/test_knowledge_rag.py     — 新增 Knowledge 集成测试
 ### 前置条件
 
 - Phase 1.10 完成（模型调用统计，为 trace 提供 token 数据）
+- scoped API key / RBAC 的 endpoint enforcement 至少覆盖 MCP 暴露的高风险操作。
 
 ### 任务列表
 
 | # | 任务 | 设计来源 | 验收标准 |
 |---|---|---|---|
 | **MCP 集成** | | | |
-| 2.1 | MCP Server 设计 | implementation-gap §P2 | 确定暴露哪些能力（agent 注册/部署/回滚、DevFlow task pack、eval 运行、知识查询） |
+| 2.1 | MCP Server 设计 | implementation-gap §P2 | 确定暴露哪些能力（agent 注册/部署/回滚、DevFlow task pack、eval 运行、知识查询）以及每个 tool 所需 scope |
 | 2.2 | 实现 MCP Server | — | 基于 `mcp` SDK 实现 server；通过 stdio/SSE transport 暴露 tools |
 | 2.3 | MCP 工具定义 | — | 每个暴露的平台能力有对应的 MCP tool schema；支持认证（API key 传递） |
 | 2.4 | MCP 集成测试 | — | Claude Code / 其他 MCP client 可通过 MCP 协议调用平台 API |
 | **观测增强** | | | |
 | 2.5 | OpenTelemetry 接入 | implementation-gap §P1 | 引入 `opentelemetry-sdk`；HTTP 请求自动生成 span；tool 调用生成子 span |
 | 2.6 | Langfuse 可选集成 | — | 当 `LANGFUSE_PUBLIC_KEY` 设置时，trace 自动发送到 Langfuse；否则仅用 OTLP |
-| 2.7 | Trace 持久化 | — | trace 数据写入 `AgentRunRepository`；`/api/v1/agent-runs/{run_id}/trace` 可查询 |
+| 2.7 | Trace 事件模型与持久化 | — | 先定义 route/tool/model/runtime event schema，再写入 `AgentRunRepository`；`/api/v1/agent-runs/{run_id}/trace` 可查询 |
 | **路由增强** | | | |
 | 2.8 | SemanticRouter 规则自动加载 | implementation-gap §P1 | manifest `routing.rules` 在 agent 注册时自动加入 SemanticRouter；trace 记录命中原因 |
 | 2.9 | 路由决策持久化 | — | route decision 作为结构化 trace event 写入 run store |
@@ -113,6 +148,7 @@ pyproject.toml                              — 添加 mcp, opentelemetry 依赖
 ### 前置条件
 
 - Phase 2.5 完成（观测能力，为审批提供 trace 上下文）
+- deploy/audit/artifact 的持久化边界已经在 Phase 0/2 中校准，审批记录不能只落内存。
 
 ### 任务列表
 
@@ -123,7 +159,7 @@ pyproject.toml                              — 添加 mcp, opentelemetry 依赖
 | 3.2 | 高风险工具审批 gate | security-tenant-policy §7 | `RequiresApproval` 返回时，tool 执行暂停等待人工审批；支持 WebSocket 推送审批请求 |
 | 3.3 | Deploy 审批绑定 | implementation-gap §2.5 | prod deploy 强制校验 GitLab MR approval + eval report；审批记录写入 audit log |
 | **Admin API** | | | |
-| 3.4 | Agent 管理 API | implementation-gap §P2 | CRUD agent packages；查看版本历史；查看部署状态 |
+| 3.4 | Agent 管理 API | implementation-gap §P2 | CRUD agent packages；查看版本历史；查看部署状态；所有写操作要求 admin scope |
 | 3.5 | Tenant 管理 API | — | 创建/更新 tenant；配置 tool permissions；管理 API keys |
 | 3.6 | DevFlow 管理 API | — | 查看 job 列表/详情；手动触发/取消 runner；查看 workspace 日志 |
 | **Artifact 增强** | | | |
@@ -148,17 +184,18 @@ src/agent_platform/registry/artifact_local.py — 新增本地文件后端
 ## 总体时间线
 
 ```
-Week 1-2          Week 3-4          Week 5-6
-|-- Phase 1 ------|-- Phase 2 ------|-- Phase 3 ------|
-  Runtime 补齐       平台扩展          治理与运维
-  Hermes B + RAG     MCP + OTLP       HITL + Admin
-  7-10d              7-10d            7-10d
+Week 0            Week 1-2          Week 3-4          Week 5-6
+|-- Phase 0 ------|-- Phase 1 ------|-- Phase 2 ------|-- Phase 3 ------|
+  主链路校准         Runtime 补齐       平台扩展          治理与运维
+  持久化/审计/文档    Hermes B + RAG     MCP + OTLP       HITL + Admin
+  2-4d              7-10d             7-10d            7-10d
 ```
 
 ## 里程碑
 
 | 里程碑 | 时间 | 标志 |
 |---|---|---|
+| M4.5：主链路事实源可信 | Week 0 末 | 测试基线、实现差距、阶段地图一致；webhook/audit/artifact/registry 风险明确关闭或接受 |
 | M5：非 stub runtime | Week 2 末 | Hermes SDK 真实执行 agent；Knowledge 真实检索；模型调用有 token 统计 |
 | M6：平台可集成 | Week 4 末 | MCP server 可被外部工具调用；OpenTelemetry trace 可导出；路由规则自动加载 |
 | M7：生产治理就绪 | Week 6 末 | 高风险操作有审批；Admin API 可管理 agent/tenant；Artifact 有远程存储 |
@@ -177,6 +214,11 @@ Week 1-2          Week 3-4          Week 5-6
 
 | Plane Work Item | Phase | 类型 |
 |---|---|---|
+| S5 主链路可靠性校准 | 0 | platform:infra |
+| Plane webhook DevFlow 触发路径修复 | 0 | platform:devflow |
+| Registry/Deployment/Audit 持久化接入 | 0 | platform:release |
+| LocalArtifactStore + hash 绑定 | 0 | platform:release |
+| ContextBuilder/Knowledge 主链路接入点确认 | 0 | platform:runtime |
 | Hermes SDK 真接入（Spike B） | 1 | platform:runtime |
 | Knowledge/RAG 真实接入 | 1 | platform:runtime |
 | ModelGateway token/cost 统计 + 多模型路由 | 1 | platform:runtime |

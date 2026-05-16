@@ -1,6 +1,8 @@
 # 实现与设计差距分析
 
-> Last verified against code: 2026-05-16 (Updated: Phase 1-4 全部完成 — pipeline wiring ✅, Domain Model ✅, 持久化层全量完成 ✅, 动态工具加载 ✅, Hermes 真接入 ✅, ArtifactStore ✅, 安全基线 ✅, 租户隔离 ✅, DevFlow Runner→Orchestrator ✅, Webhook 持久化 ✅, Eval 持久化+状态回写 ✅)
+> Last verified against code: 2026-05-16
+>
+> S5 开工口径：S2-S4 的很多基础组件已经实现，但“基础组件存在”不等于“生产主链路闭环”。Registry/Deployment/Audit/Artifact、Hermes 官方 SDK、Knowledge/RAG、RBAC/scopes enforcement、审批和观测仍是 S5 需要校准或补齐的重点。
 
 本文档对齐以下两份设计文档和当前代码实现：
 
@@ -47,6 +49,63 @@ All checks passed
 ```
 
 已消除 pytest collection warning，当前存在 DeprecationWarning（旧字段名 `store_id`/`retailer_id`/`store` 的向后兼容告警，符合预期）。Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参数化，66 个测试覆盖 7 个 Repository 的 InMemory 和 SQL 实现（含 4 个租户隔离测试）。
+
+### 1.3 代码审查校准结论（2026-05-16）
+
+本轮 review 对当前文档和代码重新对齐后的结论：
+
+> 当前代码已经超过最初 MVP 骨架，具备可运行的多 Agent 平台雏形：统一协议、Agent Registry、路由、Native/Hermes/LangGraph backend 抽象、Eval、DevFlow、Plane/GitLab adapter、部分持久化、安全策略、工具执行、指标和 trace 都已有实现。
+> 但它仍不是生产级 Agent Platform。主要差距集中在：Registry/Deployment 没有完全持久化、ArtifactStore 仍是内存实现、Hermes 不是官方 runtime 真接入、DevFlow 默认仍是 mock runner、安全/RBAC/高危工具审批未真正闭环、Knowledge/RAG 还没进主链路、发布审批和可回滚性不足。
+
+按成熟度粗略判断：
+
+| 层级 | 当前成熟度 | 主要缺口 |
+| --- | --- | --- |
+| API 层 | 70% | RBAC/scopes、WebSocket 鉴权/背压、capability negotiation |
+| Agent Contract / Manifest | 75% | tool handler import、adapter entrypoint import、artifact hash 绑定 |
+| Routing | 70% | semantic rules 自动加载、route decision 持久化、DB 化路由配置 |
+| Runtime 抽象 | 60% | ContextBuilder/Knowledge/ResponseBuilder 未完整串主链路 |
+| Tool 执行 | 65% | 高风险审批、审计持久化、完整 JSON Schema 校验 |
+| Eval | 55% | EvalRun 自动持久化、LLM judge/semantic scoring、线上反馈回归集 |
+| DevFlow | 50% | 真实 runner 配置、job 持久化、安全沙箱、失败恢复 |
+| Persistence | 55% | repo 层完成较多，但 Registry/Deployment/Audit/Eval 主链路未完全接入 |
+| Artifact / Release | 40% | 持久化 store、artifact hash、deployment 绑定、可复现 rollback |
+| Security / Tenant / Policy | 40% | endpoint RBAC/scopes、多租户强隔离、高危操作审批 |
+| Hermes 真接入 | 30% | 当前是平台 tool-loop 原型，不是官方 Hermes runtime |
+| Observability | 45% | OTel/Langfuse、结构化 span/event、dashboard、alerting |
+| Knowledge / RAG | 25% | 未接 runtime 主链路，无真实 vector backend、同步和权限过滤 |
+
+需要特别避免的文档误判：
+
+- “持久化层完成”只能表示 repository/interface 基础较完整，不能表示 Registry/Deployment/Audit/Eval 等业务状态已经全部生产持久化。
+- “Hermes 真接入”当前只能表示 Spike A 的平台自研 conversation loop 已接 ModelGateway/ToolExecutor，不能表示接入了 Hermes 官方 runtime/planner/memory/event stream。
+- “ArtifactStore 完成”当前只能表示内存 tar.gz/checksum 原型可用，不能表示生产 artifact registry 完成。
+- “租户隔离完成”当前只能表示部分 repo 支持 tenant filter，不能表示所有 API/list/registry/runtime 路径都强制租户隔离。
+- “DevFlow 闭环完成”当前只能表示基础 orchestrator/runner/workspace 已有，不能表示真实 Codex/Claude Code 生产执行、job 持久化和失败恢复完成。
+
+### 1.4 Review 17 项覆盖索引
+
+本轮 review 的 17 个模块点在本文档中的落点如下。该表用于防止后续只保留汇总结论而遗漏模块级差距。
+
+| # | Review 模块 | 当前落点 | 是否完整沉淀 | 后续处理 |
+| --- | --- | --- | --- | --- |
+| 1 | API 层 | §2.1、§3.1、§5 P1 | 已覆盖 | RBAC/scopes、WebSocket、capability negotiation 进入 S5 |
+| 2 | Agent Request / Response 契约 | §1.1、§3.1 | 部分覆盖 | streaming event、error 统一、capability filtering 后续补到契约文档 |
+| 3 | Manifest / Agent Package | §2.3、§5 P0/P1 | 已覆盖 | handler import、entrypoint import、artifact hash 绑定进入 S5 |
+| 4 | Agent Registry | §2.1、§2.3、§5 P0、§7 | 已覆盖 | Registry/Deployment repository 接入列为 P0 |
+| 5 | Routing | §2.2、§5 P1、§7 | 已覆盖 | semantic rules 自动加载、route decision 持久化列为 P1 |
+| 6 | Runtime 管线 | §2.4、§4.2、§5 P0 | 已覆盖 | ContextBuilder/Knowledge/ResponseBuilder 主链路列为 P0 |
+| 7 | Native Runtime | §4.2 | 部分覆盖 | agent 级 orchestrator 隔离、adapter import 失败策略后续补到 runtime 设计 |
+| 8 | Hermes Runtime | §2.4、§6 阶段 2 | 已覆盖 | 官方 Hermes SDK Spike B 列为 P1 |
+| 9 | Model Gateway | §2.1、§5 P1 | 已覆盖 | provider 配置注册、token/cost、fallback、多模型路由进入 S5 |
+| 10 | Tool Registry / Tool Executor | §2.1、§4.4、§5 P1 | 已覆盖 | 高风险审批、审计持久化、JSON Schema 校验进入 S5 |
+| 11 | Persistence / Storage | §2.1、§4.1、§5 P0、§7 | 已覆盖 | repo 层与业务主链路接线列为 P0 |
+| 12 | Artifact / Release / Rollback | §2.3、§2.5、§5 P0、§7 | 已覆盖 | LocalArtifactStore、hash 绑定、可复现 rollback 列为 P0 |
+| 13 | Eval | §2.1、§5 P1、§7 | 已覆盖 | EvalRun 自动记录、报告 artifact、评分增强进入 P1 |
+| 14 | DevFlow / AI Coding Runner | §3.2、§3.3、§4.3、§5 P1 | 已覆盖 | runner 配置化、job 持久化、失败恢复进入 P1 |
+| 15 | Security / Tenant / Policy | §3.4、§4.4、§5 P1 | 已覆盖 | endpoint RBAC/scopes、高危审批、多租户强隔离进入 P1 |
+| 16 | Observability | §2.1、§5 P1 | 已覆盖 | OTel/Langfuse、结构化 trace event、dashboard/alerting 进入 S5 |
+| 17 | Knowledge / RAG | §2.1、§5 P0/P1、§7 | 已覆盖 | KnowledgeService 接 runtime 为 P0，真实 RAG backend 为 P1 |
 
 ## 2. 与 `agent-platform-design.md` 的差距
 
@@ -386,20 +445,24 @@ All checks passed
 
 | 优先级 | 工作项 | 原因 |
 | --- | --- | --- |
-| P0 | 持久化 AgentDeployment、AgentRun、Session、Audit、WebhookDelivery | 生产可追溯、多实例一致性、回滚基础 |
-| P0 | 真实 HermesBackend 集成或明确继续使用 Native runtime | 当前 Hermes 只是 stub，不能宣称用上 Hermes runtime |
-| P0 | manifest 强校验 | 已完成基础补强；下一步需要和 package artifact / deployment gate 绑定 |
-| P0 | deploy gate 强化 | eval gate 已补强；仍需人工审批、MR approval、release artifact 绑定 |
-| P0 | Plane/GitLab 状态闭环 | ✅ 基础闭环已实现：Webhook→MR→Runner→Eval→Comment→状态回写 |
-| P0 | Tool 权限和 secret 管理 | ✅ 已实现：`compute_tool_permission()` + `check_tool_allowed` + `SecretResolver` |
+| P0 | 修复 Plane webhook `background_tasks` 注入问题 | 启用 DevFlow 后 webhook 分支可能运行时失败 |
+| P0 | Registry/Deployment 接入持久化主链路 | 发布、灰度、回滚不能依赖进程内 cache |
+| P0 | Deployment audit 改用 `DeploymentAuditRepository` | 审计、rollback target、责任人记录必须重启可恢复 |
+| P0 | ArtifactStore 持久化并绑定 hash | 生产发布和回滚必须可复现，不能只依赖内存 tar.gz |
+| P0 | ContextBuilder + KnowledgeService 接入 RuntimeManager | runtime 管线缺少统一上下文、会话历史和知识注入治理点 |
+| P0 | 修正文档事实源 | 避免“基础组件存在”被误读为“生产闭环完成” |
 
 ### P1：平台扩展多个业务 Agent 前补齐
 
 | 优先级 | 工作项 | 原因 |
 | --- | --- | --- |
+| P1 | RBAC/scoped API key 接入 API endpoint | register/deploy/rollback/eval/MCP/Admin 不能只靠全局 API key |
+| P1 | Tool permission matrix 接入高风险审批 | `RequiresApproval` 需要进入实际执行 gate，而不是只停留在模型层 |
+| P1 | EvalRunner 自动记录 EvalRun | deploy gate、CI callback、线上回归需要可追溯 eval_run_id |
+| P1 | ModelGateway provider 从配置注册 | 默认只有 stub 不足以支撑真实 Hermes/业务 agent |
+| P1 | DevFlow runner adapter 从配置选择 | 不能在生产入口 hardcode mock runner |
 | P1 | package artifact registry | 多 agent、多版本、跨环境发布需要稳定产物 |
 | P1 | SemanticRouter manifest 规则加载 | 新 agent 增多后不能依赖手工注册 semantic rule |
-| P1 | CodingAgentRunner | ✅ 已实现并接入 orchestrator（Runner + Workspace + PathGuard + 3 adapters + Webhook 持久化 + Eval 回写） |
 | P1 | Eval 数据集扩展和自动报告 | 业务质量回归需要量化 |
 | P1 | Knowledge/RAG 真实接入 | MYJ 等业务 agent 离不开业务知识 |
 | P1 | OpenTelemetry/Langfuse trace | 线上排障和质量分析必需 |
@@ -471,13 +534,15 @@ All checks passed
 
 | 标题 | 类型 | 优先级 | 验收标准 |
 | --- | --- | --- | --- |
-| 引入持久化 repository 层 | platform:infra | P0 | deployment/run/session/webhook delivery 重启不丢失，单测覆盖 |
-| package artifact 与 manifest snapshot | platform:contract | P0 | 发布产物包含 manifest snapshot、checksum，deployment 记录可复现版本 |
-| 实现真实 HermesBackend spike | platform:runtime | P0 | 一个 echo agent 能通过 Hermes backend 完成真实 run，并返回平台响应 |
-| DevFlow 状态同步设计和实现 | platform:devflow | P0 | Plane Work Item、GitLab MR、eval result 可双向回写 |
-| CodingAgentRunner 接口设计 | platform:devflow | P1 | 定义 runner、workspace、path guard、result schema，并完成一个 mock runner |
+| 修复 Plane webhook DevFlow 触发路径 | platform:devflow | P0 | webhook 命中 DevFlow 分支不再运行时失败，测试覆盖 background task 注入 |
+| Registry/Deployment 持久化接入 | platform:infra | P0 | agent definition/deployment/list/resolve 重启后状态不丢失 |
+| Deployment audit repository 接入 | platform:release | P0 | deploy/rollback/audit endpoint 使用持久化审计记录 |
+| LocalArtifactStore + manifest/package hash | platform:release | P0 | 发布产物包含 manifest snapshot、checksum，deployment 记录可复现版本 |
+| ContextBuilder/Knowledge 接入 RuntimeManager | platform:runtime | P0 | runtime request 会统一注入 session history、knowledge snippets 和 system prompt |
+| Hermes SDK 真接入 Spike B | platform:runtime | P1 | 一个 echo agent 能通过官方 Hermes runtime 完成 run，并返回平台响应 |
+| DevFlow runner 配置化 + job 持久化 | platform:devflow | P1 | 生产入口可选择 codex/claude/mock adapter，job 状态可恢复 |
 | SemanticRouter manifest 规则加载 | platform:routing | P1 | manifest routing rule 可自动注册到 semantic router，trace 记录命中原因 |
-| Tool 权限和 secret 管理 | platform:security | P1 | 工具执行前校验 tenant/agent policy，secret 不出现在日志和 trace |
+| RBAC/scopes 接入 endpoint | platform:security | P1 | deploy/register/rollback/eval/admin/MCP 有 scope enforcement |
 | Eval report artifact | platform:quality | P1 | CI callback 生成可追溯 eval report，并可回写 GitLab/Plane |
 
 ## 8. 总结

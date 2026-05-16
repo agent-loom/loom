@@ -16,10 +16,10 @@
 | --- | --- | --- | --- |
 | S0 | 架构基线 | 冻结平台边界、MVP、核心契约 | 已完成，持续维护 |
 | S1 | MVP 骨架 | 跑通多 Agent、统一 API、manifest、runtime、eval、DevFlow 骨架 | 已基本实现 |
-| S2 | 生产化底座 | 持久化、artifact、发布审计、回滚、权限、观测 | Phase 1-3 完成（pipeline ✅, 持久化 ✅, 动态工具 ✅, Hermes 真接入 ✅, Artifact ✅）；Phase 4 安全+DevFlow 待实现 |
-| S3 | Hermes 真接入 | 从 stub/adapter 原型变成真实 Hermes runtime 能力 | ✅ 基本完成（OpenAICompatibleProvider ✅, ConversationEngine 修复 ✅, model_gateway 注入 ✅, hermes_echo 集成测试 ✅） |
-| S4 | AI 研发闭环 | CodingAgentRunner、workspace、path guard、Plane/GitLab 状态同步 | 下一阶段重点 |
-| S5 | 多 Agent 规模化 | semantic routing、model gateway、knowledge/RAG、admin UI、MCP | 后续扩展 |
+| S2 | 生产化底座 | 持久化、artifact、发布审计、回滚、权限、观测 | 部分完成；repository/DI 基础已实现，Registry/Deployment/Audit/Artifact 主链路仍需校准 |
+| S3 | Hermes 真接入 | 从 stub/adapter 原型变成真实 Hermes runtime 能力 | 部分完成；Spike A 已完成，官方 Hermes SDK Spike B 待实施 |
+| S4 | AI 研发闭环 | CodingAgentRunner、workspace、path guard、Plane/GitLab 状态同步 | 部分完成；runner/workspace/path guard 基础已实现，真实 runner 配置、job 持久化、失败恢复待补 |
+| S5 | 平台生产化与规模化 | 主链路可靠性校准、semantic routing、model gateway、knowledge/RAG、admin API、MCP、治理 | 计划中，入口为 `development-plan-s5.md` |
 
 ## 2. 文档状态定义
 
@@ -60,18 +60,19 @@
 | 文档 | 状态 | 用途 |
 | --- | --- | --- |
 | `next-stage-design-plan.md` | Baseline | 下一阶段设计清单和顺序 |
-| `development-plan-s2.md` | Phase 1-3 Complete | S2-S4 开发计划和任务跟踪（Phase 1-3 全部完成） |
-| `05-production/persistence-storage-design.md` | Implemented | 持久化、repository、migration 设计（persistence/ 全量实现 + Alembic migration + DI） |
-| `05-production/package-artifact-release-design.md` | Partially Implemented | agent artifact、manifest snapshot、发布回滚设计（ArtifactStore in-memory 已完成） |
-| `05-production/security-tenant-policy-design.md` | Partially Implemented | 鉴权、租户、tool policy、secret、脱敏设计（PolicyEngine 管线已接入，Domain Model 已泛化） |
+| `development-plan-s2.md` | Historical Plan | S2-S4 开发计划和任务跟踪；记录基础组件实现历史，不作为当前完成度事实源 |
+| `development-plan-s5.md` | Planned | S5 平台生产化与规模化执行计划，先做主链路可靠性校准 |
+| `05-production/persistence-storage-design.md` | Partially Implemented | repository/migration 基础已实现；Registry/Deployment/Audit/Eval 主链路仍需校准 |
+| `05-production/package-artifact-release-design.md` | Partially Implemented | agent artifact、manifest snapshot、发布回滚设计；当前仅有 in-memory ArtifactStore 原型 |
+| `05-production/security-tenant-policy-design.md` | Partially Implemented | 鉴权、租户、tool policy、secret、脱敏设计；RBAC/scopes endpoint enforcement 和高风险审批待补 |
 | `05-production/observability-eval-feedback-design.md` | Planned | trace、metrics、eval report、反馈闭环设计 |
 
 ### S3. Hermes 真接入
 
 | 文档 | 状态 | 用途 |
 | --- | --- | --- |
-| `03-runtime/hermes-runtime.md` | Implemented | Hermes 接入边界和能力映射 |
-| `03-runtime/hermes-backend-spike.md` | Implemented | 官方 Hermes runtime spike 设计和验收（Spike A 完成） |
+| `03-runtime/hermes-runtime.md` | Partially Implemented | Hermes 接入边界和能力映射；官方 runtime/planner/memory/event stream 尚未接入 |
+| `03-runtime/hermes-backend-spike.md` | Partially Implemented | Spike A 完成；Spike B 官方 Hermes SDK 真接入待实施 |
 
 ### S4. AI 研发闭环
 
@@ -86,6 +87,7 @@
 
 | 文档 | 状态 | 用途 |
 | --- | --- | --- |
+| `development-plan-s5.md` | Planned | S5 执行入口：Phase 0 主链路校准，Phase 1-3 扩展 runtime、平台集成和治理 |
 | `06-scale/semantic-routing-policy-design.md` | Planned | semantic routing rule schema 和 manifest 自动加载 |
 | `06-scale/model-gateway-design.md` | Planned | 模型 provider、profile、fallback、成本统计 |
 | `06-scale/knowledge-rag-design.md` | Planned | knowledge source、RAG、同步和租户过滤 |

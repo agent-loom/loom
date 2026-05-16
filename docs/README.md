@@ -14,6 +14,7 @@
 - [设计文档一致性检查报告](00-baseline/consistency-check.md)
 - [实现与设计差距分析](implementation-gap.md)
 - [下一阶段技术设计计划](next-stage-design-plan.md)
+- [S5 平台生产化与规模化开发计划](development-plan-s5.md)
 
 ## 总体设计
 
@@ -34,7 +35,7 @@
 | S2 生产化底座 | 设计持久化、制品、发布、权限、观测 | [下一阶段技术设计计划](next-stage-design-plan.md) |
 | S3 Hermes 真接入 | 验证真实 Hermes RuntimeBackend | [Hermes Runtime 能力利用设计](03-runtime/hermes-runtime.md) |
 | S4 AI 研发闭环 | 设计 runner、workspace、Plane/GitLab 状态同步 | [AI + 人 + Vibe Coding 研发一体化平台设计](02-architecture/ai-human-vibecoding-rd-platform.md)、[DevFlow Task Pack 契约](01-contracts/devflow-task-pack.md) |
-| S5 多 Agent 规模化 | 设计 semantic routing、model gateway、knowledge/RAG | [下一阶段技术设计计划](next-stage-design-plan.md) |
+| S5 平台生产化与规模化 | 主链路可靠性校准、Hermes SDK、knowledge/RAG、MCP、观测、治理 | [S5 平台生产化与规模化开发计划](development-plan-s5.md)、[下一阶段技术设计计划](next-stage-design-plan.md) |
 
 ## 使用方式
 
