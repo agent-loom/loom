@@ -89,6 +89,264 @@ flowchart TB
     PlaneAdapter --> Comments
 ```
 
+## 2.1 Plane / SCM / Coding Runner / Hermes 端到端交互流程
+
+本节是 Plane 与代码平台、AI 编码执行器、Agent Runtime 的主流程事实源。后续如果接入 GitHub、调整 DevFlowOrchestrator、修改 Plane webhook 触发条件或 Hermes runtime 边界，优先更新本节，再同步 `04-devflow/gitlab.md`、`04-devflow/devflow-state-sync-design.md` 和 `03-runtime/hermes-runtime.md`。
+
+当前实现中，Plane、GitLab、Hermes 不是直接两两互调，而是由 `agent-platform` 作为编排层统一打通：
+
+```text
+Plane 管需求和看板状态
+GitLab 管代码、分支、MR、CI 和制品
+agent-platform 管 DevFlow 编排、TaskPack、Eval、发布、运行时路由
+Hermes 是 Agent RuntimeBackend 之一，负责运行配置为 hermes backend 的业务 Agent
+```
+
+当前代码已经接入的是 **Plane + GitLab**。GitHub 尚未实现主链路；如果需要接 GitHub，应先抽象统一 `ScmAdapter`，再实现 GitHub 的 branch / pull request / comment / workflow artifact 能力。
+
+### 2.1.1 端到端架构图
+
+```mermaid
+flowchart LR
+    subgraph Plane[Plane]
+        WI[Work Item]
+        State[Ready for AI Dev]
+        Comment[Comments]
+        Props[Custom Properties]
+    end
+
+    subgraph Platform[Agent Platform]
+        Webhook[Plane Webhook Endpoint]
+        Orchestrator[DevFlowOrchestrator]
+        TaskPack[TaskPackGenerator]
+        Runner[CodingAgentRunner]
+        Eval[EvalRunner]
+        Deploy[Deployment Controller]
+        Router[AgentRouter]
+        Runtime[RuntimeManager]
+    end
+
+    subgraph SCM[SCM 当前为 GitLab / 未来可扩展 GitHub]
+        Branch[Feature Branch]
+        MR[Merge Request / Pull Request]
+        CI[CI Pipeline]
+        Artifact[Artifacts]
+    end
+
+    subgraph AgentRuntime[Agent Runtime Backends]
+        Native[NativeRuntimeBackend]
+        Hermes[HermesRuntimeBackend]
+        LangGraph[LangGraphRuntimeBackend]
+    end
+
+    WI --> State
+    State --> Webhook
+    Webhook --> Orchestrator
+    Orchestrator --> TaskPack
+    TaskPack --> Branch
+    Branch --> MR
+    MR --> CI
+    Orchestrator --> Comment
+    Orchestrator --> Props
+    Orchestrator --> Runner
+    Runner --> MR
+    CI --> Artifact
+    CI --> Eval
+    Eval --> Comment
+    Eval --> Deploy
+    Deploy --> Router
+    Router --> Runtime
+    Runtime --> Native
+    Runtime --> Hermes
+    Runtime --> LangGraph
+```
+
+### 2.1.2 主时序
+
+```mermaid
+sequenceDiagram
+    participant Human as Product / Developer
+    participant Plane as Plane Work Item
+    participant AP as Agent Platform
+    participant GitLab as GitLab
+    participant Runner as Coding Runner
+    participant Eval as Eval Runner
+    participant Runtime as Agent Runtime
+
+    Human->>Plane: 创建需求 / 补充验收标准
+    Human->>Plane: 状态改为 Ready for AI Dev
+    Plane->>AP: POST /api/v1/integrations/plane/webhook
+    AP->>AP: 校验事件类型、状态、签名、幂等
+    AP->>Plane: get_work_item(project_id, work_item_id)
+    AP->>AP: 生成 DevFlow TaskPack
+    AP->>GitLab: create_branch(feat/<work_item_id>)
+    AP->>GitLab: create_merge_request(...)
+    AP->>Plane: add_comment(MR link)
+    AP->>Plane: update_custom_properties(gitlab_branch, gitlab_mr_url, gitlab_mr_iid)
+    AP->>Runner: run(task_pack, mr_iid, plane ids)
+    Runner->>GitLab: 提交代码 / 更新 MR
+    GitLab->>Eval: CI 执行测试和 eval
+    Eval->>GitLab: MR comment(eval report)
+    Eval->>Plane: comment / state update
+    Human->>GitLab: Review / merge
+    AP->>Runtime: deploy 后运行 agent chat
+    Runtime->>Runtime: 根据 manifest 选择 native / hermes / langgraph
+```
+
+### 2.1.3 标准 16 步流程
+
+下面 16 步是 Plane、SCM、Coding Runner、Eval、Deployment 和 Hermes Runtime 打通后的标准端到端流程。架构设计、测试用例、runbook 和后续实现任务都应按这组步骤校准。
+
+1. 人在 Plane 创建或补充需求，例如“新增促销推荐 Agent”。
+2. 人或 AI 在 Plane Work Item 中补齐背景、验收标准、风险、目标 `agent_id` 和 `task_type`。
+3. 人把 Plane Work Item 状态改成 `Ready for AI Dev`。
+4. Plane 通过 Webhook 调用 `agent-platform` 的 `/api/v1/integrations/plane/webhook`。
+5. `agent-platform` 校验 Webhook 签名、事件类型、delivery 幂等和目标状态。
+6. `DevFlowOrchestrator` 从 Plane 拉取 Work Item 详情。
+7. `TaskPackGenerator` 根据 Work Item 生成 DevFlow TaskPack。
+8. SCM Adapter 创建 feature branch；当前实现为 GitLab branch，未来可扩展为 GitHub branch。
+9. SCM Adapter 创建变更请求；当前实现为 GitLab MR，未来可扩展为 GitHub PR。
+10. `agent-platform` 把 branch、MR/PR 链接和 DevFlow 摘要评论回 Plane。
+11. `agent-platform` 把 `gitlab_branch`、`gitlab_mr_url`、`gitlab_mr_iid` 等工程信息写回 Plane custom properties。
+12. `CodingAgentRunner` 接收 TaskPack，调用 mock / codex / claude_code adapter 执行代码修改。
+13. Coding Runner 提交代码并更新 MR/PR，变更内容通常包括 manifest、adapter、tools、prompts、evals、tests 和 docs。
+14. CI 执行 lint、unit tests、contract tests、agent eval 和 package；Eval 结果回写 MR/PR 和 Plane。
+15. Eval 和人工 Review 通过后，Agent Platform 执行 staging / prod canary / prod 部署，并记录 artifact、deployment 和 audit。
+16. 业务流量通过 `POST /api/v1/agent/chat` 进入平台，由 `AgentRouter` 和 `RuntimeManager` 根据 manifest 选择 `native`、`hermes` 或 `langgraph` runtime；配置为 `hermes` 的 Agent 才会进入 `HermesRuntimeBackend`。
+
+关键边界：
+
+| 边界 | 规则 |
+| --- | --- |
+| Plane -> Platform | Plane 只触发需求和状态事件，不直接运行 Agent |
+| Platform -> SCM | Platform 通过 adapter 创建 branch 和 MR/PR，不把 SCM 逻辑写死在 Plane adapter |
+| SCM -> Runner | Coding Runner 只围绕 TaskPack 和受控工作区改代码 |
+| Eval -> Deploy | Eval 是部署门禁的一部分，不应绕过 |
+| Runtime -> Hermes | Hermes 是 runtime backend，不处理 Plane webhook，也不直接管理 MR/PR |
+
+### 2.1.4 Plane Webhook 到 DevFlow 的触发条件
+
+当前 `DevFlowOrchestrator` 只处理这些事件：
+
+```text
+work_item.updated
+work_item
+issue.updated
+issue
+```
+
+工作项状态必须命中 `Ready for AI Dev` 触发集合。最小 payload：
+
+```json
+{
+  "data": {
+    "id": "wi-001",
+    "project": "proj-001",
+    "name": "新增促销推荐 Agent",
+    "state_detail": {"name": "Ready for AI Dev"},
+    "properties": {
+      "agent_id": "promo_recommendation",
+      "task_type": "agent:new"
+    }
+  }
+}
+```
+
+字段约定：
+
+| 字段 | 用途 | 当前实现 |
+| --- | --- | --- |
+| `data.id` | Work Item ID，也作为 TaskPack task_id | 必需 |
+| `data.project` / `data.project_id` | Plane Project ID | 必需 |
+| `data.name` / `data.title` | 任务标题 | 可选，缺省 `Untitled` |
+| `data.state_detail.name` / `data.state.name` | 看板状态 | 必须为 Ready 状态 |
+| `data.properties.agent_id` | 目标业务 Agent | 可选 |
+| `data.properties.task_type` | DevFlow 任务类型 | 可选，缺省 `platform:change` |
+
+### 2.1.5 回写 Plane 的数据
+
+DevFlow 成功创建 SCM 分支和 MR 后，平台应回写 Plane：
+
+| Plane 位置 | 回写内容 | 目的 |
+| --- | --- | --- |
+| Comment | MR / PR 链接、分支名、DevFlow 摘要 | 让产品和研发在需求卡片里看到工程入口 |
+| Custom Properties | `gitlab_branch`、`gitlab_mr_url`、`gitlab_mr_iid` | 后续状态同步、eval 回写、人工追踪 |
+| State | `AI Developing`、`Testing / Eval`、`Human Review` 等 | 让看板反映自动化研发进度 |
+
+当前代码已实现 MR comment 和 custom properties 回写；状态回写依赖配置 `ai_developing_state_id`，完整状态机见 `04-devflow/devflow-state-sync-design.md`。
+
+### 2.1.6 Hermes 在流程中的位置
+
+Hermes 不负责 Plane webhook，也不直接操作 GitLab/GitHub。Hermes 的位置是 **运行时后端**：
+
+```text
+前端 / 业务系统
+  -> POST /api/v1/agent/chat
+  -> AgentRouter
+  -> RuntimeManager
+  -> 根据 manifest.runtime.backend 选择 HermesRuntimeBackend
+  -> ModelGateway / ToolBridge / ResponseMapper
+  -> AgentResponse
+```
+
+Plane 研发流程和 Hermes runtime 的关系是：
+
+1. Plane 触发新增或修改业务 Agent。
+2. DevFlow 生成 TaskPack 并驱动代码变更。
+3. 代码变更可能新增 `runtime.backend: hermes` 的 Agent Package。
+4. Eval 和部署通过后，线上业务请求进入 `RuntimeManager`。
+5. 只有 manifest 指定 `hermes` 的 Agent 才会走 `HermesRuntimeBackend`。
+
+因此不要在 Plane Adapter 中直接依赖 Hermes SDK，也不要让 Hermes Runtime 直接处理需求看板事件。两者通过 `Agent Package + Manifest + Deployment` 间接衔接。
+
+### 2.1.7 GitHub 扩展点
+
+当前主实现是 GitLab。接入 GitHub 时建议不要把 GitHub 逻辑塞进 `DevFlowOrchestrator`，而是新增统一 SCM 抽象：
+
+```python
+class ScmAdapter(Protocol):
+    async def create_branch(self, project_id: str, branch: str) -> dict: ...
+    async def create_change_request(
+        self,
+        project_id: str,
+        source_branch: str,
+        target_branch: str,
+        title: str,
+        description: str,
+        labels: list[str],
+    ) -> dict: ...
+    async def add_comment(self, project_id: str, change_request_id: int, body: str) -> dict: ...
+    async def download_artifacts(self, project_id: str, job_id: str) -> bytes: ...
+```
+
+映射关系：
+
+| 平台概念 | GitLab | GitHub |
+| --- | --- | --- |
+| 代码项目 | project | repository |
+| 变更请求 | Merge Request | Pull Request |
+| CI | GitLab Pipeline | GitHub Actions |
+| 制品 | Job Artifacts | Workflow Artifacts |
+| 评论 | MR Notes | Issue / PR Comments |
+
+完成抽象后，`DevFlowOrchestrator` 只依赖 `ScmAdapter`，Plane 流程不需要关心后端是 GitLab 还是 GitHub。
+
+### 2.1.8 当前实现状态
+
+| 能力 | 当前状态 | 代码入口 |
+| --- | --- | --- |
+| Plane REST Adapter | 已实现 | `src/agent_platform/integrations/plane/adapter.py` |
+| Plane Webhook 签名 | 已实现 | `src/agent_platform/integrations/plane/webhook.py` |
+| Plane Webhook endpoint | 已实现 | `src/agent_platform/api/app.py` |
+| Webhook delivery 幂等 | 已实现，依赖 webhook repo | `src/agent_platform/api/app.py` |
+| Ready for AI Dev 触发 DevFlow | 已实现 | `src/agent_platform/devflow/orchestrator.py` |
+| Plane -> GitLab branch/MR | 已实现 | `src/agent_platform/devflow/orchestrator.py` |
+| GitLab MR 链接回写 Plane | 已实现 | `src/agent_platform/devflow/orchestrator.py` |
+| CodingRunner 派发 | 已实现基础版 | `src/agent_platform/devflow/runner/runner.py` |
+| GitHub 主链路 | 未实现 | 待新增 `GitHubAdapter` / `ScmAdapter` |
+| Hermes RuntimeBackend | 已实现轻量后端 | `src/agent_platform/runtime/hermes.py` |
+| Hermes 官方 runtime/planner/memory/event stream | 未完整接入 | 见 `03-runtime/hermes-runtime.md` |
+
 ## 3. Plane 项目建议
 
 建议先建 3 个 Project：

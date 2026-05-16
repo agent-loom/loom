@@ -1,23 +1,23 @@
-suite_name: hermes_echo_golden
-description: Basic golden test cases for Hermes echo agent
-
-cases:
-  - id: basic_greeting
+- id: hermes_echo_basic_greeting
+  input:
+    agent_id: hermes_echo
+    context:
+      tenant:
+        tenant_id: t1
     input:
       query: "Hello"
-    expected:
-      contains_any:
-        - "Hello"
-        - "hello"
-        - "Hi"
-        - "hi"
-    tags: [basic]
+  expected:
+    output_contains:
+      - "Hello"
 
-  - id: simple_question
+- id: hermes_echo_simple_question
+  input:
+    agent_id: hermes_echo
+    context:
+      tenant:
+        tenant_id: t1
     input:
       query: "What is 2+2?"
-    expected:
-      contains_any:
-        - "4"
-        - "four"
-    tags: [basic]
+  expected:
+    output_contains:
+      - "What is 2+2?"

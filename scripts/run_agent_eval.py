@@ -4,7 +4,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import subprocess
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from agent_platform.evals.runner import EvalRunner
 from agent_platform.registry.registry import AgentRegistry
@@ -31,7 +35,7 @@ async def main() -> int:
     registry = AgentRegistry(Path(args.registry_root))
 
     if args.eval_all:
-        agent_ids = [spec.agent_id for spec in registry.list_agents()]
+        agent_ids = [spec.agent_id for spec in await registry.list_agents()]
     elif args.changed_only:
         agent_ids = _changed_agent_ids(Path(args.registry_root))
     else:
@@ -46,7 +50,7 @@ async def main() -> int:
             if len(agent_ids) == 1
             else _agent_report_path(args.report, agent_id)
         )
-        spec = registry.get(agent_id)
+        spec = await registry.get(agent_id)
         report = await EvalRunner().run_agent_to_file(spec, report_path)
         print(
             f"eval {report.agent_id}: {report.passed}/{report.total} "

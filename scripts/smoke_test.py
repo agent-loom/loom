@@ -23,7 +23,7 @@ async def main() -> int:
     assert spec.agent_id == "myj"
 
     registry = AgentRegistry(Path("agents"))
-    route = AgentRouter(registry, Settings(default_agent_id="myj")).route(
+    route = await AgentRouter(registry, Settings(default_agent_id="myj")).route(
         AgentRequest(agent_id="myj", input=AgentInput(query="hello"))
     )
     assert route.agent_spec.agent_id == "myj"

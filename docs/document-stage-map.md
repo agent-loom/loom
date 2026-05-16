@@ -60,6 +60,7 @@
 | 文档 | 状态 | 用途 |
 | --- | --- | --- |
 | `next-stage-design-plan.md` | Baseline | 下一阶段设计清单和顺序 |
+| `manual-verification-guide.md` | Baseline | 平台功能模块手动验证指南（16 个模块，~30 min） |
 | `development-plan-s2.md` | Historical Plan | S2-S4 开发计划和任务跟踪；记录基础组件实现历史，不作为当前完成度事实源 |
 | `development-plan-s5.md` | Completed | S5 平台生产化与规模化执行计划；Phase 0-3 全部完成，670 tests passed |
 | `05-production/persistence-storage-design.md` | Implemented | repository/migration 基础已实现；Registry/Deployment/Audit 主链路已在 S5 Phase 0 接入 |
@@ -79,7 +80,7 @@
 | 文档 | 状态 | 用途 |
 | --- | --- | --- |
 | `04-devflow/gitlab.md` | Partially Implemented | GitLab 交付闭环设计 |
-| `04-devflow/plane.md` | Partially Implemented | Plane Work Item 和看板集成设计 |
+| `04-devflow/plane.md` | Partially Implemented | Plane Work Item、看板集成，以及 Plane / SCM / Coding Runner / Hermes 端到端交互流程 |
 | `04-devflow/devflow-runner-workspace-design.md` | Draft | CodingAgentRunner、workspace、path guard |
 | `04-devflow/devflow-state-sync-design.md` | Draft | Plane/GitLab 状态同步、幂等、重试、DLQ |
 
@@ -122,7 +123,7 @@
 
 1. `02-architecture/ai-human-vibecoding-rd-platform.md`
 2. `01-contracts/devflow-task-pack.md`
-3. `04-devflow/plane.md`
+3. `04-devflow/plane.md`，其中 `2.1` 节是 Plane / SCM / Coding Runner / Hermes 交互流程主入口
 4. `04-devflow/gitlab.md`
 5. 待补：`04-devflow/devflow-runner-workspace-design.md`
 6. 待补：`04-devflow/devflow-state-sync-design.md`

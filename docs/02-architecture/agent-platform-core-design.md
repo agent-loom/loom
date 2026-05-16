@@ -1,6 +1,6 @@
 # Agent Platform 核心功能设计
 
-> 本文档定位：平台**内部重构设计**——代码怎么组织、业务如何剥离、管线如何串联。平台总体设计见 [`agent-platform-design.md`](agent-platform-design.md)。
+> 本文档定位：平台**内部重构设计**——代码怎么组织、业务如何剥离、管线如何串联。平台总体设计见 [agent-platform-design.md](agent-platform-design.md)。
 
 本文档聚焦 agent-platform 自身作为平台的功能设计。不讨论任何具体业务 Agent（如 MYJ、促销推荐）的功能。目标是让平台成为一个通用的、业务无关的 Agent 运行与管理基础设施。
 
@@ -77,6 +77,7 @@ def goods_search(payload: dict) -> dict:
 ```
 
 平台的 `ToolRegistry` 本身是空的。工具注册只在以下场景发生：
+
 1. Agent Package 加载时，按 manifest 和 handler_ref 动态注册
 2. API 调用 `POST /api/v1/agent-packages/register` 时
 3. 插件通过 Hook 注册（`pre_run` hook 可以动态添加工具）
@@ -114,7 +115,7 @@ POST   /api/v1/agent-packages/{id}/reload        # 热重载 (重新读取 manif
 当前 `ManifestLoader` 已有 `_validate_contract()` 和 `_validate_file_refs()`。需要增强：
 
 | 校验项 | 当前状态 | 目标 |
-|---|---|---|
+| --- | --- | --- |
 | manifest schema | ✓ Pydantic | 保持 |
 | prompt 文件存在 | ✓ | 保持 |
 | eval suite 文件存在 | ✓ | 保持 |
@@ -207,6 +208,7 @@ await hook_registry.emit("on_error", HookContext(data={"error": exc}))
 ```
 
 Hook 的价值：
+
 - 审计日志（记录每次工具调用的参数和结果）
 - 观测（发送 metrics、trace span）
 - 安全拦截（hook 可以 `ctx.cancel()` 阻止危险操作）
@@ -238,7 +240,7 @@ def create_default_tool_registry() -> ToolRegistry:
 **ToolExecutor 增强**：
 
 | 能力 | 当前 | 目标 |
-|---|---|---|
+| --- | --- | --- |
 | Allow-list 校验 | ✓ | 保持 |
 | JSON Schema 输入校验 | ✓ 基础 | 增强：支持 required fields |
 | 超时控制 | ✓ | 保持 |
@@ -263,6 +265,7 @@ class ModelGateway:
 ```
 
 平台侧功能：
+
 - **Provider 注册**：OpenAI-compatible、HuaweiCloud、Anthropic 等 provider 通过配置注入
 - **成本统计**：记录 token usage per agent per model
 - **限流**：per-agent model call rate limit
@@ -327,7 +330,7 @@ Knowledge source 由 Agent manifest 声明，平台按 backend type 分发检索
 **核心端点**（平台必须）：
 
 | Method | Path | 用途 |
-|---|---|---|
+| --- | --- | --- |
 | POST | `/api/v1/agent/chat` | 统一对话入口 |
 | GET | `/api/v1/agent/chat/stream` | SSE 流式对话 |
 | WS | `/ws/agent/chat` | WebSocket 对话 |
@@ -337,7 +340,7 @@ Knowledge source 由 Agent manifest 声明，平台按 backend type 分发检索
 **Agent 管理端点**：
 
 | Method | Path | 用途 |
-|---|---|---|
+| --- | --- | --- |
 | GET | `/api/v1/agents` | 列出所有注册 Agent |
 | POST | `/api/v1/agent-packages/register` | 注册 Agent Package |
 | PATCH | `/api/v1/agent-packages/{id}/activate` | 激活 |
@@ -350,7 +353,7 @@ Knowledge source 由 Agent manifest 声明，平台按 backend type 分发检索
 **运行时端点**：
 
 | Method | Path | 用途 |
-|---|---|---|
+| --- | --- | --- |
 | GET | `/api/v1/agent-runs` | 查看运行记录 |
 | GET | `/api/v1/sessions` | 列出会话 |
 | GET | `/api/v1/sessions/{id}` | 查看会话详情 |
@@ -358,14 +361,14 @@ Knowledge source 由 Agent manifest 声明，平台按 backend type 分发检索
 **Eval 端点**：
 
 | Method | Path | 用途 |
-|---|---|---|
+| --- | --- | --- |
 | POST | `/api/v1/evals/run` | 运行评测 |
 | POST | `/api/v1/evals/ci-callback` | CI 回调 |
 
 **DevFlow 端点**（可选，按需启用）：
 
 | Method | Path | 用途 |
-|---|---|---|
+| --- | --- | --- |
 | POST | `/api/v1/devflow/parse-requirement` | 需求解析 |
 | POST | `/api/v1/devflow/generate-issues` | 生成 Issue |
 | POST | `/api/v1/devflow/scaffold-agent` | 脚手架 |
@@ -412,7 +415,7 @@ Knowledge source 由 Agent manifest 声明，平台按 backend type 分发检索
 
 ## 5. Domain Model 解耦
 
-> **注意**：本节提出的变更将影响 [`01-contracts/agent-request-response.md`](../01-contracts/agent-request-response.md) 中的字段定义和示例。实施前需同步更新契约文档，建议通过 ADR 记录此决策。
+> **注意**：本节提出的变更将影响 `[01-contracts/agent-request-response.md](../01-contracts/agent-request-response.md)` 中的字段定义和示例。实施前需同步更新契约文档，建议通过 ADR 记录此决策。
 
 当前 `RequestContext` 中的零售行业字段需要泛化：
 
