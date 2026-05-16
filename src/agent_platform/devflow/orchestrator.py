@@ -12,23 +12,19 @@ from agent_platform.persistence.repositories import WebhookDeliveryRepository
 
 logger = logging.getLogger(__name__)
 
-# 标识准备进行 AI 开发的状态集合
 READY_FOR_AI_DEV_STATES = {"Ready for AI Dev", "ready_for_ai_dev"}
-# 标识 AI 正在开发中的状态
 AI_DEVELOPING_STATE = "AI Developing"
 
 
 @dataclass(frozen=True)
 class DevFlowResult:
-    """
-    开发流程执行结果。
-    包含任务包、分支信息以及可能的合并请求(MR)和代码生成任务信息。
-    """
+    """开发流程执行结果。"""
     task_pack: DevelopmentTask
     branch: str
     mr_url: str | None = None
     mr_iid: int | None = None
     coding_job: CodingJob | None = None
+    job_submitted: bool = False
 
 
 class DevFlowOrchestrator:
@@ -46,6 +42,7 @@ class DevFlowOrchestrator:
         *,
         webhook_repo: WebhookDeliveryRepository | None = None,
         coding_runner: Any | None = None,
+        job_queue: Any | None = None,
         ai_developing_state_id: str | None = None,
         default_branch: str = "main",
     ):
@@ -54,6 +51,7 @@ class DevFlowOrchestrator:
         self.gitlab_project_id = gitlab_project_id
         self.webhook_repo = webhook_repo
         self.coding_runner = coding_runner
+        self.job_queue = job_queue
         self.ai_developing_state_id = ai_developing_state_id
         self.default_branch = default_branch
         self.task_pack_generator = TaskPackGenerator()
@@ -154,9 +152,9 @@ class DevFlowOrchestrator:
             logger.warning("Failed to update custom properties for %s", work_item_id)
 
         coding_job: CodingJob | None = None
-        # 如果配置了代码运行器并成功创建了 MR，则派发代码生成任务
+        job_submitted = False
         if self.coding_runner is not None and mr_iid is not None:
-            coding_job = await self._dispatch_runner(
+            coding_job, job_submitted = await self._dispatch_runner(
                 task_pack, mr_iid=mr_iid,
                 plane_project_id=project_id,
                 plane_work_item_id=work_item_id,
@@ -169,6 +167,7 @@ class DevFlowOrchestrator:
             mr_url=mr_url,
             mr_iid=mr_iid,
             coding_job=coding_job,
+            job_submitted=job_submitted,
         )
 
     async def _check_idempotency(
@@ -213,25 +212,37 @@ class DevFlowOrchestrator:
         mr_iid: int,
         plane_project_id: str,
         plane_work_item_id: str,
-    ) -> CodingJob | None:
-        """
-        触发 AI 代码运行器以处理生成的任务包。
+    ) -> tuple[CodingJob | None, bool]:
+        """Dispatch coding runner — via async queue if available, else direct await.
 
-        :return: 返回触发的 CodingJob，如果触发失败则返回 None。
+        Returns (job, submitted_async) where submitted_async=True means the job
+        was submitted to the queue and will complete asynchronously.
         """
+        runner_kwargs = dict(
+            mr_iid=mr_iid,
+            plane_project_id=plane_project_id,
+            plane_work_item_id=plane_work_item_id,
+        )
+
+        if self.job_queue is not None:
+            try:
+                job_id = f"{plane_work_item_id}-mr{mr_iid}"
+                await self.job_queue.submit(
+                    job_id,
+                    lambda: self.coding_runner.run(task_pack, **runner_kwargs),
+                )
+                logger.info("Job %s submitted to async queue", job_id)
+                return None, True
+            except Exception:
+                logger.exception("Failed to submit job to queue for MR !%s", mr_iid)
+                return None, False
+
         try:
-            job: CodingJob = await self.coding_runner.run(
-                task_pack,
-                mr_iid=mr_iid,
-                plane_project_id=plane_project_id,
-                plane_work_item_id=plane_work_item_id,
-            )
-            return job
+            job: CodingJob = await self.coding_runner.run(task_pack, **runner_kwargs)
+            return job, False
         except Exception:
-            logger.exception(
-                "CodingAgentRunner dispatch failed for MR !%s", mr_iid,
-            )
-            return None
+            logger.exception("CodingAgentRunner dispatch failed for MR !%s", mr_iid)
+            return None, False
 
     async def _fetch_work_item_detail(
         self, project_id: str, work_item_id: str

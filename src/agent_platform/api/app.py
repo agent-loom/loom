@@ -194,6 +194,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         if not self.api_key:
+            # Dev mode: no key configured → grant full access so require_scope() still works
             request.state.auth = AuthIdentity(
                 subject="anonymous",
                 tenant_id=request.headers.get("x-tenant-id", "default"),
@@ -494,12 +495,19 @@ def create_app() -> FastAPI:
             testing_state_id=settings.plane_testing_state_id,
             job_repo=coding_job_repo,
         )
+        from agent_platform.devflow.runner.job_queue import AsyncJobQueue
+
+        job_queue = AsyncJobQueue(max_concurrent=3)
+        app.state._closeables.append(("AsyncJobQueue", job_queue))
+        app.state.runner_adapter = adapter
+
         devflow = DevFlowOrchestrator(
             plane=plane_adapter,
             gitlab=gitlab_adapter,
             gitlab_project_id=settings.gitlab_project_id,
             webhook_repo=webhook_repo,
             coding_runner=coding_runner,
+            job_queue=job_queue,
             ai_developing_state_id=settings.plane_ai_developing_state_id,
             default_branch=settings.devflow_default_branch,
         )
@@ -549,6 +557,21 @@ def create_app() -> FastAPI:
         checks["devflow"] = "enabled" if devflow is not None else "disabled"
         checks["runner_adapter"] = settings.devflow_runner_adapter
         checks["auth"] = "enabled" if settings.api_key else "open"
+
+        runner_adapter = getattr(app.state, "runner_adapter", None)
+        if runner_adapter is not None:
+            try:
+                healthy = await runner_adapter.health_check()
+                checks["runner_health"] = "ok" if healthy else "unhealthy"
+                if not healthy:
+                    overall = False
+            except Exception:
+                checks["runner_health"] = "error"
+
+        job_queue_state = getattr(app.state, "_closeables", [])
+        for name, resource in job_queue_state:
+            if name == "AsyncJobQueue" and hasattr(resource, "get_stats"):
+                checks["job_queue"] = resource.get_stats()
 
         return JSONResponse(
             status_code=200 if overall else 503,
@@ -789,13 +812,19 @@ def create_app() -> FastAPI:
         for j in jobs:
             st = j.get("state", "unknown")
             by_state[st] = by_state.get(st, 0) + 1
-        return {
+        result: dict[str, Any] = {
             "enabled": devflow is not None,
             "runner_adapter": settings.devflow_runner_adapter,
             "gitlab_project_id": settings.gitlab_project_id,
             "total_jobs": len(jobs),
             "jobs_by_state": by_state,
         }
+
+        for name, resource in getattr(app.state, "_closeables", []):
+            if name == "AsyncJobQueue" and hasattr(resource, "get_stats"):
+                result["job_queue"] = resource.get_stats()
+
+        return result
 
     @app.post("/api/v1/deployments/rollback")
     async def rollback_deployment(
