@@ -351,3 +351,28 @@ class InMemoryEvalRunRepository:
                 if r["agent_id"] == agent_id
             ]
         return items[-limit:]
+
+
+class InMemoryCodingJobRepository:
+    """In-memory coding job persistence for dev/test environments."""
+
+    def __init__(self) -> None:
+        self._jobs: dict[str, dict[str, Any]] = {}
+
+    async def save(self, job_data: dict[str, Any]) -> None:
+        job_id = job_data.get("job_id", "")
+        self._jobs[job_id] = job_data
+
+    async def get(self, job_id: str) -> dict[str, Any] | None:
+        return self._jobs.get(job_id)
+
+    async def list_jobs(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        items = list(self._jobs.values())
+        if status is not None:
+            items = [j for j in items if j.get("state") == status]
+        return items[-limit:]

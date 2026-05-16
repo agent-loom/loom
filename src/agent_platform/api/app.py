@@ -2,6 +2,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, Response, WebSocket
@@ -41,6 +42,11 @@ from agent_platform.domain.models import (
 from agent_platform.evals.runner import EvalReport, EvalRunner
 from agent_platform.hooks import HookRegistry
 from agent_platform.integrations.gitlab.adapter import GitLabAdapter
+from agent_platform.integrations.gitlab.webhook import (
+    GitLabEventHandler,
+    GitLabWebhookError,
+    GitLabWebhookVerifier,
+)
 from agent_platform.integrations.plane.adapter import PlaneAdapter
 from agent_platform.integrations.plane.webhook import (
     PlaneWebhookError,
@@ -52,6 +58,7 @@ from agent_platform.observability.metrics import MetricsCollector
 from agent_platform.persistence.memory import (
     InMemoryAgentRunRepository,
     InMemoryAgentSessionRepository,
+    InMemoryCodingJobRepository,
     InMemoryDeploymentAuditRepository,
     InMemoryEvalRunRepository,
     InMemoryWebhookDeliveryRepository,
@@ -272,6 +279,8 @@ def create_app() -> FastAPI:
         definition_repo = None
         deployment_repo = None
 
+    coding_job_repo = InMemoryCodingJobRepository()
+
     registry = AgentRegistry(
         Path(settings.registry_root),
         definition_repo=definition_repo,
@@ -352,15 +361,22 @@ def create_app() -> FastAPI:
             base_url=settings.gitlab_base_url,
             token=settings.gitlab_token,
         )
-        # 将 CodingAgentRunner 注入到 DevFlowOrchestrator 中
-        workspace_manager = WorkspaceManager()
-        adapter = create_adapter("mock")
+        workspace_base = (
+            Path(settings.devflow_workspace_base_dir)
+            if settings.devflow_workspace_base_dir
+            else None
+        )
+        workspace_manager = WorkspaceManager(base_dir=workspace_base)
+        adapter = create_adapter(settings.devflow_runner_adapter)
         coding_runner = CodingAgentRunner(
             adapter=adapter,
             workspace_manager=workspace_manager,
             gitlab=gitlab_adapter,
             plane=plane_adapter,
             gitlab_project_id=settings.gitlab_project_id,
+            repo_url=settings.devflow_repo_url,
+            testing_state_id=settings.plane_testing_state_id,
+            job_repo=coding_job_repo,
         )
         devflow = DevFlowOrchestrator(
             plane=plane_adapter,
@@ -368,7 +384,28 @@ def create_app() -> FastAPI:
             gitlab_project_id=settings.gitlab_project_id,
             webhook_repo=webhook_repo,
             coding_runner=coding_runner,
+            ai_developing_state_id=settings.plane_ai_developing_state_id,
+            default_branch=settings.devflow_default_branch,
         )
+        logger.info(
+            "DevFlow enabled: adapter=%s, project=%s",
+            settings.devflow_runner_adapter,
+            settings.gitlab_project_id,
+        )
+
+    # GitLab reverse sync handler
+    gitlab_event_handler: GitLabEventHandler | None = None
+    if devflow is not None:
+        gitlab_event_handler = GitLabEventHandler(
+            plane=plane_adapter,
+            webhook_repo=webhook_repo,
+            testing_state_id=settings.plane_testing_state_id,
+            human_review_state_id=settings.plane_human_review_state_id,
+            staging_state_id=settings.plane_staging_state_id,
+            done_state_id=settings.plane_done_state_id,
+            ai_developing_state_id=settings.plane_ai_developing_state_id,
+        )
+
     app.state.devflow_enabled = devflow is not None
 
     @app.get("/health")
@@ -554,6 +591,36 @@ def create_app() -> FastAPI:
         )
         return plan.model_dump()
 
+    # --- DevFlow job observability endpoints ---
+
+    @app.get("/api/v1/devflow/jobs")
+    async def list_devflow_jobs(
+        status: str | None = None, limit: int = 50,
+    ) -> list[dict]:
+        return await coding_job_repo.list_jobs(status=status, limit=limit)
+
+    @app.get("/api/v1/devflow/jobs/{job_id}")
+    async def get_devflow_job(job_id: str) -> dict:
+        job = await coding_job_repo.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"job not found: {job_id}")
+        return job
+
+    @app.get("/api/v1/devflow/status")
+    async def devflow_status() -> dict[str, Any]:
+        jobs = await coding_job_repo.list_jobs(limit=1000)
+        by_state: dict[str, int] = {}
+        for j in jobs:
+            st = j.get("state", "unknown")
+            by_state[st] = by_state.get(st, 0) + 1
+        return {
+            "enabled": devflow is not None,
+            "runner_adapter": settings.devflow_runner_adapter,
+            "gitlab_project_id": settings.gitlab_project_id,
+            "total_jobs": len(jobs),
+            "jobs_by_state": by_state,
+        }
+
     @app.post("/api/v1/deployments/rollback")
     async def rollback_deployment(payload: RollbackRequest):
         rollback_info = await audit_log.get_rollback_version(
@@ -736,6 +803,41 @@ def create_app() -> FastAPI:
             result["devflow_status"] = "queued"
 
         return result
+
+    # --- GitLab webhook for reverse state sync ---
+
+    @app.post("/api/v1/integrations/gitlab/webhook")
+    async def gitlab_webhook(
+        request: Request,
+        background_tasks: BackgroundTasks,
+        x_gitlab_token: str | None = Header(default=None),
+        x_gitlab_event: str | None = Header(default=None),
+    ) -> dict[str, str | None]:
+        if settings.gitlab_webhook_secret:
+            try:
+                GitLabWebhookVerifier(settings.gitlab_webhook_secret).verify(x_gitlab_token)
+            except GitLabWebhookError as exc:
+                raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+        raw_body = await request.body()
+        payload = json.loads(raw_body) if raw_body else {}
+
+        event_type = (
+            payload.get("object_kind")
+            or (x_gitlab_event or "").replace(" Hook", "").lower().replace(" ", "_")
+        )
+
+        if not gitlab_event_handler:
+            return {"status": "accepted", "event": event_type, "sync": "disabled"}
+
+        async def _run_gitlab_sync() -> None:
+            try:
+                await gitlab_event_handler.handle_event(event_type, payload)
+            except Exception:
+                logger.exception("GitLab reverse sync failed for event %s", event_type)
+
+        background_tasks.add_task(_run_gitlab_sync)
+        return {"status": "accepted", "event": event_type, "sync": "queued"}
 
     # --- Approval gate API endpoints ---
 

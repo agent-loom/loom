@@ -6,8 +6,8 @@ from typing import Any
 
 from agent_platform.devflow.runner.models import CodingJob
 from agent_platform.devflow.task_pack import DevelopmentTask, TaskPackGenerator
-from agent_platform.integrations.gitlab.adapter import GitLabAdapter
 from agent_platform.integrations.plane.adapter import PlaneAdapter
+from agent_platform.integrations.scm.protocol import ScmAdapter
 from agent_platform.persistence.repositories import WebhookDeliveryRepository
 
 logger = logging.getLogger(__name__)
@@ -34,36 +34,28 @@ class DevFlowResult:
 class DevFlowOrchestrator:
     """
     开发流程编排器。
-    负责监听外部系统（如 Plane）的 Webhook 事件，并在状态变更为“准备 AI 开发”时，
+    负责监听外部系统（如 Plane）的 Webhook 事件，并在状态变更为"准备 AI 开发"时，
     触发代码生成流程，包括创建任务包、创建分支、创建 MR 以及派发代码编写任务。
     """
 
     def __init__(
         self,
         plane: PlaneAdapter,
-        gitlab: GitLabAdapter,
+        gitlab: ScmAdapter,
         gitlab_project_id: str,
         *,
         webhook_repo: WebhookDeliveryRepository | None = None,
         coding_runner: Any | None = None,
         ai_developing_state_id: str | None = None,
+        default_branch: str = "main",
     ):
-        """
-        初始化编排器。
-
-        :param plane: Plane 系统适配器，用于获取和更新 Issue 信息。
-        :param gitlab: GitLab 适配器，用于操作代码仓库（分支、MR 等）。
-        :param gitlab_project_id: 目标 GitLab 项目的 ID。
-        :param webhook_repo: Webhook 持久化仓库，用于幂等性校验。
-        :param coding_runner: 代码生成任务运行器，用于执行具体的代码编写。
-        :param ai_developing_state_id: “AI Developing” 状态的 ID，用于更新任务状态。
-        """
         self.plane = plane
         self.gitlab = gitlab
         self.gitlab_project_id = gitlab_project_id
         self.webhook_repo = webhook_repo
         self.coding_runner = coding_runner
         self.ai_developing_state_id = ai_developing_state_id
+        self.default_branch = default_branch
         self.task_pack_generator = TaskPackGenerator()
         self._processed_items: set[str] = set()
 
@@ -130,17 +122,15 @@ class DevFlowOrchestrator:
             labels=task_pack.repository.merge_request.labels,
         )
 
-        mr_url = mr_result.get("web_url")
-        mr_iid = mr_result.get("iid")
+        mr_url = mr_result.url
+        mr_iid = mr_result.mr_id
 
-        # 将创建的 MR 信息作为评论添加到原工作项中
         await self.plane.add_comment(
             project_id,
             work_item_id,
-            f"<p>DevFlow: GitLab MR created — <a href='{mr_url}'>{branch}</a></p>",
+            f"<p>DevFlow: MR created — <a href='{mr_url}'>{branch}</a></p>",
         )
 
-        # 更新工作项的状态为“AI 开发中”
         if self.ai_developing_state_id:
             try:
                 await self.plane.update_work_item_state(
@@ -150,7 +140,6 @@ class DevFlowOrchestrator:
             except Exception:
                 logger.warning("Failed to move work item %s to AI Developing", work_item_id)
 
-        # 将 GitLab 分支及 MR 详情更新到自定义属性中
         try:
             await self.plane.update_custom_properties(
                 project_id,
@@ -257,11 +246,10 @@ class DevFlowOrchestrator:
             return {}
 
     async def _create_branch_safe(self, branch: str) -> None:
-        """
-        安全地创建 GitLab 分支，若分支已存在则记录日志并继续。
-        """
         try:
-            await self.gitlab.create_branch(self.gitlab_project_id, branch)
+            await self.gitlab.create_branch(
+                self.gitlab_project_id, branch, ref=self.default_branch,
+            )
         except Exception:
             logger.info("Branch %s may already exist, proceeding", branch)
 

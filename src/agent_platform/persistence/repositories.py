@@ -233,3 +233,25 @@ class EvalRunRepository(Protocol):
     ) -> list[dict[str, Any]]:
         """列出评估记录，可按条件过滤。"""
         ...
+
+
+@runtime_checkable
+class CodingJobRepository(Protocol):
+    """DevFlow coding job persistence."""
+
+    async def save(self, job_data: dict[str, Any]) -> None:
+        """Persist a coding job snapshot."""
+        ...
+
+    async def get(self, job_id: str) -> dict[str, Any] | None:
+        """Retrieve a coding job by ID."""
+        ...
+
+    async def list_jobs(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """List coding jobs with optional status filter."""
+        ...

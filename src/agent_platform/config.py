@@ -20,10 +20,21 @@ class Settings(BaseModel):
     plane_workspace_slug: str | None = None
     plane_api_key: str | None = None
     plane_webhook_secret: str | None = None
+    plane_ai_developing_state_id: str | None = None
+    plane_testing_state_id: str | None = None
+    plane_human_review_state_id: str | None = None
+    plane_staging_state_id: str | None = None
+    plane_done_state_id: str | None = None
 
     gitlab_base_url: str | None = None
     gitlab_token: str | None = None
     gitlab_project_id: str | None = None
+    gitlab_webhook_secret: str | None = None
+
+    devflow_runner_adapter: str = "mock"
+    devflow_repo_url: str | None = None
+    devflow_default_branch: str = "main"
+    devflow_workspace_base_dir: str | None = None
 
 
 @lru_cache
@@ -41,7 +52,17 @@ def get_settings() -> Settings:
         plane_workspace_slug=os.getenv("PLANE_WORKSPACE_SLUG"),
         plane_api_key=os.getenv("PLANE_API_KEY"),
         plane_webhook_secret=os.getenv("PLANE_WEBHOOK_SECRET"),
+        plane_ai_developing_state_id=os.getenv("PLANE_AI_DEVELOPING_STATE_ID"),
+        plane_testing_state_id=os.getenv("PLANE_TESTING_STATE_ID"),
+        plane_human_review_state_id=os.getenv("PLANE_HUMAN_REVIEW_STATE_ID"),
+        plane_staging_state_id=os.getenv("PLANE_STAGING_STATE_ID"),
+        plane_done_state_id=os.getenv("PLANE_DONE_STATE_ID"),
         gitlab_base_url=os.getenv("GITLAB_BASE_URL"),
         gitlab_token=os.getenv("GITLAB_TOKEN"),
         gitlab_project_id=os.getenv("GITLAB_PROJECT_ID"),
+        gitlab_webhook_secret=os.getenv("GITLAB_WEBHOOK_SECRET"),
+        devflow_runner_adapter=os.getenv("DEVFLOW_RUNNER_ADAPTER", "mock"),
+        devflow_repo_url=os.getenv("DEVFLOW_REPO_URL"),
+        devflow_default_branch=os.getenv("DEVFLOW_DEFAULT_BRANCH", "main"),
+        devflow_workspace_base_dir=os.getenv("DEVFLOW_WORKSPACE_BASE_DIR"),
     )

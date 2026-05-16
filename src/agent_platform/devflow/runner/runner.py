@@ -16,8 +16,9 @@ from agent_platform.devflow.runner.path_guard import PathGuard
 from agent_platform.devflow.runner.protocol import RunnerAdapter, RunnerAdapterResult
 from agent_platform.devflow.runner.workspace import WorkspaceManager
 from agent_platform.devflow.task_pack import DevelopmentTask
-from agent_platform.integrations.gitlab.adapter import GitLabAdapter
 from agent_platform.integrations.plane.adapter import PlaneAdapter
+from agent_platform.integrations.scm.protocol import ScmAdapter
+from agent_platform.persistence.repositories import CodingJobRepository
 
 logger = logging.getLogger(__name__)
 
@@ -33,23 +34,13 @@ class CodingAgentRunner:
         *,
         adapter: RunnerAdapter,
         workspace_manager: WorkspaceManager,
-        gitlab: GitLabAdapter,
+        gitlab: ScmAdapter,
         plane: PlaneAdapter | None = None,
         gitlab_project_id: str,
         repo_url: str | None = None,
         testing_state_id: str | None = None,
+        job_repo: CodingJobRepository | None = None,
     ):
-        """
-        初始化。
-
-        :param adapter: 具体的 AI 编码适配器（如 Codex, Claude）。
-        :param workspace_manager: 工作区管理工具，负责环境的克隆与清理。
-        :param gitlab: GitLab API 适配器。
-        :param plane: 关联的项目管理平台适配器。
-        :param gitlab_project_id: 关联的代码项目 ID。
-        :param repo_url: 指定拉取代码的 git URL。
-        :param testing_state_id: 代码成功提交后在项目平台上所需要流转到的测试状态。
-        """
         self.adapter = adapter
         self.workspace_manager = workspace_manager
         self.gitlab = gitlab
@@ -57,6 +48,7 @@ class CodingAgentRunner:
         self.gitlab_project_id = gitlab_project_id
         self._repo_url_override = repo_url
         self._testing_state_id = testing_state_id
+        self._job_repo = job_repo
 
     async def run(
         self,
@@ -74,9 +66,11 @@ class CodingAgentRunner:
             plane_project_id=plane_project_id,
             plane_work_item_id=plane_work_item_id,
         )
+        await self._persist_job(job)
 
         try:
             job.state = JobState.WORKSPACE_CREATING
+            await self._persist_job(job)
             # 创建本地代码工作区
             workspace_dir = await self.workspace_manager.create(
                 branch=task.repository.work_branch,
@@ -85,6 +79,7 @@ class CodingAgentRunner:
             job.workspace_dir = str(workspace_dir)
 
             job.state = JobState.RUNNING
+            await self._persist_job(job)
             path_guard = PathGuard.from_task(task)
             # 执行 AI 代理编写代码，包含重试机制
             adapter_result = await self._execute_with_retry(job, task)
@@ -159,6 +154,7 @@ class CodingAgentRunner:
 
         finally:
             job.updated_at = datetime.now(UTC)
+            await self._persist_job(job)
             # 根据配置清理工作区目录
             if job.workspace_dir:
                 wm = self.workspace_manager
@@ -231,12 +227,21 @@ class CodingAgentRunner:
         return last_result
 
     def _repo_url(self) -> str:
-        """
-        获取拉取代码库所用的 Git URL。
-        """
+        """获取拉取代码库所用的 Git URL。"""
         if self._repo_url_override:
             return self._repo_url_override
-        return f"https://gitlab.example.com/{self.gitlab_project_id}.git"
+        raise RuntimeError(
+            "DEVFLOW_REPO_URL is not configured. "
+            "Set the environment variable or pass repo_url to CodingAgentRunner."
+        )
+
+    async def _persist_job(self, job: CodingJob) -> None:
+        if self._job_repo is None:
+            return
+        try:
+            await self._job_repo.save(job.model_dump(mode="json"))
+        except Exception:
+            logger.warning("Failed to persist job %s", job.job_id)
 
     async def _report_result(self, job: CodingJob) -> None:
         """
