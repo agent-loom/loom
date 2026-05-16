@@ -415,3 +415,31 @@ class RuntimeManager:
             )
         TraceSanitizer.sanitize_run(run)
         await self.run_store.record(run)
+
+    # ------------------------------------------------------------------
+    # Aggregate query methods (used by admin API)
+    # ------------------------------------------------------------------
+
+    async def list_runs(
+        self,
+        *,
+        agent_id: str | None = None,
+        limit: int = 100,
+    ) -> list[AgentRun]:
+        return await self.run_store.list_runs(agent_id=agent_id, limit=limit)
+
+    async def get_run(self, run_id: str) -> AgentRun | None:
+        return await self.run_store.get(run_id)
+
+    async def list_sessions(
+        self,
+        *,
+        agent_id: str | None = None,
+    ) -> list[AgentSession]:
+        return await self.session_store.list_sessions(agent_id=agent_id)
+
+    async def load_session(self, session_id: str) -> AgentSession | None:
+        return await self.session_store.load(session_id)
+
+    async def delete_session(self, session_id: str) -> None:
+        await self.session_store.delete(session_id)

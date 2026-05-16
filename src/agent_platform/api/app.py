@@ -184,7 +184,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
     """
 
     _ALL_SCOPES = ["chat", "deploy", "admin", "eval", "register", "rollback", "read"]
-    _SKIP_PATHS = {"/health", "/health/ready", "/docs", "/openapi.json", "/redoc"}
+    _SKIP_PATHS = {"/health", "/health/ready", "/metrics", "/docs", "/openapi.json", "/redoc"}
 
     def __init__(self, app, api_key: str | None = None, key_store=None):
         super().__init__(app)
@@ -437,7 +437,7 @@ def create_app() -> FastAPI:
         knowledge_service=app_knowledge_service,
         langfuse_tracer=langfuse_tracer,
     )
-    eval_runner = EvalRunner(runtime_manager)
+    eval_runner = EvalRunner(runtime_manager, eval_repo=eval_repo)
     task_pack_generator = TaskPackGenerator()
 
     requirement_parser = RequirementParser()
@@ -497,6 +497,7 @@ def create_app() -> FastAPI:
         audit_log=audit_log,
         tool_registry=tool_registry,
         metrics=app_metrics,
+        key_store=key_store,
     )
     app.include_router(
         admin_router,

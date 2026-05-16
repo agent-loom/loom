@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
 
 from agent_platform.api.admin_deps import AdminDeps
 from agent_platform.registry.registry import AgentNotFoundError
@@ -55,7 +58,7 @@ async def get_agent(agent_id: str, request: Request) -> dict[str, Any]:
         d.model_dump(mode="json") for d in deployments if d.agent_id == agent_id
     ]
 
-    runs = await deps.runtime_manager.run_store.list_runs(agent_id=agent_id, limit=20)
+    runs = await deps.runtime_manager.list_runs(agent_id=agent_id, limit=20)
     recent_runs = [r.model_dump(mode="json") for r in runs]
 
     return {
@@ -94,8 +97,8 @@ async def system_status(request: Request) -> dict[str, Any]:
 
     agents = await deps.registry.list_agents()
     deployments = await deps.registry.list_deployments()
-    sessions = await deps.runtime_manager.session_store.list_sessions()
-    runs = await deps.runtime_manager.run_store.list_runs()
+    sessions = await deps.runtime_manager.list_sessions()
+    runs = await deps.runtime_manager.list_runs()
 
     return {
         "agents": len(agents),
@@ -118,7 +121,7 @@ async def list_runs(
 ) -> list[dict[str, Any]]:
     """List recent runs with optional agent_id and status filters."""
     deps = _deps(request)
-    runs = await deps.runtime_manager.run_store.list_runs(agent_id=agent_id)
+    runs = await deps.runtime_manager.list_runs(agent_id=agent_id)
     results = [r.model_dump(mode="json") for r in runs]
     if status is not None:
         results = [r for r in results if r.get("status") == status]
@@ -129,7 +132,7 @@ async def list_runs(
 async def get_run(run_id: str, request: Request) -> dict[str, Any]:
     """Get run details by run_id."""
     deps = _deps(request)
-    run = await deps.runtime_manager.run_store.get(run_id)
+    run = await deps.runtime_manager.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
     return run.model_dump(mode="json")
@@ -147,7 +150,7 @@ async def list_sessions(
 ) -> list[dict[str, Any]]:
     """List sessions with optional agent_id filter."""
     deps = _deps(request)
-    sessions = await deps.runtime_manager.session_store.list_sessions(agent_id=agent_id)
+    sessions = await deps.runtime_manager.list_sessions(agent_id=agent_id)
     return [s.model_dump(mode="json") for s in sessions]
 
 
@@ -155,10 +158,10 @@ async def list_sessions(
 async def delete_session(session_id: str, request: Request) -> dict[str, str]:
     """Delete a session by session_id."""
     deps = _deps(request)
-    existing = await deps.runtime_manager.session_store.load(session_id)
+    existing = await deps.runtime_manager.load_session(session_id)
     if existing is None:
         raise HTTPException(status_code=404, detail=f"session not found: {session_id}")
-    await deps.runtime_manager.session_store.delete(session_id)
+    await deps.runtime_manager.delete_session(session_id)
     return {"status": "deleted", "session_id": session_id}
 
 
@@ -183,3 +186,90 @@ async def list_tools(request: Request) -> list[dict[str, Any]]:
         }
         for t in tools
     ]
+
+
+# ---------------------------------------------------------------------------
+# API Key Management
+# ---------------------------------------------------------------------------
+
+
+class CreateKeyRequest(BaseModel):
+    tenant_id: str = "default"
+    role: str = "agent_developer"
+    scopes: list[str] = Field(default_factory=lambda: ["chat", "eval"])
+    expires_in_hours: int | None = None
+
+
+class CreateKeyResponse(BaseModel):
+    key_id: str
+    api_key: str
+    tenant_id: str
+    role: str
+    scopes: list[str]
+    expires_at: str | None = None
+
+
+@router.post("/keys")
+async def create_api_key(
+    body: CreateKeyRequest,
+    request: Request,
+) -> CreateKeyResponse:
+    """Create a new API key and return the plaintext (shown only once)."""
+    deps = _deps(request)
+    if deps.key_store is None:
+        raise HTTPException(status_code=501, detail="key store not configured")
+
+    key_id = f"key_{uuid4().hex[:16]}"
+    plaintext = f"ap_{uuid4().hex}"
+    expires_at: datetime | None = None
+    if body.expires_in_hours is not None:
+        from datetime import timedelta
+        expires_at = datetime.now(UTC) + timedelta(hours=body.expires_in_hours)
+
+    auth = getattr(request.state, "auth", None)
+    created_by = auth.subject if auth else "admin"
+
+    await deps.key_store.add_key(
+        plaintext,
+        key_id=key_id,
+        tenant_id=body.tenant_id,
+        role=body.role,
+        scopes=body.scopes,
+        created_by=created_by,
+        expires_at=expires_at,
+    )
+    return CreateKeyResponse(
+        key_id=key_id,
+        api_key=plaintext,
+        tenant_id=body.tenant_id,
+        role=body.role,
+        scopes=body.scopes,
+        expires_at=expires_at.isoformat() if expires_at else None,
+    )
+
+
+@router.get("/keys")
+async def list_api_keys(
+    request: Request,
+    tenant_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """List all active API keys (hashes never exposed)."""
+    deps = _deps(request)
+    if deps.key_store is None:
+        raise HTTPException(status_code=501, detail="key store not configured")
+    return await deps.key_store.list_keys(tenant_id=tenant_id)
+
+
+@router.delete("/keys/{key_id}")
+async def revoke_api_key(
+    key_id: str,
+    request: Request,
+) -> dict[str, Any]:
+    """Revoke an API key by key_id (soft delete)."""
+    deps = _deps(request)
+    if deps.key_store is None:
+        raise HTTPException(status_code=501, detail="key store not configured")
+    revoked = await deps.key_store.revoke_key(key_id)
+    if not revoked:
+        raise HTTPException(status_code=404, detail=f"key not found: {key_id}")
+    return {"status": "revoked", "key_id": key_id}

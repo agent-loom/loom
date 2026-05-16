@@ -1,6 +1,7 @@
 """Agent 评测运行器，加载用例并生成评测报告。"""
 
 import json
+import logging
 from typing import Any
 
 import yaml
@@ -8,6 +9,8 @@ from pydantic import BaseModel, Field
 
 from agent_platform.domain.models import AgentRequest, AgentSpec, RuntimeRequest
 from agent_platform.runtime.manager import RuntimeManager
+
+logger = logging.getLogger(__name__)
 
 
 class EvalCase(BaseModel):
@@ -39,11 +42,16 @@ class EvalReport(BaseModel):
 class EvalRunner:
     """评测运行器，执行评测用例并生成报告。"""
 
-    def __init__(self, runtime_manager: RuntimeManager | None = None):
+    def __init__(
+        self,
+        runtime_manager: RuntimeManager | None = None,
+        eval_repo: Any | None = None,
+    ):
         """初始化评测运行器。"""
         self.runtime_manager = runtime_manager or RuntimeManager()
+        self.eval_repo = eval_repo
 
-    async def run_agent(self, spec: AgentSpec) -> EvalReport:
+    async def run_agent(self, spec: AgentSpec, *, trigger: str = "manual") -> EvalReport:
         """运行指定 Agent 的全部评测用例并返回报告。"""
         cases = self._load_cases(spec)
         results: list[EvalCaseResult] = []
@@ -60,7 +68,7 @@ class EvalRunner:
         total = len(results)
         pass_rate = passed_count / total if total else 0.0
         required_pass_rate = spec.manifest.evals.required_pass_rate
-        return EvalReport(
+        report = EvalReport(
             agent_id=spec.agent_id,
             agent_version=spec.manifest.version.package_version,
             total=total,
@@ -70,6 +78,24 @@ class EvalRunner:
             gate_passed=pass_rate >= required_pass_rate,
             results=results,
         )
+
+        if self.eval_repo is not None:
+            try:
+                await self.eval_repo.record(
+                    agent_id=report.agent_id,
+                    agent_version=report.agent_version,
+                    total=report.total,
+                    passed=report.passed,
+                    pass_rate=report.pass_rate,
+                    required_pass_rate=report.required_pass_rate,
+                    gate_passed=report.gate_passed,
+                    results=[r.model_dump(mode="json") for r in report.results],
+                    trigger=trigger,
+                )
+            except Exception:
+                logger.exception("failed to persist eval run for %s", report.agent_id)
+
+        return report
 
     def _evaluate_case(self, case: EvalCase, response) -> EvalCaseResult:
         failures: list[str] = []

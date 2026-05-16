@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agent_platform.observability.metrics import MetricsCollector
+    from agent_platform.persistence.sql import SqlApiKeyStore
     from agent_platform.registry.deployment import DeploymentAuditLog
     from agent_platform.registry.registry import AgentRegistry
     from agent_platform.runtime.manager import RuntimeManager
@@ -22,3 +23,4 @@ class AdminDeps:
     audit_log: DeploymentAuditLog
     tool_registry: ToolRegistry
     metrics: MetricsCollector
+    key_store: SqlApiKeyStore | None = None

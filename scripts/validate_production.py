@@ -77,10 +77,12 @@ def check_cli_tool(report: ValidationReport, name: str, cmd: list[str], critical
         return
     try:
         result = subprocess.run(cmd, capture_output=True, timeout=10)
+        ok = result.returncode == 0
+        msg = f"found at {path}" if ok else f"exit code {result.returncode}"
         report.add(CheckResult(
             name=f"CLI: {name}",
-            passed=result.returncode == 0,
-            message=f"found at {path}" if result.returncode == 0 else f"exit code {result.returncode}",
+            passed=ok,
+            message=msg,
             critical=critical,
         ))
     except Exception as e:
@@ -141,8 +143,8 @@ async def check_weaviate(report: ValidationReport):
 async def check_database(report: ValidationReport):
     db_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./agent_platform.db")
     try:
-        from sqlalchemy.ext.asyncio import create_async_engine
         from sqlalchemy import text
+        from sqlalchemy.ext.asyncio import create_async_engine
         engine = create_async_engine(db_url)
         async with engine.begin() as conn:
             await conn.execute(text("SELECT 1"))
@@ -198,10 +200,11 @@ def check_env_vars(report: ValidationReport):
 
 def check_runner_adapter(report: ValidationReport):
     adapter = os.getenv("DEVFLOW_RUNNER_ADAPTER", "mock")
+    suffix = " (mock is not production-ready)" if adapter == "mock" else ""
     report.add(CheckResult(
         name="Runner adapter",
         passed=adapter != "mock",
-        message=f"adapter={adapter}" + (" (mock is not production-ready)" if adapter == "mock" else ""),
+        message=f"adapter={adapter}{suffix}",
     ))
 
 
