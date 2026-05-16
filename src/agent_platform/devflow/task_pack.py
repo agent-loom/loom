@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+
+def _sanitize_branch_name(raw: str) -> str:
+    """Sanitize a string for use as a git branch name suffix."""
+    s = raw.lower()
+    s = re.sub(r"[^a-z0-9/_-]", "-", s)
+    s = re.sub(r"-{2,}", "-", s)
+    return s.strip("-")
 
 
 class TaskMetadata(BaseModel):
@@ -132,7 +141,7 @@ class TaskPackGenerator:
         :param source: 任务来源信息字典。
         ...
         """
-        branch_suffix = task_id.lower().replace("_", "-")
+        branch_suffix = _sanitize_branch_name(task_id)
         source = source or {"system": "manual", "issue_id": task_id}
         reviewers = reviewers or ["backend-owner", "product-owner"]
         agent_package_path = f"agents/{agent_id}" if agent_id else "agents/<agent_id>"

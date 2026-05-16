@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
-import fnmatch
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 
 from agent_platform.devflow.task_pack import DevelopmentTask
+
+
+def _glob_match(path: str, pattern: str) -> bool:
+    """Match *path* against *pattern*, supporting ``**`` for recursive dirs."""
+    return PurePosixPath(path).match(pattern)
 
 
 @dataclass(frozen=True)
@@ -39,14 +44,14 @@ class PathGuard:
 
     def _check_single(self, file_path: str) -> PathViolation | None:
         for pattern in self.write_denied:
-            if fnmatch.fnmatch(file_path, pattern):
+            if _glob_match(file_path, pattern):
                 return PathViolation(
                     path=file_path,
                     reason=f"matches write_denied pattern: {pattern}",
                 )
 
         for pattern in self.write_allowed:
-            if fnmatch.fnmatch(file_path, pattern):
+            if _glob_match(file_path, pattern):
                 return None
 
         return PathViolation(

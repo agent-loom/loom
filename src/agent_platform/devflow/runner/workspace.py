@@ -20,6 +20,9 @@ class WorkspaceManager:
     执行验证脚本、以及最终的代码提交、推送和工作区清理。
     """
 
+    GIT_CLONE_TIMEOUT = 300
+    GIT_COMMAND_TIMEOUT = 120
+
     def __init__(
         self,
         *,
@@ -67,7 +70,16 @@ class WorkspaceManager:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await proc.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=self.GIT_CLONE_TIMEOUT,
+            )
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            raise RuntimeError(
+                f"git clone timed out after {self.GIT_CLONE_TIMEOUT}s for {repo_url}"
+            )
         if proc.returncode != 0:
             raise RuntimeError(
                 f"git clone failed (exit {proc.returncode}): {stderr.decode(errors='replace')}"
@@ -241,16 +253,22 @@ class WorkspaceManager:
             logger.info("Cleaned up workspace: %s", workspace_dir)
 
     async def _run_git(self, cwd: Path, cmd: list[str]) -> None:
-        """
-        底层通用的 git 命令行执行封装。
-        """
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(cwd),
         )
-        stdout, stderr = await proc.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=self.GIT_COMMAND_TIMEOUT,
+            )
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            raise RuntimeError(
+                f"{' '.join(cmd)} timed out after {self.GIT_COMMAND_TIMEOUT}s"
+            )
         if proc.returncode != 0:
             raise RuntimeError(
                 f"{' '.join(cmd)} failed (exit {proc.returncode}): "

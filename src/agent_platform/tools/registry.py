@@ -155,12 +155,14 @@ def _try_load_module(
     except ValueError:
         module_name = f"_agent_tools_{agent_id}_{module_stem}"
     spec = importlib.util.spec_from_file_location(module_name, py_file)
-    if spec and spec.loader:
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        spec.loader.exec_module(module)
+    if not spec or not spec.loader:
+        logger.debug("Cannot create import spec for %s", py_file)
+        return
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
     try:
-        pass
+        spec.loader.exec_module(module)
     except Exception:
         logger.warning(
             "Failed to import tool module %s for agent %s",
@@ -168,6 +170,7 @@ def _try_load_module(
             agent_id,
             exc_info=True,
         )
+        del sys.modules[module_name]
         return
 
     # Look for register functions.

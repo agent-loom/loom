@@ -15,6 +15,13 @@ from agent_platform.domain.models import AgentSpec
 logger = logging.getLogger(__name__)
 
 
+def _join_patterns(patterns: list[str]) -> str:
+    """Join multiple regex patterns into a single alternation group."""
+    if len(patterns) == 1:
+        return patterns[0]
+    return "|".join(f"(?:{p})" for p in patterns)
+
+
 class PolicyViolation(BaseModel):
     """策略违规记录。"""
     policy_type: str
@@ -184,7 +191,11 @@ class PolicyEngine:
 
     @staticmethod
     def _normalize_safety_rule(raw: dict[str, Any]) -> dict[str, Any]:
-        """Normalize nested YAML safety rule format to flat SafetyRule fields."""
+        """Normalize nested YAML safety rule format to flat SafetyRule fields.
+
+        Handles multiple output_patterns by joining them into a single
+        alternation regex group so no patterns are silently dropped.
+        """
         out: dict[str, Any] = {
             "id": raw.get("id", ""),
             "description": raw.get("description", ""),
@@ -201,10 +212,10 @@ class PolicyEngine:
             out["tools"] = match["tool_names"]
         elif match.get("output_patterns") and action == "warn":
             out["type"] = "pii_guard"
-            out["pattern"] = match["output_patterns"][0]
+            out["pattern"] = _join_patterns(match["output_patterns"])
         elif match.get("output_patterns"):
             out["type"] = "deny_pattern"
-            out["pattern"] = match["output_patterns"][0]
+            out["pattern"] = _join_patterns(match["output_patterns"])
         elif match.get("output_commands"):
             out["type"] = "command_allowlist"
             out["commands"] = match["output_commands"]
