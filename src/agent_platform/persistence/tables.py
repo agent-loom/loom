@@ -246,3 +246,27 @@ class EvalRunRow(AuditMixin, Base):
     trigger: Mapped[str] = mapped_column(
         String(64), nullable=False, default="manual"
     )
+
+
+class ApiKeyRow(AuditMixin, Base):
+    """API 密钥持久化表行模型。"""
+    __tablename__ = "api_keys"
+
+    key_id: Mapped[str] = mapped_column(
+        String(128), nullable=False, unique=True, index=True
+    )
+    key_hash: Mapped[str] = mapped_column(
+        String(128), nullable=False, unique=True, index=True
+    )
+    role: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="readonly"
+    )
+    scopes_json: Mapped[list | None] = mapped_column(
+        JSON, nullable=True
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )

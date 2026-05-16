@@ -58,6 +58,13 @@ class ApiKeyStore(Protocol):
         ...
 
 
+@runtime_checkable
+class AsyncApiKeyStore(Protocol):
+    """Async interface for persistent API key verification."""
+
+    async def verify_async(self, key_plaintext: str) -> ApiKeyRecord | None: ...
+
+
 class InMemoryApiKeyStore:
     """In-memory API key store using ``hashlib.sha256`` for hashing.
 

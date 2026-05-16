@@ -26,6 +26,7 @@ from agent_platform.persistence.tables import (
     AgentDeploymentRow,
     AgentRunRow,
     AgentSessionRow,
+    ApiKeyRow,
     DeploymentAuditEventRow,
     EvalRunRow,
     WebhookDeliveryRow,
@@ -760,3 +761,112 @@ class SqlEvalRunRepository:
                 else None
             ),
         }
+
+
+# ------------------------------------------------------------------
+# ApiKeyStore (SQL)
+# ------------------------------------------------------------------
+
+
+class SqlApiKeyStore:
+    """SQL-backed API key store using SHA-256 hash lookup."""
+
+    def __init__(
+        self, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        self._sf = session_factory
+
+    @staticmethod
+    def _hash(key_plaintext: str) -> str:
+        import hashlib
+        return hashlib.sha256(key_plaintext.encode()).hexdigest()
+
+    async def add_key(
+        self,
+        key_plaintext: str,
+        *,
+        key_id: str,
+        tenant_id: str = "default",
+        role: str = "platform_admin",
+        scopes: list[str] | None = None,
+        created_by: str = "system",
+        expires_at: datetime | None = None,
+    ) -> None:
+        h = self._hash(key_plaintext)
+        async with self._sf() as session:
+            row = ApiKeyRow(
+                key_id=key_id,
+                key_hash=h,
+                tenant_id=tenant_id,
+                role=role,
+                scopes_json=scopes or [
+                    "chat", "deploy", "admin", "eval",
+                    "register", "rollback", "read",
+                ],
+                created_by=created_by,
+                expires_at=expires_at,
+                active=True,
+            )
+            session.add(row)
+            await session.commit()
+
+    def verify(self, key_plaintext: str) -> None:
+        raise NotImplementedError(
+            "Use verify_async for SqlApiKeyStore"
+        )
+
+    async def verify_async(self, key_plaintext: str):
+        from agent_platform.api.auth import ApiKeyRecord
+        h = self._hash(key_plaintext)
+        async with self._sf() as session:
+            stmt = select(ApiKeyRow).where(
+                ApiKeyRow.key_hash == h,
+                ApiKeyRow.active.is_(True),
+            )
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row is None:
+                return None
+            if row.expires_at is not None and row.expires_at <= datetime.now(UTC):
+                return None
+            return ApiKeyRecord(
+                key_id=row.key_id,
+                key_hash=row.key_hash,
+                tenant_id=row.tenant_id or "default",
+                role=row.role,
+                scopes=row.scopes_json or [],
+                created_by=row.created_by,
+                expires_at=row.expires_at,
+            )
+
+    async def list_keys(self, *, tenant_id: str | None = None) -> list[dict]:
+        async with self._sf() as session:
+            stmt = select(ApiKeyRow).where(ApiKeyRow.active.is_(True))
+            if tenant_id:
+                stmt = stmt.where(ApiKeyRow.tenant_id == tenant_id)
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+            return [
+                {
+                    "key_id": r.key_id,
+                    "tenant_id": r.tenant_id,
+                    "role": r.role,
+                    "scopes": r.scopes_json,
+                    "created_by": r.created_by,
+                    "expires_at": (
+                        r.expires_at.isoformat() if r.expires_at else None
+                    ),
+                }
+                for r in rows
+            ]
+
+    async def revoke_key(self, key_id: str) -> bool:
+        async with self._sf() as session:
+            stmt = select(ApiKeyRow).where(ApiKeyRow.key_id == key_id)
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row is None:
+                return False
+            row.active = False
+            await session.commit()
+            return True

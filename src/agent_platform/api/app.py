@@ -180,21 +180,22 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
     校验传入请求的 API 密钥并将 AuthIdentity 填入 request.state.auth，
     使得下游 require_role()/require_scope() 依赖可正常工作。
+    支持同步 ApiKeyStore（内存）和异步 SqlApiKeyStore（持久化）。
     """
 
     _ALL_SCOPES = ["chat", "deploy", "admin", "eval", "register", "rollback", "read"]
     _SKIP_PATHS = {"/health", "/health/ready", "/docs", "/openapi.json", "/redoc"}
 
-    def __init__(self, app, api_key: str | None = None):
+    def __init__(self, app, api_key: str | None = None, key_store=None):
         super().__init__(app)
         self.api_key = api_key
+        self.key_store = key_store
 
     async def dispatch(self, request: Request, call_next):
         if request.url.path in self._SKIP_PATHS:
             return await call_next(request)
 
-        if not self.api_key:
-            # Dev mode: no key configured → grant full access so require_scope() still works
+        if not self.api_key and self.key_store is None:
             request.state.auth = AuthIdentity(
                 subject="anonymous",
                 tenant_id=request.headers.get("x-tenant-id", "default"),
@@ -210,7 +211,29 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not token:
             token = request.headers.get("x-api-key")
 
-        if token == self.api_key:
+        if not token:
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "error": {
+                        "code": "UNAUTHORIZED",
+                        "message": "invalid or missing API key",
+                    }
+                },
+            )
+
+        record = await self._verify_token(token)
+        if record is not None:
+            request.state.auth = AuthIdentity(
+                subject=record.created_by,
+                tenant_id=request.headers.get("x-tenant-id", record.tenant_id),
+                role=record.role,
+                scopes=record.scopes,
+                key_id=record.key_id,
+            )
+            return await call_next(request)
+
+        if self.api_key and token == self.api_key:
             request.state.auth = AuthIdentity(
                 subject="api-key-user",
                 tenant_id=request.headers.get("x-tenant-id", "default"),
@@ -228,6 +251,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 }
             },
         )
+
+    async def _verify_token(self, token: str):
+        if self.key_store is None:
+            return None
+        if hasattr(self.key_store, "verify_async"):
+            return await self.key_store.verify_async(token)
+        return self.key_store.verify(token)
 
 
 def _validate_startup_config(settings) -> None:
@@ -304,8 +334,27 @@ def create_app() -> FastAPI:
 
     app_policy_engine = PolicyEngine()
     app_knowledge_service = KnowledgeService()
+
+    if settings.weaviate_url:
+        from agent_platform.knowledge.service import WeaviateKnowledgeBackend
+        weaviate_backend = WeaviateKnowledgeBackend(
+            url=settings.weaviate_url,
+            api_key=settings.weaviate_api_key,
+        )
+        app_knowledge_service.register(weaviate_backend)
+        logger.info("WeaviateKnowledgeBackend registered (url=%s)", settings.weaviate_url)
+
     app_hook_registry = HookRegistry()
     app_metrics = MetricsCollector()
+
+    from agent_platform.observability.langfuse_tracer import LangfuseTracer
+    langfuse_tracer = LangfuseTracer(
+        public_key=settings.langfuse_public_key,
+        secret_key=settings.langfuse_secret_key,
+        host=settings.langfuse_host,
+    )
+    if langfuse_tracer.enabled:
+        logger.info("Langfuse LLM tracing enabled")
 
     model_gateway = ModelGateway.create_default()
     tool_registry = create_default_tool_registry()
@@ -397,15 +446,21 @@ def create_app() -> FastAPI:
     test_agent = TestGenerationAgent()
     audit_log = DeploymentAuditLog(repo=audit_repo)
     artifact_store = ArtifactStore()
-    ws_manager = AgentWebSocketManager(router, runtime_manager)
+    ws_manager = AgentWebSocketManager(
+        router, runtime_manager,
+        api_key=settings.api_key,
+    )
 
     app = FastAPI(title="Agent Platform", version="0.2.0", lifespan=_app_lifespan)
     app.state._settings = settings
     app.state._closeables = []
     if db_engine:
         app.state._closeables.append(("SQLAlchemy engine", db_engine))
+    if langfuse_tracer.enabled:
+        app.state._closeables.append(("LangfuseTracer", langfuse_tracer))
     app.state.policy_engine = app_policy_engine
     app.state.knowledge_service = app_knowledge_service
+    app.state.langfuse = langfuse_tracer
     app.state.hook_registry = app_hook_registry
     app.state.semantic_router = app_semantic_router
     app.state.metrics = app_metrics
@@ -427,7 +482,28 @@ def create_app() -> FastAPI:
         dependencies=[_ROLE_ADMIN],
     )
 
-    app.add_middleware(AuthMiddleware, api_key=settings.api_key)
+    key_store = None
+    if db_session_factory is not None:
+        from agent_platform.persistence.sql import SqlApiKeyStore
+        key_store = SqlApiKeyStore(db_session_factory)
+        if settings.api_key:
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop is None:
+                asyncio.run(key_store.add_key(
+                    settings.api_key,
+                    key_id="bootstrap-key",
+                    role="platform_admin",
+                    created_by="bootstrap",
+                ))
+    app.state.key_store = key_store
+
+    app.add_middleware(
+        AuthMiddleware, api_key=settings.api_key, key_store=key_store,
+    )
     app.add_middleware(RateLimiterMiddleware, requests_per_minute=120, burst=20)
 
     cors_raw = settings.cors_allowed_origins
@@ -497,8 +573,15 @@ def create_app() -> FastAPI:
         )
         from agent_platform.devflow.runner.job_queue import AsyncJobQueue
 
-        job_queue = AsyncJobQueue(max_concurrent=3)
-        app.state._closeables.append(("AsyncJobQueue", job_queue))
+        if settings.devflow_job_queue_backend == "redis" and settings.redis_url:
+            from agent_platform.devflow.runner.redis_queue import RedisJobQueue
+            job_queue = RedisJobQueue(
+                redis_url=settings.redis_url, max_concurrent=3,
+            )
+            app.state._closeables.append(("RedisJobQueue", job_queue))
+        else:
+            job_queue = AsyncJobQueue(max_concurrent=3)
+            app.state._closeables.append(("AsyncJobQueue", job_queue))
         app.state.runner_adapter = adapter
 
         devflow = DevFlowOrchestrator(
@@ -570,8 +653,18 @@ def create_app() -> FastAPI:
 
         job_queue_state = getattr(app.state, "_closeables", [])
         for name, resource in job_queue_state:
-            if name == "AsyncJobQueue" and hasattr(resource, "get_stats"):
+            if name in ("AsyncJobQueue", "RedisJobQueue") and hasattr(resource, "get_stats"):
                 checks["job_queue"] = resource.get_stats()
+
+        lf = getattr(app.state, "langfuse", None)
+        if lf is not None:
+            checks["langfuse"] = "enabled" if lf.enabled else "disabled"
+
+        if settings.weaviate_url:
+            checks["weaviate"] = settings.weaviate_url
+
+        if settings.redis_url:
+            checks["redis"] = settings.redis_url
 
         return JSONResponse(
             status_code=200 if overall else 503,
@@ -821,7 +914,7 @@ def create_app() -> FastAPI:
         }
 
         for name, resource in getattr(app.state, "_closeables", []):
-            if name == "AsyncJobQueue" and hasattr(resource, "get_stats"):
+            if name in ("AsyncJobQueue", "RedisJobQueue") and hasattr(resource, "get_stats"):
                 result["job_queue"] = resource.get_stats()
 
         return result

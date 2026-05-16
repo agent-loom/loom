@@ -38,6 +38,16 @@ class Settings(BaseModel):
     devflow_default_branch: str = "main"
     devflow_workspace_base_dir: str | None = None
 
+    redis_url: str | None = None
+    devflow_job_queue_backend: str = "memory"
+
+    langfuse_public_key: str | None = None
+    langfuse_secret_key: str | None = None
+    langfuse_host: str | None = None
+
+    weaviate_url: str | None = None
+    weaviate_api_key: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:
@@ -68,4 +78,11 @@ def get_settings() -> Settings:
         devflow_repo_url=os.getenv("DEVFLOW_REPO_URL"),
         devflow_default_branch=os.getenv("DEVFLOW_DEFAULT_BRANCH", "main"),
         devflow_workspace_base_dir=os.getenv("DEVFLOW_WORKSPACE_BASE_DIR"),
+        redis_url=os.getenv("REDIS_URL"),
+        devflow_job_queue_backend=os.getenv("DEVFLOW_JOB_QUEUE_BACKEND", "memory"),
+        langfuse_public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
+        langfuse_secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+        langfuse_host=os.getenv("LANGFUSE_HOST"),
+        weaviate_url=os.getenv("WEAVIATE_URL"),
+        weaviate_api_key=os.getenv("WEAVIATE_API_KEY"),
     )

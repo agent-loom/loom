@@ -27,6 +27,16 @@ dev = [
 hermes = [
     "hermes-agent>=0.13.0,<1.0",
 ]
+redis = [
+    "redis[hiredis]>=5.0",
+]
+langfuse = [
+    "langfuse>=2.0",
+]
+production = [
+    "redis[hiredis]>=5.0",
+    "langfuse>=2.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

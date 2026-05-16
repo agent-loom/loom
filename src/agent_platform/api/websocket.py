@@ -1,7 +1,8 @@
-"""WebSocket 实时通信管理器。"""
+"""WebSocket 实时通信管理器，含鉴权、背压和优雅断连。"""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -15,45 +16,141 @@ from agent_platform.runtime.manager import RuntimeManager
 
 logger = logging.getLogger(__name__)
 
+MAX_PENDING_MESSAGES = 32
+MAX_MESSAGE_SIZE = 65536
+
 
 class AgentWebSocketManager:
-    """Manages WebSocket connections for real-time agent communication."""
+    """Manages WebSocket connections with auth, backpressure, and graceful shutdown."""
 
     def __init__(
         self,
         router: AgentRouter,
         runtime_manager: RuntimeManager,
+        *,
+        api_key: str | None = None,
+        key_store=None,
+        max_connections: int = 100,
     ):
-        """初始化 WebSocket 管理器。"""
         self.router = router
         self.runtime_manager = runtime_manager
+        self._api_key = api_key
+        self._key_store = key_store
+        self._max_connections = max_connections
         self._connections: dict[str, WebSocket] = {}
+        self._pending: dict[str, int] = {}
 
     async def handle(self, websocket: WebSocket, session_id: str | None = None) -> None:
-        """处理 WebSocket 连接的完整生命周期。"""
+        if len(self._connections) >= self._max_connections:
+            await websocket.close(code=1013, reason="server at capacity")
+            return
+
+        auth_identity = await self._authenticate(websocket)
+        if auth_identity is None:
+            return
+
         await websocket.accept()
         ws_id = session_id or f"ws_{id(websocket)}"
         self._connections[ws_id] = websocket
-        logger.info("WebSocket connected: %s", ws_id)
+        self._pending[ws_id] = 0
+        logger.info(
+            "WebSocket connected: %s (auth=%s, total=%d)",
+            ws_id, auth_identity.get("subject", "unknown"), len(self._connections),
+        )
 
         try:
             while True:
-                raw = await websocket.receive_text()
+                if self._pending.get(ws_id, 0) >= MAX_PENDING_MESSAGES:
+                    await websocket.send_json({
+                        "type": "error",
+                        "error": {
+                            "code": "BACKPRESSURE",
+                            "message": "too many pending messages, slow down",
+                        },
+                    })
+                    await asyncio.sleep(0.5)
+                    continue
+
+                try:
+                    raw = await asyncio.wait_for(
+                        websocket.receive_text(), timeout=300,
+                    )
+                except TimeoutError:
+                    await websocket.send_json({"type": "ping"})
+                    continue
+
+                if len(raw) > MAX_MESSAGE_SIZE:
+                    await websocket.send_json({
+                        "type": "error",
+                        "error": {
+                            "code": "MESSAGE_TOO_LARGE",
+                            "message": "message exceeds size limit",
+                        },
+                    })
+                    continue
+
+                self._pending[ws_id] = self._pending.get(ws_id, 0) + 1
                 try:
                     data = json.loads(raw)
-                    response = await self._process_message(data, ws_id)
+                    response = await self._process_message(data, ws_id, auth_identity)
                     await websocket.send_json(response)
                 except Exception as exc:
                     await websocket.send_json({
                         "type": "error",
                         "error": {"code": "PROCESSING_ERROR", "message": str(exc)},
                     })
+                finally:
+                    self._pending[ws_id] = max(0, self._pending.get(ws_id, 1) - 1)
+
         except WebSocketDisconnect:
             logger.info("WebSocket disconnected: %s", ws_id)
+        except Exception:
+            logger.exception("WebSocket error: %s", ws_id)
         finally:
             self._connections.pop(ws_id, None)
+            self._pending.pop(ws_id, None)
 
-    async def _process_message(self, data: dict[str, Any], ws_id: str) -> dict[str, Any]:
+    async def _authenticate(self, websocket: WebSocket) -> dict[str, Any] | None:
+        if not self._api_key and self._key_store is None:
+            return {"subject": "anonymous", "role": "platform_admin"}
+
+        query_params = websocket.query_params
+        token = query_params.get("token")
+
+        if not token:
+            headers = dict(websocket.headers)
+            auth_header = headers.get("authorization", "")
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:]
+            if not token:
+                token = headers.get("x-api-key")
+
+        if not token:
+            await websocket.close(code=4001, reason="authentication required")
+            return None
+
+        if self._key_store is not None:
+            if hasattr(self._key_store, "verify_async"):
+                record = await self._key_store.verify_async(token)
+            else:
+                record = self._key_store.verify(token)
+            if record is not None:
+                return {
+                    "subject": record.created_by,
+                    "role": record.role,
+                    "tenant_id": record.tenant_id,
+                    "key_id": record.key_id,
+                }
+
+        if self._api_key and token == self._api_key:
+            return {"subject": "api-key-user", "role": "platform_admin"}
+
+        await websocket.close(code=4001, reason="invalid credentials")
+        return None
+
+    async def _process_message(
+        self, data: dict[str, Any], ws_id: str, auth: dict[str, Any],
+    ) -> dict[str, Any]:
         msg_type = data.get("type", "chat")
 
         if msg_type == "ping":
@@ -96,3 +193,12 @@ class AgentWebSocketManager:
     @property
     def active_connections(self) -> int:
         return len(self._connections)
+
+    async def close_all(self, reason: str = "server shutting down") -> None:
+        for _ws_id, ws in list(self._connections.items()):
+            try:
+                await ws.close(code=1001, reason=reason)
+            except Exception:
+                pass
+        self._connections.clear()
+        self._pending.clear()
