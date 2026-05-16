@@ -9,7 +9,7 @@ from agent_platform.devflow.task_pack import DevelopmentTask
 
 
 def _glob_match(path: str, pattern: str) -> bool:
-    """Match *path* against *pattern* using PurePosixPath which correctly handles ``**`` recursive globs (fnmatch does not)."""
+    """PurePosixPath.match handles ``**`` correctly; fnmatch does not."""
     return PurePosixPath(path).match(pattern)
 
 

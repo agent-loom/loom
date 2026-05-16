@@ -1,16 +1,12 @@
 from __future__ import annotations
 
-import asyncio
-
 import httpx
 import pytest
 
-from agent_platform.integrations.errors import IntegrationError, RetryableError, ScmError
+from agent_platform.integrations.errors import IntegrationError, ScmError
 from agent_platform.integrations.http_client import (
-    DEFAULT_BACKOFF_BASE,
-    DEFAULT_MAX_RETRIES,
-    HttpClient,
     RETRYABLE_STATUS_CODES,
+    HttpClient,
 )
 
 

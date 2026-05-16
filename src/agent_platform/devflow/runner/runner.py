@@ -154,7 +154,7 @@ class CodingAgentRunner:
 
         finally:
             job.updated_at = datetime.now(UTC)
-            # Final persist captures terminal state (SUCCEEDED/FAILED/TIMED_OUT) regardless of exit path
+            # Persist terminal state regardless of exit path
             await self._persist_job(job)
             # 根据配置清理工作区目录
             if job.workspace_dir:

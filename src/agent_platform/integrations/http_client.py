@@ -12,7 +12,8 @@ from agent_platform.integrations.errors import IntegrationError, RetryableError
 
 logger = logging.getLogger(__name__)
 
-RETRYABLE_STATUS_CODES = {500, 502, 503, 504, 429}  # 429 included: rate-limited requests are safe to retry after backoff
+# 429 included: rate-limited requests are safe to retry after backoff
+RETRYABLE_STATUS_CODES = {500, 502, 503, 504, 429}
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_BACKOFF_BASE = 0.5
 DEFAULT_TIMEOUT = 30

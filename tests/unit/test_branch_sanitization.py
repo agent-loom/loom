@@ -1,4 +1,4 @@
-from agent_platform.devflow.task_pack import _sanitize_branch_name, TaskPackGenerator
+from agent_platform.devflow.task_pack import TaskPackGenerator, _sanitize_branch_name
 
 
 class TestSanitizeBranchName:

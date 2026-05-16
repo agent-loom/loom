@@ -80,7 +80,7 @@ class WorkspaceManager:
             await proc.wait()
             raise RuntimeError(
                 f"git clone timed out after {self.GIT_CLONE_TIMEOUT}s for {repo_url}"
-            )
+            ) from None
         if proc.returncode != 0:
             raise RuntimeError(
                 f"git clone failed (exit {proc.returncode}): {stderr.decode(errors='replace')}"
@@ -269,7 +269,7 @@ class WorkspaceManager:
             await proc.wait()
             raise RuntimeError(
                 f"{' '.join(cmd)} timed out after {self.GIT_COMMAND_TIMEOUT}s"
-            )
+            ) from None
         if proc.returncode != 0:
             raise RuntimeError(
                 f"{' '.join(cmd)} failed (exit {proc.returncode}): "

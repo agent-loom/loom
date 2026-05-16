@@ -240,9 +240,11 @@ class TestPlaneInfoExtraction:
         assert result is None
 
     def test_extract_from_description(self):
-        attrs = {
-            "description": "Some text\nPLANE_PROJECT_ID: proj-c\nPLANE_WORK_ITEM_ID: wi-c\nMore text",
-        }
+        desc = (
+            "Some text\nPLANE_PROJECT_ID: proj-c\n"
+            "PLANE_WORK_ITEM_ID: wi-c\nMore text"
+        )
+        attrs = {"description": desc}
         result = GitLabEventHandler._extract_plane_info_from_description(attrs)
         assert result == ("proj-c", "wi-c")
 
