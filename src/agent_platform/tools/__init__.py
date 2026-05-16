@@ -1,3 +1,10 @@
+from agent_platform.tools.approval import (
+    ApprovalGate,
+    ApprovalRequest,
+    ApprovalStatus,
+    AutoApproveGate,
+    InMemoryApprovalGate,
+)
 from agent_platform.tools.executor import ToolExecutor
 from agent_platform.tools.registry import (
     ToolDefinition,
@@ -7,6 +14,11 @@ from agent_platform.tools.registry import (
 )
 
 __all__ = [
+    "ApprovalGate",
+    "ApprovalRequest",
+    "ApprovalStatus",
+    "AutoApproveGate",
+    "InMemoryApprovalGate",
     "ToolDefinition",
     "ToolExecutor",
     "ToolRegistry",

@@ -4,13 +4,15 @@ import os
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import FastAPI, Header, HTTPException, Request, Response, WebSocket
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, Response, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import StreamingResponse
 
+from agent_platform.api.admin import router as admin_router
+from agent_platform.api.admin_deps import AdminDeps
 from agent_platform.api.rate_limiter import RateLimiterMiddleware
 from agent_platform.api.streaming import stream_agent_response
 from agent_platform.api.websocket import AgentWebSocketManager
@@ -62,6 +64,11 @@ from agent_platform.router import AgentRouter
 from agent_platform.router_semantic import SemanticRouter
 from agent_platform.runtime.manager import RuntimeManager
 from agent_platform.runtime.model_gateway import ModelGateway
+from agent_platform.tools.approval import (
+    ApprovalStatus,
+    AutoApproveGate,
+    InMemoryApprovalGate,
+)
 from agent_platform.tools.executor import ToolExecutor
 from agent_platform.tools.registry import create_default_tool_registry
 
@@ -126,6 +133,11 @@ class RollbackRequest(BaseModel):
     agent_id: str
     channel: str = "prod"
     actor: str = "system"
+
+
+class ResolveApprovalRequest(BaseModel):
+    status: str  # "approved" or "rejected"
+    actor: str
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
@@ -193,9 +205,8 @@ def create_app() -> FastAPI:
     setup_logging()
 
     settings = get_settings()
-    registry = AgentRegistry(Path(settings.registry_root))
+
     app_semantic_router = SemanticRouter()
-    router = AgentRouter(registry, settings, semantic_router=app_semantic_router)
 
     app_policy_engine = PolicyEngine()
     app_knowledge_service = KnowledgeService()
@@ -204,11 +215,22 @@ def create_app() -> FastAPI:
 
     model_gateway = ModelGateway.create_default()
     tool_registry = create_default_tool_registry()
+
+    # Approval gate: use InMemoryApprovalGate when HITL_ENABLED=true,
+    # otherwise default to AutoApproveGate.
+    hitl_enabled = os.getenv("HITL_ENABLED", "").lower() == "true"
+    approval_gate: InMemoryApprovalGate | AutoApproveGate
+    if hitl_enabled:
+        approval_gate = InMemoryApprovalGate()
+    else:
+        approval_gate = AutoApproveGate()
+
     tool_executor = ToolExecutor(
         registry=tool_registry,
         policy_engine=app_policy_engine,
         hook_registry=app_hook_registry,
         metrics_collector=app_metrics,
+        approval_gate=approval_gate,
     )
 
     db_session_factory = None
@@ -225,6 +247,8 @@ def create_app() -> FastAPI:
 
     if db_session_factory is not None:
         from agent_platform.persistence.sql import (
+            SqlAgentDefinitionRepository,
+            SqlAgentDeploymentRepository,
             SqlAgentRunRepository,
             SqlAgentSessionRepository,
             SqlDeploymentAuditRepository,
@@ -237,12 +261,24 @@ def create_app() -> FastAPI:
         webhook_repo = SqlWebhookDeliveryRepository(db_session_factory)
         audit_repo = SqlDeploymentAuditRepository(db_session_factory)
         eval_repo = SqlEvalRunRepository(db_session_factory)
+        definition_repo = SqlAgentDefinitionRepository(db_session_factory)
+        deployment_repo = SqlAgentDeploymentRepository(db_session_factory)
     else:
         run_repo = InMemoryAgentRunRepository()
         session_repo = InMemoryAgentSessionRepository()
         webhook_repo = InMemoryWebhookDeliveryRepository()
         audit_repo = InMemoryDeploymentAuditRepository()
         eval_repo = InMemoryEvalRunRepository()
+        definition_repo = None
+        deployment_repo = None
+
+    registry = AgentRegistry(
+        Path(settings.registry_root),
+        definition_repo=definition_repo,
+        deployment_repo=deployment_repo,
+        semantic_router=app_semantic_router,
+    )
+    router = AgentRouter(registry, settings, semantic_router=app_semantic_router)
 
     runtime_manager = RuntimeManager(
         run_store=run_repo,
@@ -262,7 +298,7 @@ def create_app() -> FastAPI:
     scaffolder = AgentScaffolder(settings.registry_root)
     architect_agent = ArchitectureDesignAgent()
     test_agent = TestGenerationAgent()
-    audit_log = DeploymentAuditLog()
+    audit_log = DeploymentAuditLog(repo=audit_repo)
     artifact_store = ArtifactStore()
     ws_manager = AgentWebSocketManager(router, runtime_manager)
 
@@ -276,6 +312,16 @@ def create_app() -> FastAPI:
     app.state.audit_repo = audit_repo
     app.state.eval_repo = eval_repo
     app.state.db_session_factory = db_session_factory
+    app.state.approval_gate = approval_gate
+
+    app.state.admin_deps = AdminDeps(
+        registry=registry,
+        runtime_manager=runtime_manager,
+        audit_log=audit_log,
+        tool_registry=tool_registry,
+        metrics=app_metrics,
+    )
+    app.include_router(admin_router)
 
     if settings.api_key:
         app.add_middleware(AuthMiddleware, api_key=settings.api_key)
@@ -345,13 +391,13 @@ def create_app() -> FastAPI:
                 "name": spec.manifest.metadata.name,
                 "runtime_backend": spec.manifest.runtime.backend,
             }
-            for spec in registry.list_agents()
+            for spec in await registry.list_agents()
         ]
 
     @app.post("/api/v1/agent-packages/register")
     async def register_agent(payload: RegisterAgentRequest) -> dict[str, str]:
         spec = registry.loader.load_file(Path(payload.manifest_path))
-        registry.register(spec)
+        await registry.register(spec)
         return {"agent_id": spec.agent_id, "version": spec.version, "status": "registered"}
 
     @app.get("/api/v1/agent-runs")
@@ -360,7 +406,8 @@ def create_app() -> FastAPI:
 
     @app.get("/api/v1/agent-deployments")
     async def list_agent_deployments() -> list[dict]:
-        return [deployment.model_dump(mode="json") for deployment in registry.list_deployments()]
+        deployments = await registry.list_deployments()
+        return [deployment.model_dump(mode="json") for deployment in deployments]
 
     @app.get("/api/v1/sessions")
     async def list_sessions(agent_id: str | None = None) -> list[dict]:
@@ -377,7 +424,7 @@ def create_app() -> FastAPI:
     @app.post("/api/v1/agent-packages/{agent_id}/versions/{version}/deploy")
     async def deploy_agent(agent_id: str, version: str, payload: DeployAgentRequest) -> dict:
         try:
-            spec = registry.get(agent_id)
+            spec = await registry.get(agent_id)
         except AgentNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         if spec.version != version:
@@ -403,12 +450,12 @@ def create_app() -> FastAPI:
             eval_report = report
 
         status = _deployment_status(payload.channel, payload.traffic_percent)
-        previous_deployment = registry.resolve_deployment(
+        previous_deployment = await registry.resolve_deployment(
             agent_id=agent_id,
             channel=payload.channel,
             tenant_id=payload.tenant_id,
         )
-        deployment = registry.deploy(
+        deployment = await registry.deploy(
             agent_id=agent_id,
             version=version,
             channel=payload.channel,
@@ -423,7 +470,7 @@ def create_app() -> FastAPI:
             package_path=spec.package_path,
         )
 
-        audit_log.record_deploy(
+        await audit_log.record_deploy(
             deployment,
             previous_version=previous_deployment.version if previous_deployment else None,
             artifact_id=artifact_meta.artifact_id,
@@ -437,7 +484,7 @@ def create_app() -> FastAPI:
     @app.post("/api/v1/evals/run", response_model=EvalReport)
     async def run_eval(payload: RunEvalRequest) -> EvalReport:
         try:
-            spec = registry.get(payload.agent_id)
+            spec = await registry.get(payload.agent_id)
         except AgentNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return await eval_runner.run_agent(spec)
@@ -450,7 +497,7 @@ def create_app() -> FastAPI:
         work_item_id: str | None = None,
     ) -> dict:
         try:
-            spec = registry.get(agent_id)
+            spec = await registry.get(agent_id)
         except AgentNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -509,7 +556,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/v1/deployments/rollback")
     async def rollback_deployment(payload: RollbackRequest):
-        rollback_info = audit_log.get_rollback_version(
+        rollback_info = await audit_log.get_rollback_version(
             payload.agent_id, payload.channel,
         )
         if not rollback_info:
@@ -518,19 +565,19 @@ def create_app() -> FastAPI:
                 detail=f"no rollback target for {payload.agent_id}:{payload.channel}",
             )
         target_version, _rollback_artifact_id = rollback_info
-        current_deployment = registry.resolve_deployment(
+        current_deployment = await registry.resolve_deployment(
             agent_id=payload.agent_id,
             channel=payload.channel,
         )
         current_version = current_deployment.version if current_deployment else None
 
-        deployment = registry.deploy(
+        deployment = await registry.deploy(
             agent_id=payload.agent_id,
             version=target_version,
             channel=payload.channel,
             status=AgentDeploymentStatus.ROLLED_BACK,
         )
-        audit_log.record_rollback(
+        await audit_log.record_rollback(
             payload.agent_id,
             payload.channel,
             current_version or "unknown",
@@ -545,7 +592,7 @@ def create_app() -> FastAPI:
         channel: str | None = None,
         limit: int = 50,
     ):
-        events = audit_log.list_events(agent_id, channel, limit)
+        events = await audit_log.list_events(agent_id, channel, limit)
         return [e.model_dump(mode="json") for e in events]
 
     @app.get("/api/v1/artifacts")
@@ -588,7 +635,7 @@ def create_app() -> FastAPI:
             request.context.tenant.tenant_id = header_tenant
 
         try:
-            route = router.route(request)
+            route = await router.route(request)
         except AgentNotFoundError as exc:
             return JSONResponse(
                 status_code=404,
@@ -639,9 +686,16 @@ def create_app() -> FastAPI:
         runtime_response = await runtime_manager.run(runtime_request)
         return runtime_response.response
 
+    async def _run_devflow(devflow_inst, event, payload):
+        try:
+            await devflow_inst.handle_webhook_event(event, payload)
+        except Exception:
+            logger.exception("DevFlow background task failed for event %s", event)
+
     @app.post("/api/v1/integrations/plane/webhook")
     async def plane_webhook(
         request: Request,
+        background_tasks: BackgroundTasks,
         x_plane_delivery: str | None = Header(default=None),
         x_plane_event: str | None = Header(default=None),
         x_plane_signature: str | None = Header(default=None),
@@ -677,21 +731,41 @@ def create_app() -> FastAPI:
         }
 
         if devflow and x_plane_event:
-            try:
-                payload = json.loads(raw_body) if raw_body else {}
-                devflow_result = await devflow.handle_webhook_event(
-                    x_plane_event, payload,
-                )
-                if devflow_result:
-                    result["devflow_branch"] = devflow_result.branch
-                    result["devflow_mr_url"] = devflow_result.mr_url
-            except Exception:
-                logger.exception(
-                    "DevFlow orchestration failed for event %s",
-                    x_plane_event,
-                )
+            payload = json.loads(raw_body) if raw_body else {}
+            background_tasks.add_task(_run_devflow, devflow, x_plane_event, payload)
+            result["devflow_status"] = "queued"
 
         return result
+
+    # --- Approval gate API endpoints ---
+
+    @app.get("/api/v1/approvals/pending")
+    async def list_pending_approvals() -> list[dict]:
+        pending = await approval_gate.list_pending()
+        return [req.model_dump(mode="json") for req in pending]
+
+    @app.post("/api/v1/approvals/{request_id}/resolve")
+    async def resolve_approval(
+        request_id: str, body: ResolveApprovalRequest
+    ) -> dict:
+        status_str = body.status.lower()
+        if status_str not in ("approved", "rejected"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"invalid status: {body.status}; must be 'approved' or 'rejected'",
+            )
+        approval_status = ApprovalStatus(status_str)
+        try:
+            await approval_gate.resolve(request_id, approval_status, body.actor)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {
+            "request_id": request_id,
+            "status": status_str,
+            "actor": body.actor,
+        }
 
     return app
 
