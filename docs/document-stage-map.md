@@ -18,7 +18,7 @@
 | S1 | MVP 骨架 | 跑通多 Agent、统一 API、manifest、runtime、eval、DevFlow 骨架 | 已基本实现 |
 | S2 | 生产化底座 | 持久化、artifact、发布审计、回滚、权限、观测 | 部分完成；Registry/Deployment/Audit/Artifact/Knowledge 相关接线已在工作树中实现，但 ruff/manifest 质量门禁未通过 |
 | S3 | Hermes 真接入 | 从 stub/adapter 原型变成真实 Hermes runtime 能力 | 部分完成；Spike A 已完成，官方 Hermes SDK Spike B 待实施 |
-| S4 | AI 研发闭环 | CodingAgentRunner、workspace、path guard、Plane/GitLab 状态同步 | 部分完成；runner/workspace/path guard 基础已实现，真实 runner 配置、job 持久化、失败恢复待补 |
+| S4 | AI 研发闭环 | CodingAgentRunner、workspace、path guard、Plane/GitLab 状态同步 | 大部分完成；runner/workspace/path guard 已生产化，ScmAdapter 协议抽象已完成，HttpClient 连接池+重试已完成，GitLab webhook 反向同步已实现，job 持久化+可观测性端点已接入，分支名清理已实现；真实 runner adapter (Claude Code / Codex) 待接入，端到端联调待做 |
 | S5 | 平台生产化与规模化 | 主链路可靠性校准、semantic routing、model gateway、knowledge/RAG、admin API、MCP、治理 | ✅ 已完成 Phase 0-3（670 tests passed, ruff clean）；入口为 `development-plan-s5.md` |
 
 ## 2. 文档状态定义
@@ -79,10 +79,10 @@
 
 | 文档 | 状态 | 用途 |
 | --- | --- | --- |
-| `04-devflow/gitlab.md` | Partially Implemented | GitLab 交付闭环设计 |
-| `04-devflow/plane.md` | Partially Implemented | Plane Work Item、看板集成，以及 Plane / SCM / Coding Runner / Hermes 端到端交互流程 |
-| `04-devflow/devflow-runner-workspace-design.md` | Draft | CodingAgentRunner、workspace、path guard |
-| `04-devflow/devflow-state-sync-design.md` | Draft | Plane/GitLab 状态同步、幂等、重试、DLQ |
+| `04-devflow/gitlab.md` | Partially Implemented | GitLab 交付闭环设计；GitLabAdapter 已迁移至 ScmAdapter 协议 + HttpClient，webhook 反向同步已实现 |
+| `04-devflow/plane.md` | Partially Implemented | Plane Work Item、看板集成；PlaneAdapter 已迁移至 HttpClient，状态同步流程已通过 GitLabEventHandler 实现 |
+| `04-devflow/devflow-runner-workspace-design.md` | Partially Implemented | CodingAgentRunner 已完成 job 持久化和重试机制，WorkspaceManager 已加 git 超时保护，PathGuard 已修复 glob 匹配 |
+| `04-devflow/devflow-state-sync-design.md` | Partially Implemented | GitLab pipeline/MR 事件→Plane 状态同步已实现，幂等性已通过 delivery_id 实现；DLQ 待补 |
 
 ### S5. 平台生产化与规模化
 

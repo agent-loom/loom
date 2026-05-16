@@ -1,15 +1,15 @@
 # 实现与设计差距分析
 
-> Last verified against code: 2026-05-17 (S5 Phase 0–3 全部完成)
+> Last verified against code: 2026-05-17 (S5 Phase 0–3 全部完成 + DevFlow 生产化)
 >
-> S5 Phase 0–3 已全部完成并通过质量门禁。670 tests passed, ruff clean。
+> S5 Phase 0–3 已全部完成并通过质量门禁。DevFlow 集成基础设施已生产化。753 tests passed, ruff clean。
 
 本文档对齐以下两份设计文档和当前代码实现：
 
 - `docs/02-architecture/agent-platform-design.md`
 - `docs/02-architecture/ai-human-vibecoding-rd-platform.md`
 
-结论：当前实现已经覆盖了平台 MVP 的骨架，并完成 S5 Phase 0–3 全部任务。具备”多 Agent Package + 统一请求响应契约 + 路由 + RuntimeBackend 抽象 + DevFlow API + Plane/GitLab Adapter + Eval + 持久化 + Hermes SDK 真接入 + MCP + OTel + HITL 审批 + Admin API + 完善测试”的能力。距离生产级 Agent Platform 的主要剩余差距集中在 RBAC endpoint enforcement、真实 vector backend、Langfuse 集成、分布式 Job Queue 和 Admin UI。
+结论：当前实现已经覆盖了平台 MVP 的骨架，并完成 S5 Phase 0–3 全部任务 + DevFlow 集成生产化。具备”多 Agent Package + 统一请求响应契约 + 路由 + RuntimeBackend 抽象 + DevFlow API + Plane/GitLab Adapter（含 ScmAdapter 协议、HttpClient 连接池重试、GitLab webhook 反向同步）+ Eval + 持久化 + Hermes SDK 真接入 + MCP + OTel + HITL 审批 + Admin API + 完善测试”的能力。距离生产级 Agent Platform 的主要剩余差距集中在 RBAC endpoint enforcement、真实 vector backend、Langfuse 集成、分布式 Job Queue、真实 coding runner adapter 接入和 Admin UI。
 
 ## 1. 当前实现总览
 
@@ -27,9 +27,9 @@
 | 会话 | `InMemorySessionStore`、`AgentSession`、✅ `AgentSessionRepository` Protocol + InMemory/SQL 实现 | 部分完成 |
 | Trace / metrics | `InMemoryRunStore`、`MetricsCollector`（✅ 已串联 runtime/tool）、✅ `AgentRunRepository` Protocol + InMemory/SQL、`/metrics` 待实现 | 部分完成 |
 | Eval | `EvalRunner`、golden case、CI callback API | 部分完成 |
-| DevFlow | 需求解析、issue 生成、task pack、agent 脚手架、设计分析、测试计划 API | 部分完成 |
-| Plane 集成 | `PlaneAdapter`、webhook 校验、幂等处理、DevFlow 触发 | 部分完成 |
-| GitLab 集成 | `GitLabAdapter`、创建分支/MR、eval 反馈 | 部分完成 |
+| DevFlow | 需求解析、issue 生成、task pack、agent 脚手架、设计分析、测试计划 API、✅ job 持久化+可观测性端点 | 基本完成 |
+| Plane 集成 | `PlaneAdapter`（✅ HttpClient 连接池+重试）、webhook 校验、幂等处理、DevFlow 触发 | 基本完成 |
+| GitLab 集成 | `GitLabAdapter`（✅ ScmAdapter 协议、HttpClient、MergeRequestResult）、创建分支/MR、eval 反馈、✅ webhook 反向同步 | 基本完成 |
 | Streaming / WebSocket | SSE 和 WebSocket chat endpoint | 部分完成 |
 | 自动化测试 | contract、integration、unit tests | 覆盖较好 |
 
@@ -39,13 +39,13 @@
 
 ```text
 .venv/bin/python -m pytest
-670 passed, 1 skipped
+753 passed, 1 skipped
 
 .venv/bin/ruff check src tests scripts alembic
 All checks passed!
 ```
 
-Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参数化覆盖 7 个 Repository 的 InMemory 和 SQL 实现（含租户隔离测试）。S5 新增 111 个测试覆盖 MCP Server、OTel tracing、HITL approval、Admin API、Hermes fallback、semantic autoload、artifact store、webhook async、runtime knowledge 等模块。
+Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参数化覆盖 7 个 Repository 的 InMemory 和 SQL 实现（含租户隔离测试）。S5 新增 111 个测试覆盖 MCP Server、OTel tracing、HITL approval、Admin API、Hermes fallback、semantic autoload、artifact store、webhook async、runtime knowledge 等模块。DevFlow 生产化新增 83 个测试覆盖 HttpClient 重试、集成错误层次、GitLab webhook、ScmAdapter 协议、CodingAgentRunner 生命周期、分支名清理、CodingJobRepository 等模块。
 
 ### 1.3 代码审查校准结论（2026-05-17）
 
@@ -67,7 +67,7 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 | Runtime 抽象 | 80% | ✅ Hermes Spike B 已完成；Hermes memory 持久化、stream event 映射待补 |
 | Tool 执行 | 80% | ✅ 高风险审批已完成；审计持久化、完整 JSON Schema 校验待补 |
 | Eval | 55% | EvalRun 自动持久化、LLM judge/semantic scoring、线上反馈回归集 |
-| DevFlow | 55% | 真实 runner 配置、job 持久化、安全沙箱、失败恢复 |
+| DevFlow | 75% | ✅ ScmAdapter 协议抽象、HttpClient 连接池+重试、GitLab webhook 反向同步、job 持久化+可观测性端点、分支名清理、git 超时保护已完成；真实 runner adapter (Claude Code / Codex) 待接入，异步 job queue 待补 |
 | Persistence | 80% | ✅ Registry/Deployment/Audit 主链路已接入持久化 |
 | Artifact / Release | 70% | ✅ LocalArtifactStore + Protocol 已完成；S3/远程后端、manifest_sha256 待补 |
 | Security / Tenant / Policy | 55% | ✅ HITL 审批已完成；endpoint RBAC/scopes enforcement 待补 |
@@ -298,9 +298,9 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 - 需求理解主要是启发式解析，不是真正的 LLM/Agent 工作流。
 - 架构设计、测试计划是轻量模板化 agent，不具备代码库深度分析能力。
 - DevFlow 只创建 branch/MR，不会真正启动 Codex/Claude Code/OpenHands 执行代码修改。
-- 缺少 coding agent runner 的隔离工作区、权限控制、日志采集、超时、中断和重试。
-- 缺少从 Plane Work Item 到 GitLab MR 再到 eval report 的完整状态回写。
-- 缺少“人类验收点”的强制状态机。
+- ~~缺少 coding agent runner 的隔离工作区、权限控制、日志采集、超时、中断和重试。~~ ✅ 已完成（WorkspaceManager 隔离工作区 + PathGuard 权限控制 + git 超时保护 + 重试机制）
+- ~~缺少从 Plane Work Item 到 GitLab MR 再到 eval report 的完整状态回写。~~ ✅ 已完成（GitLab webhook 反向同步 pipeline/MR 事件到 Plane 状态）
+- 缺少”人类验收点”的强制状态机。
 
 建议下一步：
 
@@ -325,7 +325,7 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 - Plane project、state、label、custom property 初始化还没有自动化。
 - 当前只处理部分 webhook event 和字段，真实 Plane payload 兼容性还需要压测。
 - 没有 dead-letter queue，webhook 失败后不易恢复。
-- 没有把 GitLab pipeline/eval 状态稳定同步回 Plane。
+- ~~没有把 GitLab pipeline/eval 状态稳定同步回 Plane。~~ ✅ 已完成（`GitLabEventHandler` 处理 pipeline running/failed/success 和 MR merged/closed 事件，幂等同步 Plane 状态）
 - DevFlow 只有在 Plane base url、Plane key、GitLab base url、GitLab token、GitLab project id 都存在时才启用；缺少启动时配置诊断。
 
 建议下一步：
@@ -413,17 +413,24 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 
 - ✅ `CodingAgentRunner` 支持 Claude Code、Codex CLI、Mock adapter
 - ✅ `DevFlowOrchestrator` 在 MR 创建后自动分发 runner
-- ✅ `WorkspaceManager` 提供隔离工作区（create/validate/commit/cleanup）
-- ✅ `PathGuard` 限制变更文件路径（fnmatch glob, denied-first）
+- ✅ `WorkspaceManager` 提供隔离工作区（create/validate/commit/cleanup），带 git 超时保护
+- ✅ `PathGuard` 限制变更文件路径（PurePosixPath glob, denied-first）
 - ✅ MR/Plane comment 回写 + Plane 状态流转
 - ✅ Webhook 幂等持久化（`WebhookDeliveryRepository`）
 - ✅ `EvalFeedback` 可持久化 eval 结果 + 设置 GitLab commit status
+- ✅ `ScmAdapter` Protocol — 供应商中立的 SCM 抽象（GitLab 已实现）
+- ✅ `HttpClient` — 共享连接池 + 指数退避重试（5xx/429/timeout）
+- ✅ 集成错误层级 — IntegrationError → ScmError / PlaneError / RetryableError
+- ✅ `GitLabEventHandler` — pipeline/MR 事件反向同步 Plane 状态，幂等 delivery ID
+- ✅ `CodingJobRepository` — job 持久化 + `/devflow/jobs` 可观测性端点
+- ✅ 分支名清理 — regex 清理特殊字符，确保合法 git 分支名
 
 剩余差距：
 
 - runner 执行是同步的，缺少异步 job queue 和分布式执行
-- 缺少从 runner 失败到自动重试或人工介入的状态机
+- 真实 runner adapter (Claude Code CLI / Codex CLI) 尚未接入
 - 缺少 runner 执行日志持久化和回放
+- 缺少安全沙箱（Docker / Firecracker）隔离执行环境
 
 ### 4.4 安全和租户隔离不足
 
@@ -463,7 +470,7 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 | P1 | ~~Tool permission matrix 接入高风险审批~~ | `RequiresApproval` 需要进入实际执行 gate | ✅ S5 P3 完成 |
 | P1 | EvalRunner 自动记录 EvalRun | deploy gate、CI callback、线上回归需要可追溯 eval_run_id | ⬜ 待实施 |
 | P1 | ~~ModelGateway provider 从配置注册~~ | 默认只有 stub 不足以支撑真实 Hermes/业务 agent | ✅ S5 P1 完成 |
-| P1 | DevFlow runner adapter 从配置选择 | 不能在生产入口 hardcode mock runner | ⬜ 待实施 |
+| P1 | DevFlow runner adapter 从配置选择 | 不能在生产入口 hardcode mock runner | ✅ 配置已就绪（`DEVFLOW_RUNNER_ADAPTER`），真实 adapter 待接入 |
 | P1 | package artifact registry | 多 agent、多版本、跨环境发布需要稳定产物 | ⬜ 待实施 |
 | P1 | ~~SemanticRouter manifest 规则加载~~ | 新 agent 增多后不能依赖手工注册 semantic rule | ✅ S5 P2 完成 |
 | P1 | Eval 数据集扩展和自动报告 | 业务质量回归需要量化 | ⬜ 待实施 |
@@ -550,14 +557,17 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 
 ## 8. 总结
 
-当前项目已完成 S5 全部 4 个 Phase，从 MVP 骨架演进为具备生产化基础的多 Agent 平台。670 个测试通过，ruff clean，覆盖 ~147 个 Python 文件、~13000 行代码。
+当前项目已完成 S5 全部 4 个 Phase + DevFlow 集成生产化，从 MVP 骨架演进为具备生产化基础的多 Agent 平台。753 个测试通过，ruff clean。
 
 S5 完成后的主要成果：Registry/Deployment 持久化、ArtifactStore Protocol 化、Hermes SDK 真接入（Spike B）、ModelGateway token/cost tracking、MCP Server、OpenTelemetry 集成、SemanticRouter 自动规则加载、HITL 审批门、Admin API。
 
+DevFlow 生产化成果：ScmAdapter 协议抽象、HttpClient 连接池+重试、集成错误层级、GitLab webhook 反向同步、CodingJobRepository + 可观测性端点、PathGuard glob 修复、分支名清理、git 超时保护、83 个新增测试。
+
 下一阶段（S6）建议优先：
-1. RBAC/scopes endpoint enforcement — 所有写操作需要 scope 校验
-2. 真实 vector backend（Weaviate/pgvector）— Knowledge/RAG 从 stub 升级
-3. Langfuse 集成 — 补齐 OTel 之外的 LLM 专用观测
-4. Admin API 封装修复 — 消除 `_local_specs` 直接访问和 RuntimeManager 穿透
-5. EvalRunner 自动记录 — eval report 可追溯
-6. DevFlow runner 配置化 — 生产环境不使用 mock runner
+1. **真实 coding runner adapter 接入** — Claude Code CLI 或 Codex CLI 替换 mock，端到端联调
+2. **Plane + GitLab 端到端联调** — 使用真实 Plane/GitLab 环境验证完整 DevFlow 管线
+3. RBAC/scopes endpoint enforcement — 所有写操作需要 scope 校验
+4. 真实 vector backend（Weaviate/pgvector）— Knowledge/RAG 从 stub 升级
+5. Langfuse 集成 — 补齐 OTel 之外的 LLM 专用观测
+6. 异步 job queue — runner 任务异步执行和分布式调度
+7. Admin UI — 管理 agent、版本、灰度、DevFlow jobs
