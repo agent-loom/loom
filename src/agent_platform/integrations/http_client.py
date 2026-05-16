@@ -12,7 +12,7 @@ from agent_platform.integrations.errors import IntegrationError, RetryableError
 
 logger = logging.getLogger(__name__)
 
-RETRYABLE_STATUS_CODES = {500, 502, 503, 504, 429}
+RETRYABLE_STATUS_CODES = {500, 502, 503, 504, 429}  # 429 included: rate-limited requests are safe to retry after backoff
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_BACKOFF_BASE = 0.5
 DEFAULT_TIMEOUT = 30
@@ -98,6 +98,7 @@ class HttpClient:
                     await asyncio.sleep(delay)
                     continue
             except httpx.HTTPStatusError as exc:
+                # 4xx errors are not retryable — they indicate a genuine client error
                 raise error_cls(
                     f"{method} {path} failed: {exc.response.status_code} {exc.response.text[:200]}",
                     status_code=exc.response.status_code,

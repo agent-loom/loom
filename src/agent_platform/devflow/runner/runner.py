@@ -154,6 +154,7 @@ class CodingAgentRunner:
 
         finally:
             job.updated_at = datetime.now(UTC)
+            # Final persist captures terminal state (SUCCEEDED/FAILED/TIMED_OUT) regardless of exit path
             await self._persist_job(job)
             # 根据配置清理工作区目录
             if job.workspace_dir:
@@ -236,6 +237,7 @@ class CodingAgentRunner:
         )
 
     async def _persist_job(self, job: CodingJob) -> None:
+        """Best-effort persistence — failures are logged but never block the pipeline."""
         if self._job_repo is None:
             return
         try:

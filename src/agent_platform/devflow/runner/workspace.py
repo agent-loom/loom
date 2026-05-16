@@ -20,6 +20,7 @@ class WorkspaceManager:
     执行验证脚本、以及最终的代码提交、推送和工作区清理。
     """
 
+    # Timeouts prevent zombie git processes from blocking the runner indefinitely
     GIT_CLONE_TIMEOUT = 300
     GIT_COMMAND_TIMEOUT = 120
 
