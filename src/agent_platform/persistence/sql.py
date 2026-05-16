@@ -827,8 +827,12 @@ class SqlApiKeyStore:
             row = result.scalar_one_or_none()
             if row is None:
                 return None
-            if row.expires_at is not None and row.expires_at <= datetime.now(UTC):
-                return None
+            if row.expires_at is not None:
+                exp = row.expires_at
+                if exp.tzinfo is None:
+                    exp = exp.replace(tzinfo=UTC)
+                if exp <= datetime.now(UTC):
+                    return None
             return ApiKeyRecord(
                 key_id=row.key_id,
                 key_hash=row.key_hash,
