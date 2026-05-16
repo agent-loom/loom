@@ -32,12 +32,14 @@ class CodingAgentRunner:
         gitlab: GitLabAdapter,
         plane: PlaneAdapter | None = None,
         gitlab_project_id: str,
+        repo_url: str | None = None,
     ):
         self.adapter = adapter
         self.workspace_manager = workspace_manager
         self.gitlab = gitlab
         self.plane = plane
         self.gitlab_project_id = gitlab_project_id
+        self._repo_url_override = repo_url
 
     async def run(self, task: DevelopmentTask, *, mr_iid: int | None = None) -> CodingJob:
         job = self._create_job(task, mr_iid=mr_iid)
@@ -159,6 +161,8 @@ class CodingAgentRunner:
         return last_result
 
     def _repo_url(self) -> str:
+        if self._repo_url_override:
+            return self._repo_url_override
         return f"https://gitlab.example.com/{self.gitlab_project_id}.git"
 
     async def _report_result(self, job: CodingJob) -> None:
@@ -179,6 +183,19 @@ class CodingAgentRunner:
                 )
             except Exception:
                 logger.warning("Failed to comment on Plane work item %s", job.plane_work_item_id)
+
+            if job.result and job.result.status == ResultStatus.SUCCESS:
+                try:
+                    await self.plane.update_work_item_state(
+                        job.plane_project_id,
+                        job.plane_work_item_id,
+                        "Testing / Eval",
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to update Plane state for %s",
+                        job.plane_work_item_id,
+                    )
 
     async def _report_failure(self, job: CodingJob) -> None:
         await self._report_result(job)

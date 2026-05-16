@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import os
 import re
 from typing import Any, Protocol, runtime_checkable
@@ -88,7 +87,7 @@ class SecretResolver:
                 return self._resolve_ref(
                     match.group(1), tenant_id=tenant_id, secrets=secrets,
                 )
-        return copy.deepcopy(node) if isinstance(node, (dict, list)) else node
+        return node
 
     def _resolve_ref(
         self,

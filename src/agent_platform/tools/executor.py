@@ -40,6 +40,7 @@ class ToolExecutor:
         *,
         allowed_tools: list[str],
         timeout_ms: int = 3000,
+        agent_spec: Any | None = None,
     ) -> ToolExecutionResult:
         started = perf_counter()
         if tool_name not in allowed_tools:
@@ -54,6 +55,28 @@ class ToolExecutor:
                     error="TOOL_NOT_ALLOWED",
                 ),
             )
+
+        if self.policy_engine and agent_spec:
+            try:
+                policy_set = self.policy_engine.load_policies(agent_spec)
+                violations = self.policy_engine.check_tool_allowed(
+                    tool_name, policy_set,
+                )
+                if violations:
+                    latency_ms = self._latency_ms(started)
+                    msg = "; ".join(v.message for v in violations)
+                    return ToolExecutionResult(
+                        tool_name=tool_name,
+                        output={"error": msg},
+                        trace=ToolCallTrace(
+                            tool_name=tool_name,
+                            latency_ms=latency_ms,
+                            status="denied",
+                            error="TOOL_POLICY_DENIED",
+                        ),
+                    )
+            except Exception:
+                logger.exception("check_tool_allowed failed for %s", tool_name)
 
         try:
             definition = self.registry.get(tool_name)

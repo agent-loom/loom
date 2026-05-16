@@ -73,7 +73,7 @@ X-Request-ID: <request_id>
     "stream": false,
     "debug": false,
     "max_latency_ms": 5000,
-    "runtime_profile": "prod"
+    "runtime_profile": "dev"
   },
   "metadata": {
     "source": "frontend",
@@ -167,8 +167,10 @@ X-Request-ID: <request_id>
     "tool_calls": [
       {
         "tool_name": "goods_search",
+        "runtime_tool_name": "goods_search",
         "latency_ms": 120,
-        "status": "success"
+        "status": "success",
+        "error": null
       }
     ]
   },
@@ -185,6 +187,11 @@ X-Request-ID: <request_id>
 | `traffic_bucket` | 灰度路由 bucket；未进入灰度判断时为空 |
 | `model` | 运行时使用的模型标识 |
 | `tool_calls` | 工具调用摘要 |
+| `tool_calls[].tool_name` | 工具名称（manifest 中定义） |
+| `tool_calls[].runtime_tool_name` | 运行时实际调用的工具名称（可能与 tool_name 不同） |
+| `tool_calls[].status` | 调用状态：`success`、`failed`、`timeout`、`denied` |
+| `tool_calls[].error` | 错误码（仅失败时有值） |
+| `tool_calls[].latency_ms` | 工具调用耗时 |
 | `latency_ms` | 平台侧运行耗时 |
 | `error` | trace 级错误码 |
 

@@ -60,13 +60,13 @@ All checks passed
 | Auth / 租户识别 | API key、request context、`x-tenant-id` 注入 | 缺少 RBAC、租户隔离、细粒度权限、服务间鉴权；header tenant 目前只注入 `tenant_id`，不等同于业务 `org_id` |
 | Agent Registry | 文件发现 + 内存 cache | 缺少 DB 持久化、版本索引、artifact registry、并发一致性 |
 | 版本/灰度/回滚 | deploy API、canary bucket、rollback API、staging/prod 自动 eval gate、**ArtifactStore 产物绑定**、✅ `AgentDeploymentRepository` + `DeploymentAuditRepository` Protocol + 双实现 | 缺少持久化发布历史切换、manifest_sha256 绑定、真实环境控制、审批、保护环境 |
-| Policy | ✅ `PolicyEngine` 已深度接入 runtime/tool 链路（check_input/check_output 在 RuntimeManager，pre_tool/post_tool hooks 在 ToolExecutor） | 策略规则仍需从外置配置或 DB 加载；`check_tool_allowed` 未在 ToolExecutor 中调用 |
+| Policy | ✅ `PolicyEngine` 已深度接入 runtime/tool 链路（check_input/check_output 在 RuntimeManager，check_tool_allowed 在 ToolExecutor，pre_tool/post_tool hooks 在 ToolExecutor） | 策略规则仍需从外置配置或 DB 加载 |
 | Eval | EvalRunner 存在 | 缺少大规模评测集、质量评分、线上反馈闭环、CI artifact |
 | Session / Memory | 内存 SessionStore | 缺少 Redis/Postgres、压缩、长期记忆、跨实例共享 |
 | Tool Executor | 工具执行、allowlist、timeout、✅ hook emit、✅ metrics recording | 缺少重试、熔断、审计持久化、secret 注入、租户级工具权限 |
 | Knowledge Service | 基础服务和 sources 配置 | 缺少真实 vector db、RAG pipeline、同步任务、数据权限 |
 | Model Gateway | ✅ 有网关抽象与 `OpenAICompatibleProvider`（httpx.AsyncClient） | 缺少 token/cost 统计、限流、fallback、多模型路由 |
-| Observability | ✅ run store、metrics 已串联至 RuntimeManager 和 ToolExecutor、HookRegistry 已串联、logging | 缺少 OpenTelemetry/Langfuse、dashboard、trace 持久化、告警 |
+| Observability | ✅ run store、metrics 已串联至 RuntimeManager 和 ToolExecutor、HookRegistry 已串联、logging、✅ LogSanitizer（PII 脱敏）+ TraceSanitizer（tool trace / run 脱敏） | 缺少 OpenTelemetry/Langfuse、dashboard、trace 持久化、告警 |
 | Domain Model | ✅ 泛化完成：LocationContext、org_id、locale=en、timezone=UTC | 旧字段通过 alias 保持向后兼容 |
 | 持久化骨架 | ✅ SQLAlchemy 2.0 + Alembic + persistence/ 包（7 ORM 表 + 7 Protocol + 7 InMemory + 7 SQL + AuditMixin + Alembic migration） | DI 已就绪；RuntimeManager 内部 store 待切换到 Repository |
 | Artifact 管理 | ✅ ArtifactStore（tar.gz + SHA256 + 部署绑定） | 仅 in-memory；缺 manifest_sha256 绑定和远程存储 |
@@ -242,10 +242,10 @@ All checks passed
 
 建议下一步：
 
-1. 定义 `CodingAgentRunner` 抽象，支持 Codex CLI、Claude Code、OpenHands、内部 worker。
-2. DevFlow webhook 只负责生成 task pack 和创建 MR；实际编码交给 runner 异步执行。
-3. runner 必须在隔离 workspace 中运行，只允许修改 task pack 声明的路径。
-4. runner 输出必须包括 changed files、tests、风险、后续建议，并回写 GitLab/Plane。
+1. ✅ `CodingAgentRunner` 已实现（`devflow/runner/runner.py`），支持 Claude Code、Codex CLI、Mock adapter。
+2. DevFlow webhook 只负责生成 task pack 和创建 MR；实际编码交给 runner 异步执行。⬜ runner 尚未接入 orchestrator webhook 流程。
+3. ✅ runner 在隔离 workspace 中运行（`WorkspaceManager`），PathGuard 强制只允许修改 task pack 声明的路径。
+4. ✅ runner 输出包括 changed files、validation results，并回写 GitLab MR comment 和 Plane comment。
 5. 将 Plane state 设计为强状态机：Intake -> Ready for AI Dev -> AI Developing -> AI Review -> Human Review -> Ready for Merge -> Done。
 
 ### 3.3 Issue 看板与 GitLab
@@ -318,9 +318,9 @@ All checks passed
 - ✅ ArtifactStore 已实现本地产物保存（in-memory tar.gz + SHA256）。
 - ✅ `persistence/` 包已创建（tables.py 7 ORM Row + AuditMixin、repositories.py 7 Protocol、memory.py 7 InMemory、sql.py 7 SQL、context.py AuditContext）。
 - ✅ Alembic 配置和初始 migration 已完成，`alembic upgrade head` 验证通过。
-- ✅ DI 注入已就绪：`create_app()` 按 `DATABASE_URL` 选择 InMemory 或 SQL。
+- 🔶 DI 注入部分就绪：`create_app()` 创建 SQL engine 但所有 Repository 仍默认使用 InMemory 实现。SQL 实现已完成但未在 DI 中切换。
 - ✅ 62 个 Repository contract tests 验证 InMemory 和 SQL 行为一致。
-- 🔶 RuntimeManager 内部仍使用 `InMemoryRunStore` 和 `InMemorySessionStore`，待切换到新 Repository 接口。
+- ✅ RuntimeManager 内部已切换到 `AgentRunRepository` / `AgentSessionRepository` Protocol 接口（异步），但默认注入 InMemory 实现。
 
 重构方向：
 
@@ -362,18 +362,18 @@ All checks passed
 
 当前安全能力适合 MVP，不适合生产：
 
-- API key 是全局级别。
-- 没有用户、角色、权限。
-- 没有 tenant-level secret。
-- 工具调用没有细粒度授权。
-- trace 里没有 PII 脱敏策略。
+- API key 是全局级别。✅ 已实现 `InMemoryApiKeyStore`（SHA-256 hash）、`AuthIdentity`、`require_role`/`require_scope` FastAPI 依赖。
+- 没有用户、角色、权限。⬜ 需要 RBAC 持久化层。
+- 没有 tenant-level secret。✅ 已实现 `SecretBackend` Protocol + `EnvSecretBackend`（tenant-scoped env var）+ `SecretResolver`（`$secret:KEY` 递归解析）。
+- 工具调用没有细粒度授权。✅ 已实现 `compute_tool_permission()`（manifest ∩ tenant ∩ environment 三层矩阵）+ `check_tool_allowed` 已接入 ToolExecutor。
+- trace 里没有 PII 脱敏策略。✅ 已实现 `LogSanitizer`（PII regex + secret pattern）+ `TraceSanitizer`（tool trace + run sanitization）。
 
 重构方向：
 
-- 引入 AuthN/AuthZ 抽象。
-- ✅ PolicyEngine 已接入 runtime（check_input/check_output）；check_tool_allowed 待接入 ToolExecutor。
-- 所有外部 API token 进入 secret manager。
-- request/response/logging 增加脱敏层。
+- 引入 AuthN/AuthZ 抽象。✅ 基础版已就位（API key + role/scope）；需扩展为服务间鉴权。
+- ✅ PolicyEngine 已完整接入 runtime（check_input/check_output/check_tool_allowed）。
+- ✅ 外部 API token 通过 `SecretResolver` + `EnvSecretBackend` 管理；manifest 中使用 `$secret:KEY` 引用。
+- ✅ request/response/logging 脱敏层已完成（`LogSanitizer` 在 `JSONFormatter` 中自动调用；`TraceSanitizer` 在 `_record_run` 中调用）。
 
 ## 5. 优先级建议
 
@@ -394,7 +394,7 @@ All checks passed
 | --- | --- | --- |
 | P1 | package artifact registry | 多 agent、多版本、跨环境发布需要稳定产物 |
 | P1 | SemanticRouter manifest 规则加载 | 新 agent 增多后不能依赖手工注册 semantic rule |
-| P1 | CodingAgentRunner | 新增业务 agent 的降本核心能力 |
+| P1 | CodingAgentRunner | ✅ 已实现（Runner + Workspace + PathGuard + 3 adapters）；待接入 orchestrator webhook |
 | P1 | Eval 数据集扩展和自动报告 | 业务质量回归需要量化 |
 | P1 | Knowledge/RAG 真实接入 | MYJ 等业务 agent 离不开业务知识 |
 | P1 | OpenTelemetry/Langfuse trace | 线上排障和质量分析必需 |

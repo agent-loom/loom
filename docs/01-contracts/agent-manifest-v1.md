@@ -52,6 +52,11 @@ runtime:
   max_iterations: 4
   timeout_ms: 5000
 
+entry:
+  mode: single_agent
+  orchestrator: null
+  default_worker: null
+
 models:
   default:
     provider: openai-compatible
@@ -80,7 +85,7 @@ knowledge:
       backend: weaviate
       collection: Good
       filters:
-        tenant_field: retailer_id
+        tenant_field: org_id
         store_field: store_code
 
 routing:
@@ -95,9 +100,9 @@ session:
 
 context:
   required:
-    - context.tenant.retailer_id
+    - context.tenant.org_id
   optional:
-    - context.store.store_id
+    - context.location.location_id
     - context.channel.channel_id
 
 output:
@@ -128,6 +133,7 @@ evals:
 | `metadata` | 是 | Agent 稳定身份 |
 | `version` | 是 | 版本和运行时兼容信息 |
 | `runtime` | 是 | 运行时后端和入口 |
+| `entry` | 否 | Agent 入口模式 (`mode`, `orchestrator`, `default_worker`) |
 | `models` | 否 | 模型配置 |
 | `prompts` | 否 | prompt 文件引用 |
 | `tools` | 否 | 工具白名单、黑名单和执行限制 |

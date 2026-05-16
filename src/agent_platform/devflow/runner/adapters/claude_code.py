@@ -2,11 +2,25 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 from agent_platform.devflow.runner.protocol import RunnerAdapterResult
 from agent_platform.devflow.task_pack import DevelopmentTask
 
 logger = logging.getLogger(__name__)
+
+_SECRET_ENV_KEYWORDS = frozenset([
+    "PLANE_API_KEY", "GITLAB_TOKEN", "API_KEY",
+    "SECRET", "PASSWORD", "CREDENTIAL",
+])
+
+
+def _build_safe_env() -> dict[str, str]:
+    safe_env = dict(os.environ)
+    for key in list(safe_env.keys()):
+        if any(kw in key.upper() for kw in _SECRET_ENV_KEYWORDS):
+            del safe_env[key]
+    return safe_env
 
 
 class ClaudeCodeAdapter:
@@ -52,6 +66,7 @@ class ClaudeCodeAdapter:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=workspace_dir,
+                env=_build_safe_env(),
             )
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
                 self._process.communicate(input=prompt.encode()),

@@ -33,7 +33,7 @@
 
 | # | 任务 | 设计来源 | 验收标准 | 状态 |
 |---|---|---|---|---|
-| 1.1 | PolicyEngine 接入 RuntimeManager | security-tenant-policy §6 | `check_input` 在 `run()` 开头调用；`check_output` 在返回前调用；`check_tool_allowed` 在 `ToolExecutor.execute()` 中调用 | ✅ 已完成（check_input/check_output 已接入；check_tool_allowed 待接入） |
+| 1.1 | PolicyEngine 接入 RuntimeManager | security-tenant-policy §6 | `check_input` 在 `run()` 开头调用；`check_output` 在返回前调用；`check_tool_allowed` 在 `ToolExecutor.execute()` 中调用 | ✅ 已完成 |
 | 1.2 | HookRegistry 接入 RuntimeManager | agent-platform-core-design §3.4 | `pre_run` / `post_run` / `on_error` / `on_route` 在 runtime 执行链路中 emit | ✅ 已完成 |
 | 1.3 | HookRegistry 接入 ToolExecutor | 同上 | `pre_tool` / `post_tool` 在工具执行前后 emit | ✅ 已完成 |
 | 1.4 | MetricsCollector 接入 runtime | observability 现有代码 | `record_request`、`record_duration`、`record_tool_call` 在每次请求中被调用 | ✅ 已完成 |
@@ -125,7 +125,7 @@ docs/adr/0002-storage-baseline.md        — 待新增
 | 3.6 | 重构 package_agent.py | package-artifact-release §4-5 | 生成 tar.gz + metadata.json + SHA256 checksum | ✅ 已完成（registry/artifact.py ArtifactStore） |
 | 3.7 | 部署绑定 artifact_id | package-artifact-release §6 | deployment 记录包含 artifact_id 和 manifest_sha256 | 🔶 部分完成（artifact_id 已绑定；manifest_sha256 / package_sha256 待补） |
 | 3.8 | 回滚使用历史 artifact | package-artifact-release §8 | rollback 从 artifact store 取历史版本部署 | 🔶 部分完成（rollback API 可用；artifact 绑定尚未完整） |
-| 3.9 | CI pipeline 集成 | package-artifact-release §9 | `.gitlab-ci.yml` 增加 package / deploy 阶段 | ⬜ 待实现 |
+| 3.9 | CI pipeline 集成 | package-artifact-release §9 | ✅ `.gitlab-ci.yml` package / deploy stages |
 
 **依赖关系**：(3.1 → 3.2 → 3.3 → 3.4 → 3.5) ∥ (3.6 → 3.7 → 3.8 → 3.9)。Hermes 和 Artifact 两条线可并行。
 
@@ -173,7 +173,7 @@ scripts/deploy_agent.py                  — 待绑定 artifact
 | **DevFlow 闭环** | | | |
 | 4.6 | Webhook 幂等持久化 | devflow-state-sync §4 | ⬜ 待实现（需 DB 层） |
 | 4.7 | GitLab → Plane 状态回写 | devflow-state-sync §3.2 | ⬜ 待实现 |
-| 4.8 | Eval report 回写 Plane | devflow-state-sync §3.3 | ⬜ 待实现 |
+| 4.8 | Eval report 回写 Plane | devflow-state-sync §3.3 | 🔶 `EvalFeedback.update_plane_state()` 已实现，ci-callback 待接入 |
 | 4.9 | WorkspaceManager | devflow-runner-workspace §5 | ✅ `WorkspaceManager` (create/validate/commit/cleanup) |
 | 4.10 | PathGuard | devflow-runner-workspace §6 | ✅ `PathGuard` (fnmatch glob, denied-first) |
 | 4.11 | CodingAgentRunner Protocol | devflow-runner-workspace §3 | ✅ `RunnerAdapter` Protocol + `CodingAgentRunner` |
@@ -201,7 +201,7 @@ Week 1          Week 2          Week 3          Week 4
 | M1：平台管线可观测 | Week 1 末 | PolicyEngine、HookRegistry、Metrics 全部接入 runtime；工具动态加载 | ✅ 完成 |
 | M2：状态可持久化 | Week 2 末 | 重启不丢 session/run/deployment；Domain Model 泛化完成 | ✅ 完成（7 Repository Protocol + InMemory/SQL 双实现 + Alembic migration + DI；RuntimeManager 内部仍用 InMemory store 待切换） |
 | M3：非 stub runtime | Week 3 末 | Hermes 可跑 hermes_echo agent；artifact 有 checksum 和版本 | ✅ 完成（ConversationEngine 修复 + model_gateway 注入 + hermes_echo 集成测试通过） |
-| M4：生产可审计 | Week 4 末 | 工具权限管控、Secret 安全、日志脱敏、DevFlow 自动执行 | ✅ 安全基线 + DevFlow Runner 已实现 |
+| M4：生产可审计 | Week 4 末 | 工具权限管控、Secret 安全、日志脱敏、DevFlow 自动执行 | 🔶 安全基线 + DevFlow Runner 已实现；4.2 租户隔离、4.6-4.7 状态同步待完成 |
 
 ## 不在此计划范围内（后续阶段）
 

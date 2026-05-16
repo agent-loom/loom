@@ -4,6 +4,8 @@ from agent_platform.policy.secret import (
     SecretBackend,
     SecretNotFoundError,
     SecretResolver,
+    find_secret_refs,
+    validate_secret_refs,
 )
 
 __all__ = [
@@ -13,4 +15,6 @@ __all__ = [
     "SecretBackend",
     "SecretNotFoundError",
     "SecretResolver",
+    "find_secret_refs",
+    "validate_secret_refs",
 ]
