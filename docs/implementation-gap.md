@@ -1,8 +1,8 @@
 # 实现与设计差距分析
 
-> Last verified against code: 2026-05-17 (S5 Phase 0–3 全部完成 + DevFlow 生产化 + API 生产化加固 + AsyncJobQueue + WeaviateKnowledgeBackend + 生产基础设施 + S6 生产运营加固)
+> Last verified against code: 2026-05-17 (S5 Phase 0–3 全部完成 + DevFlow 生产化 + API 生产化加固 + AsyncJobQueue + WeaviateKnowledgeBackend + 生产基础设施 + S6 生产运营加固 + S7 多维评测 + 租户配额 + Hermes 流式映射)
 >
-> S5 Phase 0–3 已全部完成并通过质量门禁。DevFlow 集成基础设施已生产化。API 层生产化加固完成。生产基础设施已实现：RedisJobQueue 分布式 job 队列（Redis 状态持久化 + semaphore concurrency + graceful fallback）、LangfuseTracer LLM 可观测性（trace/generation/span/score + no-op fallback + RuntimeManager 管线集成）、SqlApiKeyStore RBAC 持久化（SHA-256 hash + expiry + tenant isolation + soft-delete）、WebSocket 鉴权与背压（dual-mode key store + 32 pending limit + 64KB message cap + 300s idle timeout + 序列号重连回放）、Docker Compose（Redis 7 + Weaviate 1.27 + text2vec-transformers）、生产验证脚本。S6 新增：Admin API key CRUD（create/list/revoke）、EvalRunner 自动持久化、RuntimeManager 聚合查询方法（封装修复）、Admin eval/audit 端点、Pre-deploy validation 端点、Per-agent health check、Canary deployment metrics 与自动回滚建议、Per-role rate limiting（ROLE_RATE_LIMITS）、AccessLogMiddleware 结构化请求日志。988 tests passed, ruff clean。
+> S5 Phase 0–3 已全部完成并通过质量门禁。DevFlow 集成基础设施已生产化。API 层生产化加固完成。生产基础设施已实现：RedisJobQueue 分布式 job 队列（Redis 状态持久化 + semaphore concurrency + graceful fallback）、LangfuseTracer LLM 可观测性（trace/generation/span/score + no-op fallback + RuntimeManager 管线集成）、SqlApiKeyStore RBAC 持久化（SHA-256 hash + expiry + tenant isolation + soft-delete）、WebSocket 鉴权与背压（dual-mode key store + 32 pending limit + 64KB message cap + 300s idle timeout + 序列号重连回放）、Docker Compose（Redis 7 + Weaviate 1.27 + text2vec-transformers）、生产验证脚本。S6 新增：Admin API key CRUD（create/list/revoke）、EvalRunner 自动持久化、RuntimeManager 聚合查询方法（封装修复）、Admin eval/audit 端点、Pre-deploy validation 端点、Per-agent health check、Canary deployment metrics 与自动回滚建议、Per-role rate limiting（ROLE_RATE_LIMITS）、AccessLogMiddleware 结构化请求日志。S7 新增：multi-provider ModelGateway（fallback chain + circuit breaker + AnthropicProvider + cost estimation）、ToolAuditRepository 审计持久化、统一 AgentStreamEvent 模型、KnowledgeSyncScheduler 后台同步、TenantQuotaManager 多租户配额、ArtifactStore admin 端点、多维 EvalRunner（accuracy/latency/cost/tool_accuracy + P50/P95/P99 + by-tag + 外部数据集加载）、HermesStreamMapper 流式事件映射。1075 tests passed, ruff clean。
 
 本文档对齐以下两份设计文档和当前代码实现：
 
@@ -39,13 +39,13 @@
 
 ```text
 .venv/bin/python -m pytest
-988 passed, 1 skipped
+1075 passed, 1 skipped
 
 .venv/bin/ruff check src tests scripts alembic
 All checks passed!
 ```
 
-Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参数化覆盖 7 个 Repository 的 InMemory 和 SQL 实现（含租户隔离测试）。S5 新增 111 个测试覆盖 MCP Server、OTel tracing、HITL approval、Admin API、Hermes fallback、semantic autoload、artifact store、webhook async、runtime knowledge 等模块。DevFlow 生产化新增 83 个测试覆盖 HttpClient 重试、集成错误层次、GitLab webhook、ScmAdapter 协议、CodingAgentRunner 生命周期、分支名清理、CodingJobRepository 等模块。API 生产化加固新增 27 个测试覆盖 RBAC scope enforcement、health/ready readiness probe、CORS 配置化、AuthMiddleware AuthIdentity 填充、全局异常处理等模块。异步 Job Queue + Runner 适配器 + DevFlow 端到端 + Weaviate 后端新增 87 个测试。生产基础设施新增 78 个测试覆盖 SqlApiKeyStore（add/verify/expiry/revocation/tenant filtering）、RedisJobQueue（submit/concurrency/callback/shutdown/graceful fallback）、LangfuseTracer（no-op fallback/SDK delegation/health check）、WebSocket auth（query/bearer/x-api-key/capacity/close_all/ping）。S6 生产运营加固新增 43 个测试覆盖 Admin key CRUD（9 tests）、EvalRunner auto-persist（4 tests）、RuntimeManager 聚合查询（6 tests）、Admin eval/audit 端点（8 tests）、WebSocket 重连回放（8 tests）、AccessLogMiddleware（3 tests）、Per-role rate limiting（5 tests rewrite）。
+Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参数化覆盖 7 个 Repository 的 InMemory 和 SQL 实现（含租户隔离测试）。S5 新增 111 个测试覆盖 MCP Server、OTel tracing、HITL approval、Admin API、Hermes fallback、semantic autoload、artifact store、webhook async、runtime knowledge 等模块。DevFlow 生产化新增 83 个测试覆盖 HttpClient 重试、集成错误层次、GitLab webhook、ScmAdapter 协议、CodingAgentRunner 生命周期、分支名清理、CodingJobRepository 等模块。API 生产化加固新增 27 个测试覆盖 RBAC scope enforcement、health/ready readiness probe、CORS 配置化、AuthMiddleware AuthIdentity 填充、全局异常处理等模块。异步 Job Queue + Runner 适配器 + DevFlow 端到端 + Weaviate 后端新增 87 个测试。生产基础设施新增 78 个测试覆盖 SqlApiKeyStore（add/verify/expiry/revocation/tenant filtering）、RedisJobQueue（submit/concurrency/callback/shutdown/graceful fallback）、LangfuseTracer（no-op fallback/SDK delegation/health check）、WebSocket auth（query/bearer/x-api-key/capacity/close_all/ping）。S6 生产运营加固新增 43 个测试覆盖 Admin key CRUD（9 tests）、EvalRunner auto-persist（4 tests）、RuntimeManager 聚合查询（6 tests）、Admin eval/audit 端点（8 tests）、WebSocket 重连回放（8 tests）、AccessLogMiddleware（3 tests）、Per-role rate limiting（5 tests rewrite）。S7 新增 87 个测试覆盖 multi-provider ModelGateway routing（18 tests）、ToolAudit record/filter（7 tests）、AgentStreamEvent SSE/WS/factories（16 tests）、KnowledgeSyncScheduler（6 tests）、ToolExecutor audit integration（3 tests）、EvalRunner 多维评分/数据集加载/汇总统计（24 tests）、HermesStreamMapper 事件映射/流式包装（16 tests）。
 
 ### 1.3 代码审查校准结论（2026-05-17）
 
@@ -65,16 +65,16 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 | API 层 | 97% | ✅ WebSocket 鉴权/背压/重连回放已完成；✅ Per-role rate limiting + AccessLogMiddleware 已完成 |
 | Agent Contract / Manifest | 80% | tool handler import、adapter entrypoint import |
 | Routing | 85% | ✅ semantic rules 自动加载已完成；route decision 持久化待补 |
-| Runtime 抽象 | 80% | ✅ Hermes Spike B 已完成；Hermes memory 持久化、stream event 映射待补 |
-| Tool 执行 | 80% | ✅ 高风险审批已完成；审计持久化、完整 JSON Schema 校验待补 |
-| Eval | 70% | ✅ EvalRunner auto-persist 已完成；EvalRun 线上反馈回归集待补 |
+| Runtime 抽象 | 85% | ✅ Hermes Spike B 已完成；✅ HermesStreamMapper 流式事件映射已完成；Hermes memory 持久化待补 |
+| Tool 执行 | 85% | ✅ 高风险审批已完成；✅ ToolAuditRepository 审计持久化已完成；完整 JSON Schema 校验待补 |
+| Eval | 85% | ✅ EvalRunner auto-persist 已完成；✅ 多维评分（accuracy/latency/cost/tool_accuracy）+ P50/P95/P99 + by-tag + 外部数据集加载已完成；EvalRun 线上反馈回归集待补 |
 | DevFlow | 85% | ✅ ScmAdapter 协议抽象、HttpClient 连接池+重试、GitLab webhook 反向同步、job 持久化+可观测性端点、分支名清理、git 超时保护、✅ AsyncJobQueue 异步执行已完成；真实 runner adapter 端到端联调待补 |
 | Persistence | 80% | ✅ Registry/Deployment/Audit 主链路已接入持久化 |
 | Artifact / Release | 70% | ✅ LocalArtifactStore + Protocol 已完成；S3/远程后端、manifest_sha256 待补 |
 | Security / Tenant / Policy | 80% | ✅ HITL 审批 + RBAC endpoint enforcement + SqlApiKeyStore 持久化已完成；服务间鉴权待补 |
 | Hermes 真接入 | 75% | ✅ Spike B 完成（SDK 工具桥接 + fallback + result normalization）；memory 持久化待补 |
 | Observability | 80% | ✅ OTel 集成 + NoOp fallback + LangfuseTracer（trace/generation/span/score + no-op fallback + health check）已完成；dashboard、alerting 待补 |
-| Knowledge / RAG | 80% | ✅ runtime 主链路接入已完成；✅ WeaviateKnowledgeBackend 真实 httpx REST/GraphQL 实现已完成；✅ Docker Compose Weaviate 部署已就绪；数据同步调度待补 |
+| Knowledge / RAG | 85% | ✅ runtime 主链路接入已完成；✅ WeaviateKnowledgeBackend 真实 httpx REST/GraphQL 实现已完成；✅ Docker Compose Weaviate 部署已就绪；✅ KnowledgeSyncScheduler 后台同步调度已完成；数据权限待补 |
 | MCP 集成 | 80% | ✅ 6 tools + stdio transport 已完成；SSE transport、认证传递待补 |
 | Admin API | 85% | ✅ 9 个管理端点 + 3 个 key CRUD + 2 个 eval + 1 个 audit 端点已完成；admin.py 封装已修复（RuntimeManager 聚合方法） |
 
@@ -119,11 +119,11 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 | Agent Registry | 文件发现 + 内存 cache + ✅ `AgentDefinitionRepository`/`AgentDeploymentRepository` 持久化接入 | DB 持久化已接入 dev-only fallback；版本索引、并发一致性待补 |
 | 版本/灰度/回滚 | deploy API、canary bucket、rollback API、staging/prod 自动 eval gate、**ArtifactStore 产物绑定**、✅ `AgentDeploymentRepository` + `DeploymentAuditRepository` Protocol + 双实现 | 缺少 manifest_sha256 绑定、真实环境控制、审批、保护环境 |
 | Policy | ✅ `PolicyEngine` 已深度接入 runtime/tool 链路（check_input/check_output 在 RuntimeManager，check_tool_allowed 在 ToolExecutor，pre_tool/post_tool hooks 在 ToolExecutor） | 策略规则仍需从外置配置或 DB 加载 |
-| Eval | EvalRunner 存在 | 缺少大规模评测集、质量评分、线上反馈闭环、CI artifact |
+| Eval | EvalRunner 存在 | ✅ 多维评分（accuracy/latency/cost/tool_accuracy）+ 百分位统计 + 外部数据集 + auto-persist 已完成；大规模评测集、线上反馈闭环待补 |
 | Session / Memory | 内存 SessionStore | 缺少 Redis/Postgres、压缩、长期记忆、跨实例共享 |
-| Tool Executor | 工具执行、allowlist、timeout、✅ hook emit、✅ metrics recording、✅ `check_tool_allowed` 在执行前调用 | 缺少重试、熔断、审计持久化 |
-| Knowledge Service | 基础服务和 sources 配置、✅ WeaviateKnowledgeBackend 真实 httpx 实现 | Weaviate 集群部署、数据同步调度、数据权限 |
-| Model Gateway | ✅ 有网关抽象与 `OpenAICompatibleProvider`（httpx.AsyncClient）；✅ `ChatResult` 返回类型 + `default_provider` + token/cost metrics 自动记录 | 缺少限流、fallback、多模型路由配置 |
+| Tool Executor | 工具执行、allowlist、timeout、✅ hook emit、✅ metrics recording、✅ `check_tool_allowed` 在执行前调用 | ✅ ToolAuditRepository 审计持久化已完成；缺少重试、熔断 |
+| Knowledge Service | 基础服务和 sources 配置、✅ WeaviateKnowledgeBackend 真实 httpx 实现 | ✅ KnowledgeSyncScheduler 后台同步已完成；数据权限待补 |
+| Model Gateway | ✅ 有网关抽象与 `OpenAICompatibleProvider`（httpx.AsyncClient）；✅ `ChatResult` 返回类型 + `default_provider` + token/cost metrics 自动记录 | ✅ multi-provider fallback chain + circuit breaker + AnthropicProvider + cost estimation 已完成 |
 | Observability | ✅ run store、metrics 已串联至 RuntimeManager 和 ToolExecutor、HookRegistry 已串联、logging、✅ LogSanitizer（PII 脱敏）+ TraceSanitizer（tool trace / run 脱敏）；✅ OpenTelemetry 可选集成 + NoOp fallback + span instrumentation；✅ LangfuseTracer（trace/generation/span/score + no-op when SDK unavailable + health check） | 缺少 dashboard、告警 |
 | Domain Model | ✅ 泛化完成：LocationContext、org_id、locale=en、timezone=UTC | 旧字段通过 alias 保持向后兼容 |
 | 持久化骨架 | ✅ SQLAlchemy 2.0 + Alembic + persistence/ 包（7 ORM 表 + 7 Protocol + 7 InMemory + 7 SQL + AuditMixin + Alembic migration） | ✅ DI 完成：`DATABASE_URL` 显式设置时切换 SQL 实现 |
@@ -203,7 +203,7 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 - ~~没有调用真实 Hermes 官方 runtime 或 Hermes `AIAgent`。~~ ✅ Spike B 已完成
 - ~~没有将 Hermes 的 planner、memory、tool loop、事件流和 trace 原生能力接入平台。~~ 部分完成：tool loop 已桥接，planner/memory/event stream 待补
 - ~~没有把平台 ToolExecutor 注册为 Hermes 的实际可调用 tool。~~ ✅ `register_platform_tools_to_hermes()` 已完成
-- Hermes 的 stream event 没有映射成平台 SSE/WebSocket event。
+- ~~Hermes 的 stream event 没有映射成平台 SSE/WebSocket event。~~ ✅ `HermesStreamMapper` 已完成（from_result 重建 + map_hermes_event 原生映射 + wrap_streaming_run 流式包装）
 - Hermes memory provider 只是配置字段，没有真实持久化后端。
 - Hermes 错误、重试、中断、human-in-the-loop 事件没有规范映射。
 
@@ -474,7 +474,7 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 | P1 | DevFlow runner adapter 从配置选择 | 不能在生产入口 hardcode mock runner | ✅ 配置已就绪（`DEVFLOW_RUNNER_ADAPTER`），Claude Code/Codex adapter 已实现，startup 警告已添加 |
 | P1 | package artifact registry | 多 agent、多版本、跨环境发布需要稳定产物 | ⬜ 待实施 |
 | P1 | ~~SemanticRouter manifest 规则加载~~ | 新 agent 增多后不能依赖手工注册 semantic rule | ✅ S5 P2 完成 |
-| P1 | Eval 数据集扩展和自动报告 | 业务质量回归需要量化 | ⬜ 待实施 |
+| P1 | Eval 数据集扩展和自动报告 | 业务质量回归需要量化 | ✅ 已完成（多维评分 + P50/P95/P99 + by-tag + 外部数据集加载 + run_dataset） |
 | P1 | ~~Knowledge/RAG 真实接入~~ | MYJ 等业务 agent 离不开业务知识 | ✅ S5 P0 完成（runtime 主链路）+ ✅ WeaviateKnowledgeBackend httpx 实现完成（nearText search + batch sync + health check） |
 | P1 | ~~OpenTelemetry/Langfuse trace~~ | 线上排障和质量分析必需 | ✅ S5 P2 完成（OTel）；✅ LangfuseTracer 已完成（trace/generation/span/score + no-op fallback + health check） |
 
@@ -484,9 +484,9 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 | --- | --- | --- | --- |
 | P2 | Admin UI | 管理 agent、版本、灰度、eval、trace | ⬜ S6 |
 | P2 | ~~MCP 集成~~ | 给外部研发工具统一暴露 Plane/GitLab/平台能力 | ✅ S5 P2 完成 |
-| P2 | 多模型路由和成本治理 | 控制 token 成本和模型可用性 | ⬜ S6 |
+| P2 | 多模型路由和成本治理 | 控制 token 成本和模型可用性 | ✅ 已完成（multi-provider ModelGateway + fallback chain + circuit breaker + cost estimation + AnthropicProvider） |
 | P2 | ~~Human-in-the-loop runtime event~~ | 高风险工具、人审回复、人工接管 | ✅ S5 P3 完成 |
-| P2 | 多租户计费/配额 | 平台化运营需要 | ⬜ S6 |
+| P2 | 多租户计费/配额 | 平台化运营需要 | ✅ 已完成（TenantQuotaManager + admin quota 端点） |
 
 ## 6. 推荐重构路线
 
@@ -560,7 +560,7 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 
 ## 8. 总结
 
-当前项目已完成 S5 全部 4 个 Phase + DevFlow 集成生产化 + API 层生产化加固 + AsyncJobQueue/RedisJobQueue 异步/分布式执行 + WeaviateKnowledgeBackend 真实向量后端 + 生产基础设施（LangfuseTracer + SqlApiKeyStore + WebSocket 鉴权/背压 + Docker Compose + 生产验证脚本）+ S6 生产运营加固，从 MVP 骨架演进为具备生产化能力的多 Agent 平台。988 个测试通过，ruff clean。
+当前项目已完成 S5 全部 4 个 Phase + DevFlow 集成生产化 + API 层生产化加固 + AsyncJobQueue/RedisJobQueue 异步/分布式执行 + WeaviateKnowledgeBackend 真实向量后端 + 生产基础设施（LangfuseTracer + SqlApiKeyStore + WebSocket 鉴权/背压 + Docker Compose + 生产验证脚本）+ S6 生产运营加固 + S7 多维评测/租户配额/ModelGateway/Hermes 流式映射，从 MVP 骨架演进为具备生产化能力的多 Agent 平台。1075 个测试通过，ruff clean。
 
 S5 完成后的主要成果：Registry/Deployment 持久化、ArtifactStore Protocol 化、Hermes SDK 真接入（Spike B）、ModelGateway token/cost tracking、MCP Server、OpenTelemetry 集成、SemanticRouter 自动规则加载、HITL 审批门、Admin API。
 
@@ -574,12 +574,14 @@ API 生产化加固成果：FastAPI lifespan graceful shutdown（自动关闭 ht
 
 S6 生产运营加固成果：LangfuseTracer RuntimeManager 管线集成（trace/span/generation/score 端到端）、Admin API key CRUD（create/list/revoke via SqlApiKeyStore）、EvalRunner auto-persist（自动持久化到 EvalRunRepository + trigger 类型）、RuntimeManager 聚合查询方法（list_runs/get_run/list_sessions/load_session/delete_session 封装修复）、Admin eval/audit 端点（GET /evals + GET /evals/{agent_id}/latest + GET /audit）、Pre-deploy validation 端点（agent 存在性 + 版本匹配 + backend 可用性 + 工具注册 + eval suite 检查）、Per-agent health check（backend 可用性 + 成功率 + session 计数）、Canary deployment metrics（error rate + latency p99 + auto-rollback recommendation）、Per-role rate limiting（ROLE_RATE_LIMITS 4 角色 + TokenBucket + auth identity 联动）、AccessLogMiddleware 结构化请求日志（auth subject/tenant_id/key_id/request_id tracking）、WebSocket 序列号重连回放（REPLAY_BUFFER_SIZE=50 + last_seq 查询参数 + replay missed messages）、43 个新增测试。
 
-下一阶段（S7）建议优先：
+S7 新增成果：multi-provider ModelGateway（fallback chain + CircuitBreaker closed/open/half_open 三态 + RoutingStrategy priority/round_robin/cost_optimized + AnthropicProvider Messages API + estimate_cost() 12 模型定价表）、ToolAuditRepository 工具调用审计持久化（InMemory/SQL 双实现 + ToolExecutor 自动记录 + Admin /tool-audit 端点）、统一 AgentStreamEvent 模型（14 事件类型 + SSE/WebSocket 双输出 + 12 factory helpers + streaming.py 重构）、KnowledgeSyncScheduler 后台知识同步（asyncio.Task 定期轮询 + DataSynchronization 桥接 + add_source/sync_all/start/stop）、TenantQuotaManager 多租户配额管理（requests/tokens/storage/agents 四维配额 + 日重置 + Admin quota CRUD 端点 + 违规检查）、ArtifactStore admin 端点（list/metadata/SHA-256 verify）、多维 EvalRunner（accuracy/latency/cost/tool_accuracy 四维评分 + P50/P95/P99 百分位延迟 + by-tag 分组汇总 + load_dataset YAML/JSON + run_dataset 独立数据集入口）、HermesStreamMapper（from_result 同步结果重建 + map_hermes_event 10 种原生事件映射 + wrap_streaming_run 流式包装 + 错误捕获）、87 个新增测试。
+
+下一阶段（S8）建议优先：
 1. **真实 coding runner 端到端联调** — Claude Code CLI 或 Codex CLI 在真实 workspace 中执行，验证 prompt→code→commit 管线
 2. **Plane + GitLab 端到端联调** — 使用真实 Plane/GitLab 环境验证完整 DevFlow 管线
-3. **Weaviate 数据同步调度** — 配置 cron sync pipeline，利用已部署的 Docker Compose Weaviate 实例
-4. **Session 持久化** — Redis/Postgres 替代 InMemorySessionStore，支持跨实例共享
-5. **多模型路由和成本治理** — 控制 token 成本和模型可用性，ModelGateway 增加 fallback 和限流
-6. **Hermes stream event 映射** — 将 Hermes event stream 映射为平台统一 AgentStreamEvent
-7. Admin UI — 管理 agent、版本、灰度、DevFlow jobs、eval 报告
-8. 多租户计费/配额 — 平台化运营需要
+3. **Session 持久化** — Redis/Postgres 替代 InMemorySessionStore，支持跨实例共享
+4. **Hermes memory 持久化** — Hermes memory provider 接入平台 session store
+5. **Admin UI** — 管理 agent、版本、灰度、DevFlow jobs、eval 报告
+6. **产物签名与审计** — artifact 签名验证、发布审计不可变记录
+7. **安全沙箱** — Docker/Firecracker 隔离 coding agent 执行环境
+8. **SLO 门禁与告警** — deploy gate 绑定延迟/错误率 SLO、自动告警
