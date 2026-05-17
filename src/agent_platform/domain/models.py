@@ -518,6 +518,7 @@ class AgentRun(BaseModel):
     run_id: str
     request_id: str | None = None
     session_id: str | None = None
+    tenant_id: str | None = None
     agent_id: str
     agent_version: str
     route_reason: str | None = None

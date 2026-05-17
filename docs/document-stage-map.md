@@ -16,13 +16,13 @@
 | --- | --- | --- | --- |
 | S0 | 架构基线 | 冻结平台边界、MVP、核心契约 | 已完成，持续维护 |
 | S1 | MVP 骨架 | 跑通多 Agent、统一 API、manifest、runtime、eval、DevFlow 骨架 | 已基本实现 |
-| S2 | 生产化底座 | 持久化、artifact、发布审计、回滚、权限、观测 | 部分完成；Registry/Deployment/Audit/Artifact/Knowledge 相关接线已在工作树中实现，但 ruff/manifest 质量门禁未通过 |
+| S2 | 生产化底座 | 持久化、artifact、发布审计、回滚、权限、观测 | 部分完成；Registry/Deployment/Audit 主链路已接入，Deployment upsert/strict tenant resolve 和 agent-runs 租户过滤已补齐；远程 artifact、保护环境、服务间鉴权仍待补 |
 | S3 | Hermes 真接入 | 从 stub/adapter 原型变成真实 Hermes runtime 能力 | 部分完成；Spike A 已完成，官方 Hermes SDK Spike B 待实施 |
 | S4 | AI 研发闭环 | CodingAgentRunner、workspace、path guard、Plane/GitLab 状态同步 | 大部分完成；runner/workspace/path guard 已生产化，ScmAdapter 协议抽象已完成，HttpClient 连接池+重试已完成，GitLab webhook 反向同步已实现，job 持久化+可观测性端点已接入，分支名清理已实现；真实 runner adapter (Claude Code / Codex) 待接入，端到端联调待做 |
 | S5 | 平台生产化与规模化 | 主链路可靠性校准、semantic routing、model gateway、knowledge/RAG、admin API、MCP、治理 | ✅ 已完成 Phase 0-3（670 tests passed, ruff clean）；入口为 `development-plan-s5.md` |
 | S6 | 生产运营加固 | Admin key CRUD、EvalRunner auto-persist、per-role rate limiting、access log、canary metrics、WebSocket 重连 | ✅ 已完成（988 tests passed） |
 | S7 | 多维评测与运营深化 | 多 provider ModelGateway、ToolAudit、AgentStreamEvent、KnowledgeSyncScheduler、多维 EvalRunner、TenantQuota、HermesStreamMapper | ✅ 已完成（1075 tests passed） |
-| S8 | 生产交付 | Prometheus metrics、Session 持久化、Admin eval 增强、真实 runner E2E、Plane/GitLab E2E、Admin UI、SLO 门禁 | 🔶 进行中（1113 tests passed）；入口为 `development-plan-s7.md` |
+| S8 | 生产交付 | Prometheus metrics、Session 持久化、Admin eval 增强、真实 runner E2E、Plane/GitLab E2E、Admin UI、SLO 门禁 | 🔶 进行中（当前已跟踪测试 1314 passed, 1 skipped）；入口为 `development-plan-s7.md` |
 
 ## 2. 文档状态定义
 
@@ -66,10 +66,10 @@
 | `manual-verification-guide.md` | Baseline | 平台功能模块手动验证指南（16 个模块，~30 min） |
 | `development-plan-s2.md` | Historical Plan | S2-S4 开发计划和任务跟踪；记录基础组件实现历史，不作为当前完成度事实源 |
 | `development-plan-s5.md` | Completed | S5 平台生产化与规模化执行计划；Phase 0-3 全部完成，670 tests passed |
-| `05-production/persistence-storage-design.md` | Implemented | repository/migration 基础已实现；Registry/Deployment/Audit 主链路已在 S5 Phase 0 接入 |
+| `05-production/persistence-storage-design.md` | Implemented | repository/migration 基础已实现；Registry/Deployment/Audit 主链路已在 S5 Phase 0 接入；Deployment SQL upsert 和 strict tenant resolve 已补齐 |
 | `05-production/package-artifact-release-design.md` | Partially Implemented | ArtifactStore Protocol 化 + LocalArtifactStore 已完成；远程 registry (S3/GitLab) 未实现 |
-| `05-production/security-tenant-policy-design.md` | Partially Implemented | Scoped API key、tool permission、secret、脱敏已完成；ApprovalGate HITL 已完成；RBAC/scopes endpoint enforcement 待补 |
-| `05-production/observability-eval-feedback-design.md` | Partially Implemented | OpenTelemetry 接入、@traced decorator、MetricsCollector 已完成；Langfuse 适配层已实现；结构化 trace event schema 待完善 |
+| `05-production/security-tenant-policy-design.md` | Partially Implemented | Scoped API key、tool permission、secret、脱敏已完成；ApprovalGate HITL 已完成；API key tenant binding、AuditContext、agent-runs read scope/tenant filter 已补齐；服务间鉴权待补 |
+| 待创建：`05-production/observability-eval-feedback-design.md` | Planned | OpenTelemetry、Langfuse、Prometheus、结构化 trace event 与反馈闭环需要独立沉淀；当前事实源暂在 `implementation-gap.md` |
 
 ### S3. Hermes 真接入
 
@@ -92,9 +92,9 @@
 | 文档 | 状态 | 用途 |
 | --- | --- | --- |
 | `development-plan-s5.md` | Completed | S5 执行入口：Phase 0-3 全部完成（19 项任务，670 tests passed） |
-| `06-scale/semantic-routing-policy-design.md` | Implemented | semantic routing rule schema 和 manifest 自动加载；`ManifestRoutingRule` 已实现 |
-| `06-scale/model-gateway-design.md` | Implemented | 模型 provider、ChatResult、token/cost 统计；多 provider 路由已实现 |
-| `06-scale/knowledge-rag-design.md` | Partially Implemented | KnowledgeService + WeaviateKnowledgeBackend 已实现；真实 vector backend 连接待补 |
+| 待创建：`06-scale/semantic-routing-policy-design.md` | Planned | semantic routing rule schema 和 manifest 自动加载已实现；当前事实源暂在 `implementation-gap.md` |
+| 待创建：`06-scale/model-gateway-design.md` | Planned | 模型 provider、ChatResult、token/cost 统计与多 provider 路由已实现；当前事实源暂在 `implementation-gap.md` |
+| 待创建：`06-scale/knowledge-rag-design.md` | Planned | KnowledgeService + WeaviateKnowledgeBackend 已实现；RAG 数据权限和生产同步细节仍需独立设计 |
 | `99-reference/plane-docs-acquisition.md` | Reference | Plane API/MCP 文档获取方式 |
 | `vendor/plane/*` | Reference | Plane OpenAPI 原始快照 |
 

@@ -21,7 +21,12 @@ class TestListRuns:
         m = _make_manager(run_store=store)
         result = await m.list_runs(agent_id="echo")
         assert result == ["run-1", "run-2"]
-        store.list_runs.assert_called_once_with(agent_id="echo", limit=100)
+        store.list_runs.assert_called_once_with(
+            agent_id="echo",
+            session_id=None,
+            tenant_id=None,
+            limit=100,
+        )
 
     @pytest.mark.asyncio
     async def test_list_runs_default_params(self):
@@ -29,7 +34,25 @@ class TestListRuns:
         store.list_runs = AsyncMock(return_value=[])
         m = _make_manager(run_store=store)
         await m.list_runs()
-        store.list_runs.assert_called_once_with(agent_id=None, limit=100)
+        store.list_runs.assert_called_once_with(
+            agent_id=None,
+            session_id=None,
+            tenant_id=None,
+            limit=100,
+        )
+
+    @pytest.mark.asyncio
+    async def test_list_runs_delegates_session_and_tenant_filters(self):
+        store = MagicMock()
+        store.list_runs = AsyncMock(return_value=[])
+        m = _make_manager(run_store=store)
+        await m.list_runs(agent_id="echo", session_id="s1", tenant_id="t1", limit=5)
+        store.list_runs.assert_called_once_with(
+            agent_id="echo",
+            session_id="s1",
+            tenant_id="t1",
+            limit=5,
+        )
 
 
 class TestGetRun:

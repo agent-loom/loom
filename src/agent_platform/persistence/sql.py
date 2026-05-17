@@ -39,7 +39,7 @@ def _fill_audit(row: Any) -> None:
     ctx = get_audit_context()
     row.created_by = ctx.actor
     row.request_id = ctx.request_id
-    if ctx.tenant_id is not None:
+    if ctx.tenant_id is not None and getattr(row, "tenant_id", None) is None:
         row.tenant_id = ctx.tenant_id
 
 
@@ -175,20 +175,33 @@ class SqlAgentDeploymentRepository:
     async def save(
         self, deployment: AgentDeployment
     ) -> None:
-        """将部署记录持久化到数据库。"""
-        row = AgentDeploymentRow(
-            deployment_id=deployment.deployment_id,
-            agent_id=deployment.agent_id,
-            version=deployment.version,
-            channel=deployment.channel,
-            status=deployment.status.value,
-            traffic_percent=deployment.traffic_percent,
-        )
-        if deployment.tenant_id is not None:
-            row.tenant_id = deployment.tenant_id
-        _fill_audit(row)
+        """将部署记录持久化到数据库，按 deployment_id 提供 upsert 语义。"""
         async with self._sf() as session:
-            session.add(row)
+            stmt = select(AgentDeploymentRow).where(
+                AgentDeploymentRow.deployment_id == deployment.deployment_id
+            )
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row is None:
+                row = AgentDeploymentRow(
+                    deployment_id=deployment.deployment_id,
+                    agent_id=deployment.agent_id,
+                    version=deployment.version,
+                    channel=deployment.channel,
+                    status=deployment.status.value,
+                    traffic_percent=deployment.traffic_percent,
+                    tenant_id=deployment.tenant_id,
+                )
+                _fill_audit(row)
+                session.add(row)
+            else:
+                row.agent_id = deployment.agent_id
+                row.version = deployment.version
+                row.channel = deployment.channel
+                row.status = deployment.status.value
+                row.traffic_percent = deployment.traffic_percent
+                row.tenant_id = deployment.tenant_id
+                row.updated_at = datetime.now(UTC)
             await session.commit()
 
     async def get(
@@ -221,6 +234,8 @@ class SqlAgentDeploymentRepository:
             stmt = stmt.where(
                 AgentDeploymentRow.tenant_id == tenant_id
             )
+        else:
+            stmt = stmt.where(AgentDeploymentRow.tenant_id.is_(None))
         stmt = stmt.limit(1)
         async with self._sf() as session:
             result = await session.execute(stmt)
@@ -407,6 +422,7 @@ class SqlAgentRunRepository:
             run_id=run.run_id,
             request_id=run.request_id,
             session_id=run.session_id,
+            tenant_id=run.tenant_id,
             agent_id=run.agent_id,
             agent_version=run.agent_version,
             route_reason=run.route_reason,
@@ -488,6 +504,7 @@ class SqlAgentRunRepository:
             run_id=row.run_id,
             request_id=row.request_id,
             session_id=row.session_id,
+            tenant_id=row.tenant_id,
             agent_id=row.agent_id,
             agent_version=row.agent_version,
             route_reason=row.route_reason,

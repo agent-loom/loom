@@ -100,6 +100,7 @@ def _make_run(
     run_id: str = "run-1",
     agent_id: str = "agent-a",
     session_id: str | None = None,
+    tenant_id: str | None = None,
 ) -> AgentRun:
     return AgentRun(
         run_id=run_id,
@@ -109,6 +110,7 @@ def _make_run(
         status=AgentRunStatus.SUCCEEDED,
         latency_ms=42,
         session_id=session_id,
+        tenant_id=tenant_id,
     )
 
 
@@ -263,6 +265,25 @@ class TestAgentDeploymentContract:
         assert result.deployment_id == "dep-1"
 
     @pytest.mark.asyncio
+    async def test_resolve_none_tenant_only_returns_general_deployment(self, deployment_repo):
+        await deployment_repo.save(
+            _make_deployment(deployment_id="tenant-dep", tenant_id="tenant-a")
+        )
+        await deployment_repo.save(_make_deployment(deployment_id="general-dep"))
+        result = await deployment_repo.resolve(agent_id="agent-a", channel="dev")
+        assert result is not None
+        assert result.deployment_id == "general-dep"
+        assert result.tenant_id is None
+
+    @pytest.mark.asyncio
+    async def test_save_upserts_existing_deployment_id(self, deployment_repo):
+        await deployment_repo.save(_make_deployment(version="1.0.0"))
+        await deployment_repo.save(_make_deployment(version="2.0.0"))
+        result = await deployment_repo.get("dep-1")
+        assert result is not None
+        assert result.version == "2.0.0"
+
+    @pytest.mark.asyncio
     async def test_list_all_with_agent_filter(self, deployment_repo):
         await deployment_repo.save(_make_deployment(deployment_id="d1", agent_id="a1"))
         await deployment_repo.save(_make_deployment(deployment_id="d2", agent_id="a2"))
@@ -362,6 +383,14 @@ class TestAgentRunContract:
         results = await run_repo.list_runs(session_id="s1")
         assert len(results) == 1
         assert results[0].session_id == "s1"
+
+    @pytest.mark.asyncio
+    async def test_list_runs_with_tenant_filter(self, run_repo):
+        await run_repo.record(_make_run(run_id="r1", tenant_id="t1"))
+        await run_repo.record(_make_run(run_id="r2", tenant_id="t2"))
+        results = await run_repo.list_runs(tenant_id="t1")
+        assert len(results) == 1
+        assert results[0].tenant_id == "t1"
 
 
 # ===================================================================

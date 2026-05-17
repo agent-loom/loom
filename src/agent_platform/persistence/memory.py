@@ -104,7 +104,7 @@ class InMemoryAgentDeploymentRepository:
                 continue
             if dep.channel != channel:
                 continue
-            if tenant_id and dep.tenant_id != tenant_id:
+            if dep.tenant_id != tenant_id:
                 continue
             return dep
         return None
@@ -212,6 +212,10 @@ class InMemoryAgentRunRepository:
             items = [
                 r for r in items
                 if r.session_id == session_id
+            ]
+        if tenant_id is not None:
+            items = [
+                r for r in items if r.tenant_id == tenant_id
             ]
         return items[-limit:]
 

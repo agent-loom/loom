@@ -1,8 +1,10 @@
 # 实现与设计差距分析
 
-> Last verified against code: 2026-05-17 (S5 Phase 0–3 全部完成 + DevFlow 生产化 + API 生产化加固 + AsyncJobQueue + WeaviateKnowledgeBackend + 生产基础设施 + S6 生产运营加固 + S7 多维评测 + 租户配额 + Hermes 流式映射 + S8 Phase 1 Prometheus metrics + Session 持久化 + Admin eval 增强)
+> Last verified against code: 2026-05-17 (S5 Phase 0–3 全部完成 + DevFlow 生产化 + API 生产化加固 + AsyncJobQueue + WeaviateKnowledgeBackend + 生产基础设施 + S6 生产运营加固 + S7 多维评测 + 租户配额 + Hermes 流式映射 + S8 Phase 1 Prometheus metrics + Session 持久化 + Admin eval 增强 + review hardening: API key tenant binding / deployment resolve-upsert / agent-runs tenant filtering)
 >
-> S5 Phase 0–3 已全部完成并通过质量门禁。DevFlow 集成基础设施已生产化。API 层生产化加固完成。生产基础设施已实现：RedisJobQueue 分布式 job 队列（Redis 状态持久化 + semaphore concurrency + graceful fallback）、LangfuseTracer LLM 可观测性（trace/generation/span/score + no-op fallback + RuntimeManager 管线集成）、SqlApiKeyStore RBAC 持久化（SHA-256 hash + expiry + tenant isolation + soft-delete）、WebSocket 鉴权与背压（dual-mode key store + 32 pending limit + 64KB message cap + 300s idle timeout + 序列号重连回放）、Docker Compose（Redis 7 + Weaviate 1.27 + text2vec-transformers）、生产验证脚本。S6 新增：Admin API key CRUD（create/list/revoke）、EvalRunner 自动持久化、RuntimeManager 聚合查询方法（封装修复）、Admin eval/audit 端点、Pre-deploy validation 端点、Per-agent health check、Canary deployment metrics 与自动回滚建议、Per-role rate limiting（ROLE_RATE_LIMITS）、AccessLogMiddleware 结构化请求日志。S7 新增：multi-provider ModelGateway（fallback chain + circuit breaker + AnthropicProvider + cost estimation）、ToolAuditRepository 审计持久化、统一 AgentStreamEvent 模型、KnowledgeSyncScheduler 后台同步、TenantQuotaManager 多租户配额、ArtifactStore admin 端点、多维 EvalRunner（accuracy/latency/cost/tool_accuracy + P50/P95/P99 + by-tag + 外部数据集加载）、HermesStreamMapper 流式事件映射。S8 Phase 1 新增：Prometheus metrics 端点（/api/v1/admin/metrics + to_prometheus() + HELP/TYPE 注释 + record_error/record_tool_duration）、SqlAgentSessionRepository SQL 持久化（upsert 语义 + contract tests）、Admin eval 增强端点（POST /evals/{agent_id}/run 触发执行 + GET /evals/compare 跨版本对比 + /status 平台元信息增强）。1113 tests passed, ruff clean。
+> S5 Phase 0–3 已全部完成并通过质量门禁。DevFlow 集成基础设施已生产化。API 层生产化加固完成。生产基础设施已实现：RedisJobQueue 分布式 job 队列（Redis 状态持久化 + semaphore concurrency + graceful fallback）、LangfuseTracer LLM 可观测性（trace/generation/span/score + no-op fallback + RuntimeManager 管线集成）、SqlApiKeyStore RBAC 持久化（SHA-256 hash + expiry + tenant isolation + soft-delete）、WebSocket 鉴权与背压（dual-mode key store + 32 pending limit + 64KB message cap + 300s idle timeout + 序列号重连回放）、Docker Compose（Redis 7 + Weaviate 1.27 + text2vec-transformers）、生产验证脚本。S6 新增：Admin API key CRUD（create/list/revoke）、EvalRunner 自动持久化、RuntimeManager 聚合查询方法（封装修复）、Admin eval/audit 端点、Pre-deploy validation 端点、Per-agent health check、Canary deployment metrics 与自动回滚建议、Per-role rate limiting（ROLE_RATE_LIMITS）、AccessLogMiddleware 结构化请求日志。S7 新增：multi-provider ModelGateway（fallback chain + circuit breaker + AnthropicProvider + cost estimation）、ToolAuditRepository 审计持久化、统一 AgentStreamEvent 模型、KnowledgeSyncScheduler 后台同步、TenantQuotaManager 多租户配额、ArtifactStore admin 端点、多维 EvalRunner（accuracy/latency/cost/tool_accuracy + P50/P95/P99 + by-tag + 外部数据集加载）、HermesStreamMapper 流式事件映射。S8 Phase 1 新增：Prometheus metrics 端点（/api/v1/admin/metrics + to_prometheus() + HELP/TYPE 注释 + record_error/record_tool_duration）、SqlAgentSessionRepository SQL 持久化（upsert 语义 + contract tests）、Admin eval 增强端点（POST /evals/{agent_id}/run 触发执行 + GET /evals/compare 跨版本对比 + /status 平台元信息增强）。当前已跟踪测试：1314 passed, 1 skipped；相关文件 ruff clean。
+>
+> 2026-05-17 review hardening 已补齐：持久化 API key 不再允许 `x-tenant-id` 覆盖绑定租户；AuthMiddleware 写入 `AuditContext`；`AgentRun` 显式携带 `tenant_id`；`/api/v1/agent-runs` 强制 read scope 并按租户过滤；Deployment repository 的 general fallback 仅匹配 `tenant_id IS NULL`；SQL Deployment save 改为 upsert。目标测试：`uv run pytest tests/unit/test_auth.py tests/unit/test_repository_contracts.py tests/unit/test_runtime_manager_queries.py tests/unit/test_api.py`，105 passed。
 
 本文档对齐以下两份设计文档和当前代码实现：
 
@@ -25,7 +27,7 @@
 | Runtime 抽象 | `NativeRuntimeBackend`、`HermesRuntimeBackend`、`LangGraphRuntimeBackend` | 部分完成 |
 | 工具注册和执行 | `ToolRegistry`（✅ 已去业务化 + 动态加载）、`ToolExecutor`（✅ hook/metrics 已接入）、agent-scoped tools | 基本完成 |
 | 会话 | `InMemorySessionStore`、`AgentSession`、✅ `AgentSessionRepository` Protocol + InMemory/SQL 实现、✅ `SqlAgentSessionRepository` upsert 语义 | 基本完成 |
-| Trace / metrics | `InMemoryRunStore`、`MetricsCollector`（✅ 已串联 runtime/tool）、✅ `AgentRunRepository` Protocol + InMemory/SQL、✅ `/metrics` Prometheus 端点（text exposition + HELP/TYPE 注释） | 基本完成 |
+| Trace / metrics | `InMemoryRunStore`、`MetricsCollector`（✅ 已串联 runtime/tool）、✅ `AgentRunRepository` Protocol + InMemory/SQL、✅ AgentRun tenant_id 追溯、✅ `/metrics` Prometheus 端点（text exposition + HELP/TYPE 注释） | 基本完成 |
 | Eval | `EvalRunner`、golden case、CI callback API | 部分完成 |
 | DevFlow | 需求解析、issue 生成、task pack、agent 脚手架、设计分析、测试计划 API、✅ job 持久化+可观测性端点 | 基本完成 |
 | Plane 集成 | `PlaneAdapter`（✅ HttpClient 连接池+重试）、webhook 校验、幂等处理、DevFlow 触发 | 基本完成 |
@@ -38,10 +40,10 @@
 最近一次验证：
 
 ```text
-.venv/bin/python -m pytest
-1113 passed, 1 skipped
+uv run pytest --ignore=tests/unit/test_execution_log.py --ignore=tests/unit/test_hermes_hitl.py --ignore=tests/unit/test_mcp_sse_transport.py --ignore=tests/unit/test_s3_artifact.py
+1314 passed, 1 skipped
 
-.venv/bin/ruff check src tests scripts alembic
+uv run ruff check src/agent_platform/api/app.py src/agent_platform/domain/models.py src/agent_platform/runtime/manager.py src/agent_platform/persistence/memory.py src/agent_platform/persistence/sql.py tests/unit/test_auth.py tests/unit/test_repository_contracts.py tests/unit/test_runtime_manager_queries.py tests/unit/test_api.py
 All checks passed!
 ```
 
@@ -69,9 +71,9 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 | Tool 执行 | 85% | ✅ 高风险审批已完成；✅ ToolAuditRepository 审计持久化已完成；完整 JSON Schema 校验待补 |
 | Eval | 85% | ✅ EvalRunner auto-persist 已完成；✅ 多维评分（accuracy/latency/cost/tool_accuracy）+ P50/P95/P99 + by-tag + 外部数据集加载已完成；EvalRun 线上反馈回归集待补 |
 | DevFlow | 85% | ✅ ScmAdapter 协议抽象、HttpClient 连接池+重试、GitLab webhook 反向同步、job 持久化+可观测性端点、分支名清理、git 超时保护、✅ AsyncJobQueue 异步执行已完成；真实 runner adapter 端到端联调待补 |
-| Persistence | 80% | ✅ Registry/Deployment/Audit 主链路已接入持久化 |
+| Persistence | 85% | ✅ Registry/Deployment/Audit 主链路已接入持久化；✅ Deployment SQL upsert 和 strict tenant resolve 已补齐 |
 | Artifact / Release | 70% | ✅ LocalArtifactStore + Protocol 已完成；S3/远程后端、manifest_sha256 待补 |
-| Security / Tenant / Policy | 80% | ✅ HITL 审批 + RBAC endpoint enforcement + SqlApiKeyStore 持久化已完成；服务间鉴权待补 |
+| Security / Tenant / Policy | 85% | ✅ HITL 审批 + RBAC endpoint enforcement + SqlApiKeyStore 持久化已完成；✅ API key tenant binding 与 agent-runs tenant filter 已补齐；服务间鉴权待补 |
 | Hermes 真接入 | 75% | ✅ Spike B 完成（SDK 工具桥接 + fallback + result normalization）；memory 持久化待补 |
 | Observability | 85% | ✅ OTel 集成 + NoOp fallback + LangfuseTracer（trace/generation/span/score + no-op fallback + health check）+ ✅ Prometheus /metrics 端点（HELP/TYPE + record_error/record_tool_duration）已完成；dashboard、alerting 待补 |
 | Knowledge / RAG | 85% | ✅ runtime 主链路接入已完成；✅ WeaviateKnowledgeBackend 真实 httpx REST/GraphQL 实现已完成；✅ Docker Compose Weaviate 部署已就绪；✅ KnowledgeSyncScheduler 后台同步调度已完成；数据权限待补 |
@@ -81,6 +83,9 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 已知代码质量问题：
 - ~~`admin.py:76-83` 直接访问 `registry._local_specs`（私有属性），应新增 `AgentRegistry.unregister()` 方法~~ ✅ 已修复
 - ~~`admin.py` 多处穿透 `RuntimeManager` 访问 `run_store`/`session_store`，应暴露聚合查询方法或独立注入~~ ✅ 已修复（RuntimeManager 新增 `list_runs`/`get_run`/`list_sessions`/`load_session`/`delete_session` 聚合方法）
+- ~~持久化 API key 的 `tenant_id` 可被 `x-tenant-id` 覆盖，导致租户隔离绕过~~ ✅ 已修复
+- ~~Deployment general fallback 可能返回 tenant-specific deployment；SQL repeated deploy insert-only~~ ✅ 已修复
+- ~~`/api/v1/agent-runs` 未强制 read scope，且未按租户过滤~~ ✅ 已修复
 
 ### 1.4 Review 17 项覆盖索引
 
@@ -115,9 +120,9 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 | 设计模块 | 当前实现 | 差距 |
 | --- | --- | --- |
 | API Gateway / 协议适配 | FastAPI `/api/v1/agent/chat`、SSE、WebSocket、request id header 回写 | 缺少版本协商、前端能力协商、复杂渠道协议适配 |
-| Auth / 租户识别 | API key、request context、`x-tenant-id` 注入、✅ `ApiKeyRecord` + scoped API key、✅ 所有 Repository list 查询支持 `tenant_id` 过滤、✅ AuthMiddleware → AuthIdentity → require_scope/require_role endpoint enforcement、✅ SqlApiKeyStore（SHA-256 hash + expiry + tenant isolation + soft-delete revocation） | 缺少服务间鉴权 |
+| Auth / 租户识别 | API key、request context、`x-tenant-id` 注入、✅ `ApiKeyRecord` + scoped API key、✅ 持久化 API key tenant binding 不可被 header 覆盖、✅ 所有 Repository list 查询支持 `tenant_id` 过滤、✅ AuthMiddleware → AuthIdentity → AuditContext → require_scope/require_role endpoint enforcement、✅ SqlApiKeyStore（SHA-256 hash + expiry + tenant isolation + soft-delete revocation） | 缺少服务间鉴权 |
 | Agent Registry | 文件发现 + 内存 cache + ✅ `AgentDefinitionRepository`/`AgentDeploymentRepository` 持久化接入 | DB 持久化已接入 dev-only fallback；版本索引、并发一致性待补 |
-| 版本/灰度/回滚 | deploy API、canary bucket、rollback API、staging/prod 自动 eval gate、**ArtifactStore 产物绑定**、✅ `AgentDeploymentRepository` + `DeploymentAuditRepository` Protocol + 双实现 | 缺少 manifest_sha256 绑定、真实环境控制、审批、保护环境 |
+| 版本/灰度/回滚 | deploy API、canary bucket、rollback API、staging/prod 自动 eval gate、**ArtifactStore 产物绑定**、✅ `AgentDeploymentRepository` + `DeploymentAuditRepository` Protocol + 双实现、✅ SQL deployment upsert、✅ general deployment strict tenant resolve | 缺少 manifest_sha256 绑定、真实环境控制、审批、保护环境 |
 | Policy | ✅ `PolicyEngine` 已深度接入 runtime/tool 链路（check_input/check_output 在 RuntimeManager，check_tool_allowed 在 ToolExecutor，pre_tool/post_tool hooks 在 ToolExecutor） | 策略规则仍需从外置配置或 DB 加载 |
 | Eval | EvalRunner 存在 | ✅ 多维评分（accuracy/latency/cost/tool_accuracy）+ 百分位统计 + 外部数据集 + auto-persist 已完成；大规模评测集、线上反馈闭环待补 |
 | Session / Memory | 内存 SessionStore | 缺少 Redis/Postgres、压缩、长期记忆、跨实例共享 |

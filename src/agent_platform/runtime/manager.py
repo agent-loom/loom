@@ -438,20 +438,21 @@ class RuntimeManager:
         """将当前 Agent 运行的结果和状态持久化记录到数据库或内存中。"""
         trace = response.trace or ResponseTrace()
         run = AgentRun(
-                run_id=run_id,
-                request_id=response.request_id,
-                session_id=response.session_id,
-                agent_id=request.agent_spec.agent_id,
-                agent_version=request.agent_spec.version,
-                route_reason=trace.route_reason,
-                runtime_backend=backend_name,
-                status=status,
-                latency_ms=latency_ms,
-                tool_calls=trace.tool_calls,
-                trace_events=trace_events or [],
-                error=response.error,
-                metadata={"debug": request.request.options.debug},
-            )
+            run_id=run_id,
+            request_id=response.request_id,
+            session_id=response.session_id,
+            tenant_id=request.request.context.tenant.tenant_id,
+            agent_id=request.agent_spec.agent_id,
+            agent_version=request.agent_spec.version,
+            route_reason=trace.route_reason,
+            runtime_backend=backend_name,
+            status=status,
+            latency_ms=latency_ms,
+            tool_calls=trace.tool_calls,
+            trace_events=trace_events or [],
+            error=response.error,
+            metadata={"debug": request.request.options.debug},
+        )
         TraceSanitizer.sanitize_run(run)
         await self.run_store.record(run)
 
@@ -463,9 +464,16 @@ class RuntimeManager:
         self,
         *,
         agent_id: str | None = None,
+        session_id: str | None = None,
+        tenant_id: str | None = None,
         limit: int = 100,
     ) -> list[AgentRun]:
-        return await self.run_store.list_runs(agent_id=agent_id, limit=limit)
+        return await self.run_store.list_runs(
+            agent_id=agent_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            limit=limit,
+        )
 
     async def get_run(self, run_id: str) -> AgentRun | None:
         return await self.run_store.get(run_id)

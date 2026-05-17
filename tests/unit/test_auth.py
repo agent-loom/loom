@@ -17,6 +17,7 @@ from agent_platform.api.auth import (
     require_role,
     require_scope,
 )
+from agent_platform.persistence.context import get_audit_context
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -74,6 +75,24 @@ def _make_test_app(auth: AuthIdentity | None = None) -> FastAPI:
     return app
 
 
+def _make_auth_middleware_app(key_store: InMemoryApiKeyStore) -> FastAPI:
+    from agent_platform.api.app import AuthMiddleware
+
+    app = FastAPI()
+
+    @app.get("/whoami")
+    async def whoami(request: Request):
+        auth = request.state.auth
+        audit = get_audit_context()
+        return {
+            "tenant_id": auth.tenant_id,
+            "audit_tenant_id": audit.tenant_id,
+        }
+
+    app.add_middleware(AuthMiddleware, key_store=key_store)
+    return app
+
+
 # ---------------------------------------------------------------------------
 # Tests — InMemoryApiKeyStore
 # ---------------------------------------------------------------------------
@@ -89,6 +108,27 @@ def test_in_memory_key_store_add_and_verify():
     assert result is not None
     assert result.key_id == "k-1"
     assert result.tenant_id == "tenant-a"
+
+
+def test_auth_middleware_preserves_persisted_key_tenant_binding():
+    store = InMemoryApiKeyStore()
+    store.add_key("tenant-key", _make_record(tenant_id="tenant-a", scopes=["read"]))
+    app = _make_auth_middleware_app(store)
+    client = TestClient(app)
+
+    response = client.get(
+        "/whoami",
+        headers={
+            "x-api-key": "tenant-key",
+            "x-tenant-id": "tenant-b",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "tenant_id": "tenant-a",
+        "audit_tenant_id": "tenant-a",
+    }
 
 
 def test_in_memory_key_store_wrong_key():

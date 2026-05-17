@@ -60,6 +60,7 @@ from agent_platform.integrations.plane.webhook import (
 from agent_platform.knowledge import KnowledgeService
 from agent_platform.observability.logging_config import setup_logging
 from agent_platform.observability.metrics import MetricsCollector
+from agent_platform.persistence.context import AuditContext, set_audit_context
 from agent_platform.persistence.memory import (
     InMemoryAgentRunRepository,
     InMemoryAgentSessionRepository,
@@ -93,6 +94,7 @@ _SCOPE_ADMIN = require_scope("admin")
 _SCOPE_EVAL = require_scope("eval")
 _SCOPE_REGISTER = require_scope("register")
 _SCOPE_ROLLBACK = require_scope("rollback")
+_SCOPE_READ = require_scope("read")
 _ROLE_ADMIN = require_role("platform_admin")
 
 
@@ -200,12 +202,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         if not self.api_key and self.key_store is None:
-            request.state.auth = AuthIdentity(
+            self._set_auth_context(request, AuthIdentity(
                 subject="anonymous",
                 tenant_id=request.headers.get("x-tenant-id", "default"),
                 role="platform_admin",
                 scopes=self._ALL_SCOPES,
-            )
+            ))
             return await call_next(request)
 
         token = None
@@ -228,22 +230,22 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         record = await self._verify_token(token)
         if record is not None:
-            request.state.auth = AuthIdentity(
+            self._set_auth_context(request, AuthIdentity(
                 subject=record.created_by,
-                tenant_id=request.headers.get("x-tenant-id", record.tenant_id),
+                tenant_id=record.tenant_id,
                 role=record.role,
                 scopes=record.scopes,
                 key_id=record.key_id,
-            )
+            ))
             return await call_next(request)
 
         if self.api_key and token == self.api_key:
-            request.state.auth = AuthIdentity(
+            self._set_auth_context(request, AuthIdentity(
                 subject="api-key-user",
                 tenant_id=request.headers.get("x-tenant-id", "default"),
                 role="platform_admin",
                 scopes=self._ALL_SCOPES,
-            )
+            ))
             return await call_next(request)
 
         return JSONResponse(
@@ -262,6 +264,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if hasattr(self.key_store, "verify_async"):
             return await self.key_store.verify_async(token)
         return self.key_store.verify(token)
+
+    @staticmethod
+    def _set_auth_context(request: Request, identity: AuthIdentity) -> None:
+        request.state.auth = identity
+        request.state.tenant_id = identity.tenant_id
+        set_audit_context(
+            AuditContext(
+                request_id=getattr(request.state, "request_id", None),
+                actor=identity.subject,
+                tenant_id=identity.tenant_id,
+            )
+        )
 
 
 def _validate_startup_config(settings) -> None:
@@ -780,8 +794,12 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/api/v1/agent-runs")
-    async def list_agent_runs() -> list[dict]:
-        return [run.model_dump(mode="json") for run in await runtime_manager.run_store.list_runs()]
+    async def list_agent_runs(
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> list[dict]:
+        tenant_id = None if _auth.role == "platform_admin" else _auth.tenant_id
+        runs = await runtime_manager.list_runs(tenant_id=tenant_id)
+        return [run.model_dump(mode="json") for run in runs]
 
     @app.get("/api/v1/agent-deployments")
     async def list_agent_deployments() -> list[dict]:
