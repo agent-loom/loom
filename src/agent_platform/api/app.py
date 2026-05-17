@@ -7,7 +7,16 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Request, Response, WebSocket
+from fastapi import (
+    BackgroundTasks,
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    WebSocket,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -390,8 +399,8 @@ async def _app_lifespan(app: FastAPI):
             db_engine = resource
             break
     if db_engine and settings and "sqlite" in settings.database_url:
-        from agent_platform.storage.base import Base
         import agent_platform.persistence.tables  # noqa: F401 — 确保所有表定义已加载
+        from agent_platform.storage.base import Base
         async with db_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         logger.info("SQLite 自动建表完成")
@@ -403,7 +412,7 @@ async def _app_lifespan(app: FastAPI):
     import asyncio as _asyncio
 
     _dlq_task: _asyncio.Task | None = None
-    retry_svc = getattr(app.state, "webhook_retry_service", None) if hasattr(app.state, "webhook_retry_service") else None
+    retry_svc = getattr(app.state, "webhook_retry_service", None)
     if not retry_svc:
         for _admin_deps_attr in ("admin_deps",):
             _ad = getattr(app.state, _admin_deps_attr, None)

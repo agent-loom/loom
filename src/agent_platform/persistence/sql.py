@@ -27,9 +27,9 @@ from agent_platform.persistence.tables import (
     AgentRunRow,
     AgentSessionRow,
     ApiKeyRow,
+    CodingJobRow,
     DeploymentAuditEventRow,
     EvalRunRow,
-    CodingJobRow,
     RoutingDecisionRow,
     WebhookDeliveryRow,
 )
