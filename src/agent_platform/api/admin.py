@@ -338,51 +338,6 @@ async def list_eval_runs(
     return await deps.eval_repo.list_runs(agent_id=agent_id, limit=limit)
 
 
-@router.get("/evals/{agent_id}/latest")
-async def get_latest_eval(
-    agent_id: str,
-    request: Request,
-) -> dict[str, Any]:
-    """Get the most recent eval run for an agent."""
-    deps = _deps(request)
-    if deps.eval_repo is None:
-        raise HTTPException(status_code=501, detail="eval repo not configured")
-    result = await deps.eval_repo.get_latest(agent_id)
-    if result is None:
-        raise HTTPException(
-            status_code=404, detail=f"no eval runs found for {agent_id}",
-        )
-    return result
-
-
-@router.post("/evals/{agent_id}/run")
-async def trigger_eval_run(
-    agent_id: str,
-    request: Request,
-) -> dict[str, Any]:
-    """按需触发指定 agent 的评测运行并返回报告。"""
-    deps = _deps(request)
-
-    # 检查 eval_runner 是否可用
-    if deps.eval_runner is None:
-        raise HTTPException(
-            status_code=501,
-            detail="eval runner not configured",
-        )
-
-    # 从注册中心获取 agent spec
-    try:
-        spec = await deps.registry.get(agent_id)
-    except AgentNotFoundError as exc:
-        raise HTTPException(
-            status_code=404, detail=str(exc),
-        ) from exc
-
-    # 运行评测
-    report = await deps.eval_runner.run_agent(spec)
-    return report.model_dump(mode="json")
-
-
 @router.get("/evals/compare")
 async def compare_eval_runs(
     request: Request,
@@ -453,6 +408,51 @@ async def compare_eval_runs(
         "new_failures": new_failures,
         "fixed": fixed,
     }
+
+
+@router.get("/evals/{agent_id}/latest")
+async def get_latest_eval(
+    agent_id: str,
+    request: Request,
+) -> dict[str, Any]:
+    """Get the most recent eval run for an agent."""
+    deps = _deps(request)
+    if deps.eval_repo is None:
+        raise HTTPException(status_code=501, detail="eval repo not configured")
+    result = await deps.eval_repo.get_latest(agent_id)
+    if result is None:
+        raise HTTPException(
+            status_code=404, detail=f"no eval runs found for {agent_id}",
+        )
+    return result
+
+
+@router.post("/evals/{agent_id}/run")
+async def trigger_eval_run(
+    agent_id: str,
+    request: Request,
+) -> dict[str, Any]:
+    """按需触发指定 agent 的评测运行并返回报告。"""
+    deps = _deps(request)
+
+    # 检查 eval_runner 是否可用
+    if deps.eval_runner is None:
+        raise HTTPException(
+            status_code=501,
+            detail="eval runner not configured",
+        )
+
+    # 从注册中心获取 agent spec
+    try:
+        spec = await deps.registry.get(agent_id)
+    except AgentNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail=str(exc),
+        ) from exc
+
+    # 运行评测
+    report = await deps.eval_runner.run_agent(spec)
+    return report.model_dump(mode="json")
 
 
 # ---------------------------------------------------------------------------

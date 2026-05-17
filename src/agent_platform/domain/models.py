@@ -253,6 +253,28 @@ class ToolCallTrace(BaseModel):
     error: str | None = None
 
 
+class TraceEventType(StrEnum):
+    """结构化 trace 事件类型。"""
+
+    ROUTE_DECISION = "route_decision"
+    CONTEXT_BUILD = "context_build"
+    POLICY_CHECK = "policy_check"
+    MODEL_CALL = "model_call"
+    TOOL_CALL = "tool_call"
+    RESPONSE_BUILD = "response_build"
+    ERROR = "error"
+    CUSTOM = "custom"
+
+
+class TraceEvent(BaseModel):
+    """运行管线中的结构化追踪事件。"""
+
+    type: TraceEventType
+    timestamp: datetime = Field(default_factory=_utc_now)
+    duration_ms: int | None = None
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
 class ResponseTrace(BaseModel):
     """响应级追踪信息，用于可观测性。"""
 
@@ -503,6 +525,7 @@ class AgentRun(BaseModel):
     status: AgentRunStatus
     latency_ms: int
     tool_calls: list[ToolCallTrace] = Field(default_factory=list)
+    trace_events: list[TraceEvent] = Field(default_factory=list)
     error: AgentError | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 

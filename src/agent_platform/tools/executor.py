@@ -245,6 +245,10 @@ class ToolExecutor:
                     if self.metrics_collector:
                         try:
                             self.metrics_collector.record_tool_call(tool_name, "success")
+                            # 记录工具执行耗时（转换为秒）
+                            self.metrics_collector.record_tool_duration(
+                                tool_name, latency_ms / 1000.0,
+                            )
                         except Exception:
                             logger.exception("metrics record_tool_call failed")
                     instrument_tool_call(span, tool_name, "success")
@@ -297,6 +301,10 @@ class ToolExecutor:
             if self.metrics_collector:
                 try:
                     self.metrics_collector.record_tool_call(tool_name, "failed")
+                    # 记录工具执行耗时（转换为秒）
+                    self.metrics_collector.record_tool_duration(
+                        tool_name, latency_ms / 1000.0,
+                    )
                 except Exception:
                     logger.exception("metrics record_tool_call failed")
 

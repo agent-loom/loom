@@ -17,6 +17,8 @@ from agent_platform.domain.models import (
     ResponseTrace,
     RuntimeRequest,
     RuntimeResponse,
+    TraceEvent,
+    TraceEventType,
 )
 from agent_platform.observability.instrumentation import instrument_agent_run
 from agent_platform.observability.sanitizer import TraceSanitizer
@@ -93,6 +95,7 @@ class RuntimeManager:
         started = perf_counter()
         backend_name = request.agent_spec.manifest.runtime.backend
         agent_id = request.agent_spec.agent_id
+        trace_events: list[TraceEvent] = []
 
         lf_trace = None
         if self.langfuse_tracer:
@@ -117,6 +120,12 @@ class RuntimeManager:
                 span.record_exception(exc)
                 span.set_status("ERROR", str(exc))
                 raise ValueError(f"runtime backend not registered: {backend_name}") from exc
+
+            trace_events.append(TraceEvent(
+                type=TraceEventType.ROUTE_DECISION,
+                duration_ms=self._latency_ms(started),
+                data={"backend": backend_name, "route_reason": request.route_reason},
+            ))
 
             # 策略检查：校验输入 (check_input)
             span.add_event("policy_check")
@@ -171,6 +180,15 @@ class RuntimeManager:
             # Store on the request so backends can access it
             request.runtime_context = runtime_context
 
+            trace_events.append(TraceEvent(
+                type=TraceEventType.CONTEXT_BUILD,
+                duration_ms=self._latency_ms(started),
+                data={
+                    "has_session": session is not None,
+                    "knowledge_snippets": len(request.knowledge_context or []),
+                },
+            ))
+
             timeout_ms = request.agent_spec.manifest.runtime.timeout_ms
             timeout_sec = timeout_ms / 1000.0
 
@@ -202,6 +220,8 @@ class RuntimeManager:
                 if self.metrics_collector:
                     try:
                         self.metrics_collector.record_request(request.agent_spec.agent_id, "failed")
+                        # 记录错误指标
+                        self.metrics_collector.record_error(agent_id)
                     except Exception:
                         logger.exception("metrics record_request failed")
                 return await self._build_error_response(
@@ -226,6 +246,8 @@ class RuntimeManager:
                 if self.metrics_collector:
                     try:
                         self.metrics_collector.record_request(request.agent_spec.agent_id, "failed")
+                        # 记录错误指标
+                        self.metrics_collector.record_error(agent_id)
                     except Exception:
                         logger.exception("metrics record_request failed")
                 return await self._build_error_response(
@@ -240,6 +262,17 @@ class RuntimeManager:
                 trace.traffic_bucket = request.traffic_bucket
             trace.latency_ms = latency_ms
             response.response.trace = trace
+
+            trace_events.append(TraceEvent(
+                type=TraceEventType.MODEL_CALL,
+                duration_ms=latency_ms,
+                data={
+                    "model": trace.model,
+                    "prompt_tokens": trace.prompt_tokens,
+                    "completion_tokens": trace.completion_tokens,
+                    "cost_usd": trace.estimated_cost_usd,
+                },
+            ))
 
             # 策略检查：校验输出 (check_output)
             if self.policy_engine:
@@ -285,6 +318,7 @@ class RuntimeManager:
                 status=AgentRunStatus.SUCCEEDED,
                 latency_ms=latency_ms,
                 response=response.response,
+                trace_events=trace_events,
             )
 
             if self.langfuse_tracer and lf_trace:
@@ -396,6 +430,7 @@ class RuntimeManager:
         status: AgentRunStatus,
         latency_ms: int,
         response: AgentResponse,
+        trace_events: list[TraceEvent] | None = None,
     ) -> None:
         """将当前 Agent 运行的结果和状态持久化记录到数据库或内存中。"""
         trace = response.trace or ResponseTrace()
@@ -410,6 +445,7 @@ class RuntimeManager:
                 status=status,
                 latency_ms=latency_ms,
                 tool_calls=trace.tool_calls,
+                trace_events=trace_events or [],
                 error=response.error,
                 metadata={"debug": request.request.options.debug},
             )
