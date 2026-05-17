@@ -213,10 +213,24 @@ class GitLabEventHandler:
     def _extract_plane_info_from_description(
         attrs: dict[str, Any],
     ) -> tuple[str, str] | None:
-        """Extract Plane IDs from MR description metadata comments."""
+        """Extract Plane IDs from MR description metadata comments.
+
+        支持两种格式:
+        1. HTML 注释: <!-- devflow:plane_project_id=X plane_work_item_id=Y -->
+        2. 纯文本: PLANE_PROJECT_ID: X ... PLANE_WORK_ITEM_ID: Y
+        """
         description = attrs.get("description", "") or ""
         import re
 
+        # 格式 1: HTML 注释（orchestrator 自动嵌入）
+        match = re.search(
+            r"devflow:plane_project_id=(\S+)\s+plane_work_item_id=(\S+)",
+            description,
+        )
+        if match:
+            return match.group(1), match.group(2)
+
+        # 格式 2: 纯文本标签（向后兼容）
         match = re.search(
             r"PLANE_PROJECT_ID:\s*(\S+).*?PLANE_WORK_ITEM_ID:\s*(\S+)",
             description,
