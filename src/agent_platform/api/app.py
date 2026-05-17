@@ -642,6 +642,7 @@ def create_app() -> FastAPI:
         tool_executor=tool_executor,
         knowledge_service=app_knowledge_service,
         langfuse_tracer=langfuse_tracer,
+        approval_gate=approval_gate,
     )
     eval_runner = EvalRunner(runtime_manager, eval_repo=eval_repo)
     task_pack_generator = TaskPackGenerator()

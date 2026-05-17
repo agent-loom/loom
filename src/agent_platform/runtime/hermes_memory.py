@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import anyio.from_thread
@@ -169,36 +170,34 @@ class HermesMemoryBridge:
     """高层记忆桥接器，在 HermesRuntimeBackend.run() 前后自动加载/保存记忆。
 
     在 run() 前调用 prepare() 加载已有记忆，run() 后调用 commit() 保存新消息。
-    支持 max_history 参数限制历史消息数量。
+    支持 max_history 参数限制历史消息数量，支持 ttl_seconds 过期清理。
     """
+
+    DEFAULT_TTL_SECONDS = 3600
 
     def __init__(
         self,
         provider: PlatformMemoryProvider,
         max_history: int = 50,
+        ttl_seconds: int | None = None,
     ) -> None:
-        """初始化 HermesMemoryBridge。
-
-        Args:
-            provider: PlatformMemoryProvider 实例
-            max_history: 最大历史消息数量，默认 50
-        """
         self._provider = provider
         self._max_history = max_history
+        self._ttl_seconds = ttl_seconds if ttl_seconds is not None else self.DEFAULT_TTL_SECONDS
 
     async def prepare(self, session_id: str) -> list[dict[str, str]]:
         """加载已有记忆，返回 Hermes 格式的消息历史。
 
-        自动截断超出 max_history 限制的旧消息。
-
-        Args:
-            session_id: 会话 ID
-
-        Returns:
-            Hermes 格式的消息列表（已截断）
+        当会话超过 TTL 时自动清空历史，避免无限增长。
         """
+        if self._ttl_seconds > 0:
+            expired = await self._check_ttl(session_id)
+            if expired:
+                logger.info("会话 %s 已超过 TTL（%ds），清空历史", session_id, self._ttl_seconds)
+                await self._provider.clear_async(session_id)
+                return []
+
         messages = await self._provider.load_async(session_id)
-        # 截断超出 max_history 的旧消息
         if len(messages) > self._max_history:
             messages = messages[-self._max_history :]
         return messages
@@ -206,13 +205,23 @@ class HermesMemoryBridge:
     async def commit(
         self, session_id: str, new_messages: list[dict[str, str]]
     ) -> None:
-        """保存新消息到 SessionStore，自动截断超出限制的旧消息。
-
-        Args:
-            session_id: 会话 ID
-            new_messages: 新的完整消息列表
-        """
-        # 截断超出 max_history 的旧消息
+        """保存新消息到 SessionStore，自动截断超出限制的旧消息。"""
         if len(new_messages) > self._max_history:
             new_messages = new_messages[-self._max_history :]
         await self._provider.save_async(session_id, new_messages)
+
+    async def _check_ttl(self, session_id: str) -> bool:
+        """检查会话是否超过 TTL。"""
+        try:
+            session = await self._provider._store.load(session_id)
+            if session is None:
+                return False
+            now = datetime.now(UTC)
+            updated = session.updated_at
+            if updated.tzinfo is None:
+                updated = updated.replace(tzinfo=UTC)
+            age = now - updated
+            return age > timedelta(seconds=self._ttl_seconds)
+        except Exception:
+            logger.debug("TTL 检查失败，跳过", exc_info=True)
+            return False

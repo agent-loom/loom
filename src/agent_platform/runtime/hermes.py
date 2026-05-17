@@ -507,7 +507,40 @@ class HermesRuntimeBackend:
             all_messages = prior_messages + [user_msg, assistant_msg]
             await memory_bridge.commit(session_id, all_messages)
 
+        # state_snapshot 持久化：保存 Hermes 运行轨迹到会话快照
+        if self.session_store and session_id:
+            await self._save_state_snapshot(session_id, agent_id, result)
+
         return result
+
+    async def _save_state_snapshot(
+        self,
+        session_id: str,
+        agent_id: str,
+        result: RuntimeResponse,
+    ) -> None:
+        """将 Hermes 运行轨迹保存到会话 state_snapshot。"""
+        try:
+            from agent_platform.domain.models import AgentSession
+
+            session = await self.session_store.load(session_id)
+            if session is None:
+                session = AgentSession(session_id=session_id, agent_id=agent_id)
+
+            trace = result.response.trace
+            snapshot: dict[str, Any] = {
+                "last_run_id": trace.run_id if trace else None,
+                "last_model": trace.model if trace else None,
+                "last_prompt_tokens": trace.prompt_tokens if trace else 0,
+                "last_completion_tokens": trace.completion_tokens if trace else 0,
+                "last_total_tokens": trace.total_tokens if trace else 0,
+                "last_tool_calls": len(trace.tool_calls) if trace and trace.tool_calls else 0,
+                "runtime_backend": "hermes",
+            }
+            session.state_snapshot = snapshot
+            await self.session_store.save(session)
+        except Exception:
+            logger.debug("state_snapshot 持久化失败", exc_info=True)
 
     # Spike A path --------------------------------------------------------------
 

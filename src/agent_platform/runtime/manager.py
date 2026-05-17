@@ -35,6 +35,7 @@ from agent_platform.runtime.hermes import HermesRuntimeBackend
 from agent_platform.runtime.langgraph import LangGraphRuntimeBackend
 from agent_platform.runtime.model_gateway import ModelGateway
 from agent_platform.runtime.native import NativeRuntimeBackend
+from agent_platform.tools.approval import ApprovalGate
 from agent_platform.tools.executor import ToolExecutor
 
 logger = logging.getLogger(__name__)
@@ -58,12 +59,15 @@ class RuntimeManager:
         tool_executor: ToolExecutor | None = None,
         knowledge_service: Any | None = None,
         langfuse_tracer: Any | None = None,
+        approval_gate: ApprovalGate | None = None,
     ):
         self._backends = {
             NativeRuntimeBackend.name: NativeRuntimeBackend(tool_executor=tool_executor),
             HermesRuntimeBackend.name: HermesRuntimeBackend(
                 model_gateway=model_gateway,
                 tool_executor=tool_executor,
+                session_store=session_store,
+                approval_gate=approval_gate,
             ),
             LangGraphRuntimeBackend.name: LangGraphRuntimeBackend(
                 tool_executor=tool_executor,
