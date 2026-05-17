@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from agent_platform.api.tenant_quota import TenantQuotaManager
     from agent_platform.observability.metrics import MetricsCollector
     from agent_platform.persistence.repositories import EvalRunRepository, ToolAuditRepository
     from agent_platform.persistence.sql import SqlApiKeyStore
@@ -17,7 +18,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class AdminDeps:
-    """Holds references to the core components needed by admin endpoints."""
+    """Admin API 端点所需的核心组件容器。"""
 
     registry: AgentRegistry
     runtime_manager: RuntimeManager
@@ -27,3 +28,4 @@ class AdminDeps:
     key_store: SqlApiKeyStore | None = None
     eval_repo: EvalRunRepository | None = None
     tool_audit_repo: ToolAuditRepository | None = None
+    quota_manager: TenantQuotaManager | None = None

@@ -497,6 +497,11 @@ def create_app() -> FastAPI:
     app.state.db_session_factory = db_session_factory
     app.state.approval_gate = approval_gate
 
+    # ── 多租户配额管理 ──
+    from agent_platform.api.tenant_quota import TenantQuotaManager
+    quota_manager = TenantQuotaManager()
+    app.state.quota_manager = quota_manager
+
     app.state.admin_deps = AdminDeps(
         registry=registry,
         runtime_manager=runtime_manager,
@@ -506,6 +511,7 @@ def create_app() -> FastAPI:
         key_store=key_store,
         eval_repo=eval_repo,
         tool_audit_repo=tool_audit_repo,
+        quota_manager=quota_manager,
     )
     app.include_router(
         admin_router,

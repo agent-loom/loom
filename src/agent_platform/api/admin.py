@@ -1,4 +1,4 @@
-"""Admin API router — agent, session, run, and tool management endpoints."""
+"""Admin API 路由 — agent、会话、运行、工具、配额管理端点。"""
 
 from __future__ import annotations
 
@@ -355,3 +355,124 @@ async def list_tool_audit_events(
         status=status,
         limit=limit,
     )
+
+
+# ---------------------------------------------------------------------------
+# 租户配额管理
+# ---------------------------------------------------------------------------
+
+
+class SetQuotaRequest(BaseModel):
+    """设置租户配额的请求体。"""
+    tenant_id: str
+    max_requests_per_day: int = 10000
+    max_tokens_per_day: int = 5_000_000
+    max_storage_mb: int = 1024
+    max_agents: int = 50
+
+
+@router.get("/quotas")
+async def list_quotas(request: Request) -> list[dict[str, Any]]:
+    """列出所有已设置的租户配额。"""
+    deps = _deps(request)
+    if deps.quota_manager is None:
+        raise HTTPException(status_code=501, detail="quota manager not configured")
+    return [q.model_dump() for q in deps.quota_manager.list_quotas()]
+
+
+@router.post("/quotas")
+async def set_quota(body: SetQuotaRequest, request: Request) -> dict[str, Any]:
+    """设置或更新租户配额。"""
+    deps = _deps(request)
+    if deps.quota_manager is None:
+        raise HTTPException(status_code=501, detail="quota manager not configured")
+    from agent_platform.api.tenant_quota import TenantQuota
+    quota = TenantQuota(
+        tenant_id=body.tenant_id,
+        max_requests_per_day=body.max_requests_per_day,
+        max_tokens_per_day=body.max_tokens_per_day,
+        max_storage_mb=body.max_storage_mb,
+        max_agents=body.max_agents,
+    )
+    deps.quota_manager.set_quota(quota)
+    return quota.model_dump()
+
+
+@router.get("/quotas/{tenant_id}")
+async def get_tenant_quota_report(
+    tenant_id: str, request: Request,
+) -> dict[str, Any]:
+    """获取租户的配额使用报告，含利用率百分比。"""
+    deps = _deps(request)
+    if deps.quota_manager is None:
+        raise HTTPException(status_code=501, detail="quota manager not configured")
+    return deps.quota_manager.get_tenant_report(tenant_id)
+
+
+@router.get("/quotas/{tenant_id}/check")
+async def check_tenant_quota(
+    tenant_id: str, request: Request,
+) -> dict[str, Any]:
+    """检查租户配额是否存在违规。"""
+    deps = _deps(request)
+    if deps.quota_manager is None:
+        raise HTTPException(status_code=501, detail="quota manager not configured")
+    violations = deps.quota_manager.check_all(tenant_id)
+    return {
+        "tenant_id": tenant_id,
+        "ok": len(violations) == 0,
+        "violations": violations,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 制品管理
+# ---------------------------------------------------------------------------
+
+
+@router.get("/artifacts")
+async def list_artifacts(
+    request: Request,
+    agent_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """列出所有制品，可按 agent_id 过滤。"""
+    deps = _deps(request)
+    artifact_store = getattr(request.app.state, "artifact_store", None)
+    if artifact_store is None:
+        raise HTTPException(status_code=501, detail="artifact store not configured")
+    artifacts = artifact_store.list_artifacts(agent_id=agent_id)
+    return [a.model_dump(mode="json") for a in artifacts]
+
+
+@router.get("/artifacts/{artifact_id}")
+async def get_artifact_metadata(
+    artifact_id: str, request: Request,
+) -> dict[str, Any]:
+    """获取制品元数据。"""
+    artifact_store = getattr(request.app.state, "artifact_store", None)
+    if artifact_store is None:
+        raise HTTPException(status_code=501, detail="artifact store not configured")
+    metadata = artifact_store.get_metadata(artifact_id)
+    if metadata is None:
+        raise HTTPException(status_code=404, detail=f"artifact not found: {artifact_id}")
+    return metadata.model_dump(mode="json")
+
+
+@router.get("/artifacts/{artifact_id}/verify")
+async def verify_artifact(
+    artifact_id: str, request: Request,
+) -> dict[str, Any]:
+    """校验制品的 SHA-256 完整性。"""
+    artifact_store = getattr(request.app.state, "artifact_store", None)
+    if artifact_store is None:
+        raise HTTPException(status_code=501, detail="artifact store not configured")
+    metadata = artifact_store.get_metadata(artifact_id)
+    if metadata is None:
+        raise HTTPException(status_code=404, detail=f"artifact not found: {artifact_id}")
+    valid = artifact_store.verify_checksum(artifact_id)
+    return {
+        "artifact_id": artifact_id,
+        "checksum_sha256": metadata.checksum_sha256,
+        "manifest_sha256": metadata.manifest_sha256,
+        "valid": valid,
+    }
