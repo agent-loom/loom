@@ -981,6 +981,52 @@ result = json.loads(result_str)
 
 `active_secrets` 是本次请求中通过 `SecretResolver.resolve_config()` 解析过的 secret 明文列表，只在请求生命周期内存活，请求结束后销毁。
 
+### 9.5 生产反馈洞察的安全边界
+
+Runtime Feedback Intelligence 会读取生产运行数据并生成 Plane 候选需求，因此必须比普通日志分析更严格。该链路只能消费脱敏、聚合后的 Insight Context，不允许直接把原始用户输入、工具入参、工具输出或完整 trace 交给 Hermes。
+
+数据进入 Hermes Insight Agent 前必须经过：
+
+1. `TraceSanitizer` 脱敏。
+2. 租户过滤，默认只在单租户内分析。
+3. 聚合和去重，只保留问题摘要、统计和证据引用。
+4. prompt injection 处理，用户原文只能作为 data，不作为指令。
+5. 最小化证据，只保留 `run_id`、时间窗口、错误类型、工具名和脱敏摘要。
+
+禁止写入 Plane 的内容：
+
+| 类型 | 原因 |
+| --- | --- |
+| 原始用户输入全文 | 可能包含 PII、商业信息或 prompt injection |
+| 原始工具入参 / 输出 | 可能包含业务数据或 secret |
+| 未脱敏 trace payload | 可能泄露租户、门店、用户或供应链数据 |
+| access token / API key / secret 引用解析值 | 高风险凭据泄露 |
+| 跨租户明细样本 | 违反租户隔离 |
+
+允许写入 Plane 的内容：
+
+| 类型 | 示例 |
+| --- | --- |
+| 脱敏证据引用 | `run_abc123` |
+| 聚合统计 | `affected_sessions=42` |
+| 匿名跨租户统计 | `affected_tenants=3` |
+| 问题摘要 | `库存查询场景 fallback 增多` |
+| 建议验收标准 | `新增库存查询 eval case` |
+
+跨租户策略：
+
+1. 默认禁止跨租户合并明细。
+2. 平台管理员可启用匿名跨租户聚合，但输出不得包含 tenant 名称、门店、用户、原始 query。
+3. Plane Work Item 默认归属到触发租户或平台运维项目；跨租户问题只能进入平台级项目。
+4. 非 `platform_admin` 不能查看其他租户的反馈 proposal。
+
+自动化边界：
+
+1. 生产反馈只能创建 `Backlog` / `Clarifying` 候选需求。
+2. 不允许自动把状态推进到 `Ready for AI Dev`。
+3. 不允许直接触发 Codex / Claude Code / CodingAgentRunner。
+4. 高风险 proposal 必须人工 review 后才能进入 DevFlow。
+
 ---
 
 ## 10. 高风险工具 Human-in-the-Loop

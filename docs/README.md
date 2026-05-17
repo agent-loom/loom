@@ -20,8 +20,8 @@
 
 - [多 Agent 平台设计](02-architecture/agent-platform-design.md)
 - [Agent Platform 核心功能设计](02-architecture/agent-platform-core-design.md)
-- [AI + 人 + Vibe Coding 研发一体化平台设计](02-architecture/ai-human-vibecoding-rd-platform.md)
-- [Hermes Runtime 能力利用设计](03-runtime/hermes-runtime.md)
+- [AI + 人 + Vibe Coding 研发一体化平台设计](02-architecture/ai-human-vibecoding-rd-platform.md)：生产反馈洞察与需求发现流程的总体入口
+- [Hermes Runtime 能力利用设计](03-runtime/hermes-runtime.md)：Hermes RuntimeBackend 与 Hermes Insight Agent 的边界
 - [GitLab 集成设计](04-devflow/gitlab.md)
 - [Plane 集成设计](04-devflow/plane.md)：Plane / SCM / Coding Runner / Hermes 端到端交互流程的主入口
 - [Plane API / MCP 文档获取方案](99-reference/plane-docs-acquisition.md)
@@ -43,6 +43,7 @@
 2. 再确认 `implementation-gap.md`，明确当前实现和目标设计之间的真实差距。
 3. 如果改协议或 package，确认 `AgentRequest / AgentResponse` 和 `AgentManifest v1`。
 4. 如果改研发自动化，确认 `DevFlow Task Pack`、Plane 和 GitLab 设计；Plane / GitLab / GitHub / Hermes 交互流程以 `04-devflow/plane.md` 的 `2.1` 节为准。
-5. 如果新增重大技术路线，新增 ADR。
+5. 如果改生产反馈洞察、自动提需求、日志归因或 Plane 候选需求，确认 `02-architecture/ai-human-vibecoding-rd-platform.md` 的 `5.3` 节、`04-devflow/plane.md` 的 `2.2` 节、`03-runtime/hermes-runtime.md` 的 `13.4` 节和 `05-production/security-tenant-policy-design.md` 的 `9.5` 节。
+6. 如果新增重大技术路线，新增 ADR。
 
 正式开发开始后，新增重大技术决策必须追加 ADR；修改接口、manifest 或 task pack 必须同步更新对应契约文档。

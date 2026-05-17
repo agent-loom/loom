@@ -347,6 +347,75 @@ class ScmAdapter(Protocol):
 | Hermes RuntimeBackend | 已实现轻量后端 | `src/agent_platform/runtime/hermes.py` |
 | Hermes 官方 runtime/planner/memory/event stream | 未完整接入 | 见 `03-runtime/hermes-runtime.md` |
 
+## 2.2 生产反馈到 Plane 候选需求
+
+除了人工创建需求，平台还应支持从生产运行数据中自动发现 bug、需求、知识缺口和优化机会。该链路由 Runtime Feedback Intelligence 负责，Plane 只接收结构化、脱敏、带证据的候选需求。
+
+```text
+AgentRun / Trace / ToolCall / User Feedback / Eval Regression
+  -> Sanitizer + Tenant Filter
+  -> FeedbackMiner 聚合与去重
+  -> Hermes Insight Agent 归因和生成 RequirementProposal
+  -> ProposalGate 阈值判断
+  -> Plane Backlog / Clarifying Work Item
+  -> 人确认
+  -> Ready for AI Dev
+```
+
+默认 Plane 落点：
+
+| 条件 | Plane 状态 | 说明 |
+| --- | --- | --- |
+| 一般候选需求 | `Backlog` | 需要产品或研发 triage |
+| 信息不完整但有价值 | `Clarifying` | 需要 Hermes 或人继续澄清 |
+| 高置信、低风险、证据充分 | `Designing` | 可进入方案设计，但仍需人确认 |
+| 任意生产反馈 | 不直接进入 `Ready for AI Dev` | 避免自动触发代码修改 |
+
+建议新增 Work Item 字段：
+
+| Property | 类型 | 示例 | 说明 |
+| --- | --- | --- | --- |
+| `source` | dropdown | `runtime_feedback` | 需求来源 |
+| `agent_id` | text / dropdown | `promo_recommendation` | 涉及的业务 Agent |
+| `proposal_type` | dropdown | `bug` / `feature` / `optimization` / `knowledge_gap` / `eval_gap` | 候选类型 |
+| `severity` | dropdown | `low` / `medium` / `high` / `critical` | 影响等级 |
+| `confidence` | number | `0.82` | Hermes Insight Agent 判断置信度 |
+| `risk_level` | dropdown | `low` / `medium` / `high` | 自动化开发风险 |
+| `affected_sessions` | number | `42` | 影响会话数 |
+| `affected_tenants` | number | `1` | 影响租户数；跨租户时只能保存匿名统计 |
+| `evidence_run_ids` | text | `run_a,run_b` | 脱敏后的证据引用 |
+| `suggested_task_type` | dropdown | `agent:change` | 建议 DevFlow 类型 |
+| `suggested_eval_cases` | long text | YAML / JSON 草案 | 建议补充的 eval |
+
+Plane 评论模板建议：
+
+```markdown
+## Runtime Feedback Proposal
+
+- Type: bug
+- Agent: promo_recommendation
+- Severity: medium
+- Confidence: 0.82
+- Affected sessions: 42
+- Evidence runs: run_xxx, run_yyy
+
+### Summary
+促销推荐 Agent 多次在库存查询场景 fallback。
+
+### Suggested acceptance
+- 能识别库存相关查询
+- 库存缺失时返回可解释 fallback
+- 新增 eval case 覆盖库存查询
+```
+
+ProposalGate 默认规则：
+
+1. `confidence < 0.7` 只记录指标，不创建 Plane。
+2. 单一孤立失败默认不创建 Plane，除非 `severity=critical`。
+3. `risk_level=high` 只能进入 `Backlog`，不得自动推进。
+4. 同一 `agent_id + proposal_type + title fingerprint` 在窗口期内去重。
+5. 每个 agent 每日自动创建候选需求数量必须限额。
+
 ## 3. Plane 项目建议
 
 建议先建 3 个 Project：

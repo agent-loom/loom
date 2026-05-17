@@ -560,6 +560,40 @@ NativeRuntime
  -> Hermes-compatible Tool Adapter
 ```
 
+### 13.4 Hermes 作为生产反馈洞察 Agent
+
+生产侧还可以利用 Hermes 的对话、归纳和工具循环能力，做 Runtime Feedback Intelligence：从脱敏后的运行反馈中判断是否需要生成 bug、需求、知识补齐或体验优化候选。
+
+推荐链路：
+
+```text
+AgentRun / Trace / ToolCall / User Feedback / Eval Regression
+ -> Sanitizer / Tenant Filter
+ -> FeedbackMiner 聚合
+ -> Hermes Insight Agent
+ -> RequirementProposal
+ -> ProposalGate
+ -> Plane Backlog / Clarifying
+```
+
+Hermes 在该链路中的职责：
+
+| 能力 | 说明 |
+| --- | --- |
+| 问题归因 | 从多条失败、fallback、低置信回答中归纳共同原因 |
+| 类型判断 | 区分 `bug`、`feature`、`optimization`、`knowledge_gap`、`eval_gap` |
+| 需求生成 | 生成标题、问题摘要、影响范围、验收标准和 eval case 草案 |
+| 证据整理 | 只引用脱敏后的 run_id、摘要和统计，不输出原始敏感内容 |
+| 提交建议 | 生成 `RequirementProposal`，交给 `ProposalGate` 判断是否写入 Plane |
+
+硬边界：
+
+1. Hermes 不直接读取未脱敏原始日志。
+2. Hermes 不直接调用 Codex / Claude Code 改代码。
+3. Hermes 不直接把 Plane 状态改成 `Ready for AI Dev`。
+4. Hermes 不跨租户合并明细数据；跨租户只能看匿名聚合统计。
+5. Hermes 生成的是候选需求，不是正式开发任务。
+
 ## 14. 风险与控制
 
 | 风险 | 控制 |
@@ -572,6 +606,8 @@ NativeRuntime
 | 密钥绕过平台 | 生产收敛到 ModelGateway / Secret Manager |
 | Memory 泄露租户数据 | session namespace + tenant isolation + 默认关闭长期 memory |
 | run_agent.py 过大难改 | 不改 core，只通过公开接口和轻 patch |
+| 生产反馈洞察误判 | ProposalGate + 人审 + 证据链，不直接 Ready for AI Dev |
+| 日志 prompt injection | 原始用户输入只作为 data，先脱敏聚合，再交给 Hermes |
 
 ## 15. Hermes 接入顺序
 

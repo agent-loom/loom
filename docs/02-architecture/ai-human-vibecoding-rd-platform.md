@@ -287,6 +287,88 @@ flowchart LR
 4. 不能自行扩展高风险工具权限，例如支付、退款、批量改价。
 5. 不能把密钥写入代码、manifest、prompt 或文档。
 
+### 5.3 生产反馈驱动研发闭环
+
+生产侧业务 Agent 会持续产生请求、运行记录、trace、工具调用、错误、用户反馈和 eval 回归数据。这些数据可以反向驱动研发，但不应由生产 Agent 直接创建正式开发任务。推荐新增一条独立的 **Runtime Feedback Intelligence** 链路，把生产反馈转换为可审计的 Plane 候选需求。
+
+```mermaid
+flowchart LR
+    Runtime[Business Agent Runtime] --> Runs[AgentRun / Trace / ToolCall]
+    Runtime --> Feedback[User Feedback / Low Confidence / Fallback]
+    Runtime --> Eval[Eval Regression / Online Metrics]
+    Runs --> Sanitizer[Sanitizer / Tenant Filter]
+    Feedback --> Sanitizer
+    Eval --> Sanitizer
+    Sanitizer --> Aggregator[FeedbackMiner Aggregator]
+    Aggregator --> Insight[Hermes Insight Agent]
+    Insight --> Proposal[RequirementProposal]
+    Proposal --> Gate[ProposalGate]
+    Gate -->|通过| Plane[Plane Backlog / Clarifying]
+    Gate -->|不通过| Archive[Archive / Metrics Only]
+    Plane --> Human[Human Confirmation]
+    Human -->|确认| Ready[Ready for AI Dev]
+    Ready --> DevFlow[DevFlow / Coding Runner]
+```
+
+这条链路的目标不是“自动改代码”，而是发现高价值问题和机会：
+
+| 类型 | 信号来源 | Plane 产物 |
+| --- | --- | --- |
+| `bug` | 同类失败、异常、工具报错、fallback 激增 | 缺陷候选 |
+| `feature` | 多个用户重复表达未支持能力 | 新需求候选 |
+| `optimization` | 高延迟、低满意度、低置信回答 | 体验优化候选 |
+| `knowledge_gap` | 回答缺知识、检索无结果、重复澄清 | 知识补齐候选 |
+| `eval_gap` | 线上问题未被 eval 覆盖 | 评测集补充候选 |
+
+核心组件建议：
+
+| 组件 | 职责 |
+| --- | --- |
+| `FeedbackCollector` | 收集 run、trace、error、feedback、eval regression |
+| `FeedbackMiner` | 按 agent、tenant、tool、intent、error 聚合和去重 |
+| `Hermes Insight Agent` | 基于脱敏聚合上下文做归因、分类、生成需求草案 |
+| `RequirementProposal` | 结构化候选需求，包含证据、影响、置信度、验收建议 |
+| `ProposalGate` | 按阈值、风险、重复度、限额决定是否提交 Plane |
+| `PlanePublisher` | 创建 Plane Work Item 或追加评论 |
+
+推荐 `RequirementProposal` 结构：
+
+```json
+{
+  "type": "bug | feature | optimization | knowledge_gap | eval_gap",
+  "title": "促销推荐 Agent 多次无法回答库存相关问题",
+  "agent_id": "promo_recommendation",
+  "severity": "medium",
+  "confidence": 0.82,
+  "evidence": [
+    {
+      "run_id": "run_xxx",
+      "summary": "用户询问饮料库存时 Agent fallback"
+    }
+  ],
+  "impact": {
+    "affected_tenants": 1,
+    "affected_sessions": 42,
+    "first_seen": "2026-05-17T10:00:00Z",
+    "last_seen": "2026-05-17T14:00:00Z"
+  },
+  "suggested_task_type": "agent:change",
+  "suggested_acceptance": [
+    "能识别库存相关查询",
+    "库存缺失时返回可解释 fallback",
+    "新增 eval case 覆盖库存查询"
+  ]
+}
+```
+
+默认策略：
+
+1. Hermes 只处理脱敏、聚合后的 `Insight Context`，不直接读取未脱敏原始日志。
+2. 生产反馈默认创建 Plane `Backlog` 或 `Clarifying` Work Item，不直接进入 `Ready for AI Dev`。
+3. 人类确认后才进入现有 `Plane -> SCM -> Coding Runner -> Eval -> Deploy` 流程。
+4. 不逐条 run 调 Hermes，必须批处理、聚合、去重和限流。
+5. 默认不跨租户聚合；如确需跨租户分析，只输出匿名统计。
+
 ## 6. 新增业务 Agent 的自动化流程
 
 目标：新增业务 Agent 时，尽量从“写大量代码”变成“填写目标 + AI 生成草案 + 人审 + 自动测试 + 发布”。

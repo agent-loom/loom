@@ -55,7 +55,7 @@
 | `01-contracts/devflow-task-pack.md` | Baseline | AI coding agent 的结构化任务输入 |
 | `02-architecture/agent-platform-design.md` | Partially Implemented | 生产平台总体设计 |
 | `02-architecture/agent-platform-core-design.md` | Partially Implemented | 平台核心能力去业务化、动态工具加载、hook/policy 管线设计 |
-| `02-architecture/ai-human-vibecoding-rd-platform.md` | Partially Implemented | 生产 + 研发一体化总体设计 |
+| `02-architecture/ai-human-vibecoding-rd-platform.md` | Partially Implemented | 生产 + 研发一体化总体设计；包含生产反馈洞察到 Plane 候选需求的闭环 |
 | `implementation-gap.md` | Baseline | 当前实现和设计差距事实来源（持续更新） |
 
 ### S2. 生产化底座
@@ -75,7 +75,7 @@
 
 | 文档 | 状态 | 用途 |
 | --- | --- | --- |
-| `03-runtime/hermes-runtime.md` | Partially Implemented | Hermes 接入边界和能力映射；Spike B 已完成 SDK 工具桥接和 fallback；官方 runtime/planner/memory/event stream 待 S6 |
+| `03-runtime/hermes-runtime.md` | Partially Implemented | Hermes 接入边界和能力映射；包含 Hermes Insight Agent 在生产反馈洞察中的边界；官方 runtime/planner/memory/event stream 待 S6 |
 | `03-runtime/hermes-backend-spike.md` | Implemented | Spike A + Spike B 均已完成；工具桥接、结果规范化、fallback 路径全部实现 |
 
 ### S4. AI 研发闭环
@@ -83,7 +83,7 @@
 | 文档 | 状态 | 用途 |
 | --- | --- | --- |
 | `04-devflow/gitlab.md` | Partially Implemented | GitLab 交付闭环设计；GitLabAdapter 已迁移至 ScmAdapter 协议 + HttpClient，webhook 反向同步已实现 |
-| `04-devflow/plane.md` | Partially Implemented | Plane Work Item、看板集成；PlaneAdapter 已迁移至 HttpClient，状态同步流程已通过 GitLabEventHandler 实现 |
+| `04-devflow/plane.md` | Partially Implemented | Plane Work Item、看板集成；包含 Plane / SCM / Coding Runner / Hermes 主流程和生产反馈候选需求落地规则 |
 | `04-devflow/devflow-runner-workspace-design.md` | Partially Implemented | CodingAgentRunner 已完成 job 持久化和重试机制，WorkspaceManager 已加 git 超时保护，PathGuard 已修复 glob 匹配 |
 | `04-devflow/devflow-state-sync-design.md` | Partially Implemented | GitLab pipeline/MR 事件→Plane 状态同步已实现，幂等性已通过 delivery_id 实现；DLQ 待补 |
 
@@ -137,6 +137,15 @@
 5. 待补：`04-devflow/devflow-runner-workspace-design.md`
 6. 待补：`04-devflow/devflow-state-sync-design.md`
 
+### 4.3.1 设计生产反馈洞察和自动提需求
+
+按顺序读：
+
+1. `02-architecture/ai-human-vibecoding-rd-platform.md` 的 `5.3` 节，明确 Runtime Feedback Intelligence 总体闭环
+2. `04-devflow/plane.md` 的 `2.2` 节，明确 Plane 候选需求落点、字段和阈值
+3. `03-runtime/hermes-runtime.md` 的 `13.4` 节，明确 Hermes Insight Agent 职责和边界
+4. `05-production/security-tenant-policy-design.md` 的 `9.5` 节，明确脱敏、租户隔离和 prompt injection 防护
+
 ### 4.4 新增业务 Agent
 
 按顺序读：
@@ -159,6 +168,7 @@
 | 修改 Plane API 使用方式 | `04-devflow/plane.md`、`99-reference/plane-docs-acquisition.md`、`vendor/plane/endpoints.md` |
 | 修改 GitLab 流程或 CI gate | `04-devflow/gitlab.md` |
 | 修改 Hermes 接入边界 | `03-runtime/hermes-runtime.md`，必要时新增 ADR |
+| 修改生产反馈洞察、自动提需求、日志归因或 Plane 候选需求 | `02-architecture/ai-human-vibecoding-rd-platform.md`、`04-devflow/plane.md`、`03-runtime/hermes-runtime.md`、`05-production/security-tenant-policy-design.md` |
 | 修改部署、路由、持久化、DevFlow 实现状态 | `implementation-gap.md` |
 | 新增重大技术路线 | `adr/` 新增 ADR |
 | 修改文档阶段定义或文档状态 | `document-stage-map.md` 和 `README.md` |
