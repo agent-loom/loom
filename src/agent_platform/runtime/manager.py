@@ -65,7 +65,10 @@ class RuntimeManager:
                 model_gateway=model_gateway,
                 tool_executor=tool_executor,
             ),
-            LangGraphRuntimeBackend.name: LangGraphRuntimeBackend(tool_executor=tool_executor),
+            LangGraphRuntimeBackend.name: LangGraphRuntimeBackend(
+                tool_executor=tool_executor,
+                model_gateway=model_gateway,
+            ),
         }
         self.run_store = run_store or InMemoryAgentRunRepository()
         self.session_store: AgentSessionRepository = (

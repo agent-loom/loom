@@ -161,6 +161,6 @@ class TestListKeys:
 
 
 class TestSyncVerifyRaises:
-    def test_sync_verify_raises_not_implemented(self, store):
-        with pytest.raises(NotImplementedError):
+    def test_sync_verify_raises_runtime_error(self, store):
+        with pytest.raises(RuntimeError, match="verify_async"):
             store.verify("any-key")

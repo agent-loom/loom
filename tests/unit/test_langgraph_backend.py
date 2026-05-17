@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -16,7 +17,9 @@ from agent_platform.runtime.langgraph import (
     GraphState,
     LangGraphRuntimeBackend,
     StateGraph,
+    _llm_classify,
     classify_intent,
+    generate_response,
     should_continue,
 )
 from agent_platform.tools import (
@@ -389,3 +392,146 @@ class TestStateGraphExecutor:
 
         result = await g.ainvoke({"count": 0})
         assert result["count"] == 3
+
+
+class TestLLMClassifyIntent:
+    """测试 LLM 意图分类集成。"""
+
+    def _mock_gateway(self, content: str):
+        gw = MagicMock()
+        chat_result = MagicMock()
+        chat_result.content = content
+        gw.chat = AsyncMock(return_value=chat_result)
+        return gw
+
+    @pytest.mark.asyncio
+    async def test_llm_classify_returns_matched_tool(self):
+        registry = _registry_with_myj_tools()
+        executor = ToolExecutor(registry)
+        gw = self._mock_gateway("myj.goods_search")
+        result = await _llm_classify(gw, executor, "推荐低糖饮料", ["myj.goods_search"])
+        assert result == "myj.goods_search"
+
+    @pytest.mark.asyncio
+    async def test_llm_classify_returns_none_for_unknown(self):
+        registry = _registry_with_myj_tools()
+        executor = ToolExecutor(registry)
+        gw = self._mock_gateway("NONE")
+        result = await _llm_classify(gw, executor, "random query", ["myj.goods_search"])
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_llm_classify_falls_back_on_error(self):
+        registry = _registry_with_myj_tools()
+        executor = ToolExecutor(registry)
+        gw = MagicMock()
+        gw.chat = AsyncMock(side_effect=RuntimeError("LLM 不可用"))
+        result = await _llm_classify(gw, executor, "推荐饮料", ["myj.goods_search"])
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_classify_intent_uses_llm_then_keyword(self):
+        """LLM 分类优先于关键词匹配。"""
+        registry = _registry_with_myj_tools()
+        executor = ToolExecutor(registry)
+        gw = self._mock_gateway("myj.goods_search")
+        state: dict = {
+            "query": "any query",
+            "allowed_tools": ["myj.goods_search"],
+            "_tool_executor": executor,
+            "_model_gateway": gw,
+            "matched_tool": None,
+            "pending_tool_calls": False,
+        }
+        result = await classify_intent(state)
+        assert result["matched_tool"] == "myj.goods_search"
+        gw.chat.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_classify_intent_llm_fail_falls_to_keyword(self):
+        """LLM 失败时降级到关键词匹配。"""
+        registry = _registry_with_myj_tools()
+        executor = ToolExecutor(registry)
+        gw = MagicMock()
+        gw.chat = AsyncMock(side_effect=RuntimeError("timeout"))
+        state: dict = {
+            "query": "推荐低糖饮料",
+            "allowed_tools": ["myj.goods_search"],
+            "_tool_executor": executor,
+            "_model_gateway": gw,
+            "matched_tool": None,
+            "pending_tool_calls": False,
+        }
+        result = await classify_intent(state)
+        assert result["matched_tool"] == "myj.goods_search"
+
+    @pytest.mark.asyncio
+    async def test_classify_intent_no_gateway_uses_keyword(self):
+        """无 ModelGateway 时直接使用关键词匹配。"""
+        registry = _registry_with_myj_tools()
+        executor = ToolExecutor(registry)
+        state: dict = {
+            "query": "推荐低糖饮料",
+            "allowed_tools": ["myj.goods_search"],
+            "_tool_executor": executor,
+            "_model_gateway": None,
+            "matched_tool": None,
+            "pending_tool_calls": False,
+        }
+        result = await classify_intent(state)
+        assert result["matched_tool"] == "myj.goods_search"
+
+
+class TestLLMGenerateResponse:
+    """测试 LLM 响应生成集成。"""
+
+    @pytest.mark.asyncio
+    async def test_generate_with_gateway_and_tool_results(self):
+        gw = MagicMock()
+        chat_result = MagicMock()
+        chat_result.content = "为您推荐了3款低糖饮料"
+        gw.chat = AsyncMock(return_value=chat_result)
+        state: dict = {
+            "query": "推荐低糖饮料",
+            "tool_results": [{"output": {"summary": "找到3款低糖饮料"}}],
+            "_model_gateway": gw,
+        }
+        result = await generate_response(state)
+        assert result["final_answer"] == "为您推荐了3款低糖饮料"
+
+    @pytest.mark.asyncio
+    async def test_generate_without_gateway_uses_template(self):
+        state: dict = {
+            "query": "hello",
+            "tool_results": [],
+            "_model_gateway": None,
+        }
+        result = await generate_response(state)
+        assert result["final_answer"] == "Received: hello"
+
+    @pytest.mark.asyncio
+    async def test_generate_gateway_error_falls_back(self):
+        gw = MagicMock()
+        gw.chat = AsyncMock(side_effect=RuntimeError("error"))
+        state: dict = {
+            "query": "hello",
+            "tool_results": [{"output": {"summary": "tool output"}}],
+            "_model_gateway": gw,
+        }
+        result = await generate_response(state)
+        assert result["final_answer"] == "tool output"
+
+
+class TestBackendWithModelGateway:
+    """测试 LangGraphRuntimeBackend 接受 ModelGateway。"""
+
+    @pytest.mark.asyncio
+    async def test_backend_accepts_model_gateway(self):
+        gw = MagicMock()
+        chat_result = MagicMock()
+        chat_result.content = "NONE"
+        gw.chat = AsyncMock(return_value=chat_result)
+        backend = LangGraphRuntimeBackend(model_gateway=gw)
+        request = _make_request("hello")
+        result = await backend.run(request)
+        assert result.response.output.status == "completed"

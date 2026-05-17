@@ -5,11 +5,13 @@ from __future__ import annotations
 import time
 from unittest.mock import MagicMock
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agent_platform.api.rate_limiter import (
     ROLE_RATE_LIMITS,
+    InMemoryRateLimiterBackend,
     RateLimiterMiddleware,
     _TokenBucket,
 )
@@ -100,34 +102,42 @@ def test_token_bucket_refills_over_time():
 
 
 # ---------------------------------------------------------------------------
-# Tests — Middleware bucket management
+# Tests — InMemoryRateLimiterBackend
 # ---------------------------------------------------------------------------
 
-def test_requests_exceeding_burst_via_get_bucket():
-    app = _make_app(burst=2)
-    middleware = RateLimiterMiddleware(app, requests_per_minute=60, burst=2)
-    bucket = middleware._get_bucket("ip:192.168.1.1")
-    assert bucket.consume() is True
-    assert bucket.consume() is True
-    assert bucket.consume() is False
+@pytest.mark.asyncio
+async def test_inmemory_backend_within_burst():
+    backend = InMemoryRateLimiterBackend()
+    results = [await backend.try_consume("k1", 1.0, 3) for _ in range(3)]
+    assert all(results)
 
+
+@pytest.mark.asyncio
+async def test_inmemory_backend_exceeds_burst():
+    backend = InMemoryRateLimiterBackend()
+    for _ in range(3):
+        await backend.try_consume("k1", 1.0, 3)
+    assert await backend.try_consume("k1", 1.0, 3) is False
+
+
+@pytest.mark.asyncio
+async def test_inmemory_backend_separate_keys():
+    backend = InMemoryRateLimiterBackend()
+    for _ in range(3):
+        await backend.try_consume("k1", 1.0, 3)
+    assert await backend.try_consume("k1", 1.0, 3) is False
+    assert await backend.try_consume("k2", 1.0, 3) is True
+
+
+# ---------------------------------------------------------------------------
+# Tests — Middleware 分发
+# ---------------------------------------------------------------------------
 
 def test_retry_after_value():
     app = _make_app(burst=2)
     middleware = RateLimiterMiddleware(app, requests_per_minute=60, burst=2)
     expected_retry_after = str(max(1, int(1.0 / middleware.default_rate)))
     assert expected_retry_after == "1"
-
-
-def test_different_clients_have_separate_buckets():
-    app = _make_app(burst=2)
-    middleware = RateLimiterMiddleware(app, requests_per_minute=60, burst=2)
-    bucket_a = middleware._get_bucket("ip:10.0.0.1")
-    bucket_b = middleware._get_bucket("ip:10.0.0.2")
-    bucket_a.consume()
-    bucket_a.consume()
-    assert bucket_a.consume() is False
-    assert bucket_b.consume() is True
 
 
 # ---------------------------------------------------------------------------
@@ -187,19 +197,3 @@ def test_role_rate_limits_readonly():
     rpm, burst = ROLE_RATE_LIMITS["readonly"]
     assert rpm == 60
     assert burst == 10
-
-
-def test_get_bucket_with_role_uses_role_limits():
-    app = _make_app()
-    middleware = RateLimiterMiddleware(app, requests_per_minute=60, burst=10)
-    bucket = middleware._get_bucket("key:admin-key", role="platform_admin")
-    assert bucket.burst == 50
-    assert bucket.rate == 300 / 60.0
-
-
-def test_get_bucket_unknown_role_uses_default():
-    app = _make_app()
-    middleware = RateLimiterMiddleware(app, requests_per_minute=120, burst=20)
-    bucket = middleware._get_bucket("key:custom", role="custom_role")
-    assert bucket.burst == 20
-    assert bucket.rate == 120 / 60.0

@@ -1,10 +1,13 @@
-"""多租户配额管理：按租户追踪 token 用量、API 调用次数，执行配额检查。"""
+"""多租户配额管理：按租户追踪 token 用量、API 调用次数，执行配额检查。
+
+支持内存和 Redis 两种持久化后端。
+"""
 
 from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
@@ -46,41 +49,165 @@ class QuotaExceededError(Exception):
         )
 
 
-# 默认配额 — 未显式设置的租户使用此值
 DEFAULT_QUOTA = TenantQuota(tenant_id="__default__")
 
 
-class TenantQuotaManager:
-    """按租户管理配额与用量，支持日重置。"""
+@runtime_checkable
+class QuotaBackend(Protocol):
+    """配额存储后端协议。"""
+
+    async def get_usage(self, tenant_id: str) -> TenantUsage | None: ...
+    async def save_usage(self, usage: TenantUsage) -> None: ...
+    async def get_quota(self, tenant_id: str) -> TenantQuota | None: ...
+    async def save_quota(self, quota: TenantQuota) -> None: ...
+    async def list_quotas(self) -> list[TenantQuota]: ...
+
+
+class InMemoryQuotaBackend:
+    """基于进程内字典的配额后端，适用于单实例部署。"""
 
     def __init__(self) -> None:
         self._quotas: dict[str, TenantQuota] = {}
         self._usage: dict[str, TenantUsage] = {}
 
+    async def get_usage(self, tenant_id: str) -> TenantUsage | None:
+        return self._usage.get(tenant_id)
+
+    async def save_usage(self, usage: TenantUsage) -> None:
+        self._usage[usage.tenant_id] = usage
+
+    async def get_quota(self, tenant_id: str) -> TenantQuota | None:
+        return self._quotas.get(tenant_id)
+
+    async def save_quota(self, quota: TenantQuota) -> None:
+        self._quotas[quota.tenant_id] = quota
+
+    async def list_quotas(self) -> list[TenantQuota]:
+        return list(self._quotas.values())
+
+
+class RedisQuotaBackend:
+    """基于 Redis 的配额后端，支持跨实例共享用量状态。
+
+    键结构:
+      quota:{tenant_id} — 配额设置 JSON
+      usage:{tenant_id} — 用量计数器 Hash
+      quota:__index__   — 所有配置了配额的租户 ID 集合
+    """
+
+    def __init__(self, redis_client) -> None:
+        self._redis = redis_client
+
+    async def get_usage(self, tenant_id: str) -> TenantUsage | None:
+        key = f"usage:{tenant_id}"
+        try:
+            data = await self._redis.hgetall(key)
+            if not data:
+                return None
+            return TenantUsage(
+                tenant_id=tenant_id,
+                requests_today=int(data.get(b"requests_today", data.get("requests_today", 0))),
+                tokens_today=int(data.get(b"tokens_today", data.get("tokens_today", 0))),
+                storage_mb=float(data.get(b"storage_mb", data.get("storage_mb", 0))),
+                agent_count=int(data.get(b"agent_count", data.get("agent_count", 0))),
+                last_reset=float(data.get(b"last_reset", data.get("last_reset", time.time()))),
+            )
+        except Exception:
+            logger.warning("Redis 配额后端读取失败", exc_info=True)
+            return None
+
+    async def save_usage(self, usage: TenantUsage) -> None:
+        key = f"usage:{usage.tenant_id}"
+        try:
+            await self._redis.hset(key, mapping={
+                "requests_today": str(usage.requests_today),
+                "tokens_today": str(usage.tokens_today),
+                "storage_mb": str(usage.storage_mb),
+                "agent_count": str(usage.agent_count),
+                "last_reset": str(usage.last_reset),
+            })
+            remaining = max(0, 86400 - int(time.time() - usage.last_reset))
+            await self._redis.expire(key, remaining or 86400)
+        except Exception:
+            logger.warning("Redis 配额后端写入失败", exc_info=True)
+
+    async def get_quota(self, tenant_id: str) -> TenantQuota | None:
+        key = f"quota:{tenant_id}"
+        try:
+            data = await self._redis.get(key)
+            if data is None:
+                return None
+            return TenantQuota.model_validate_json(data)
+        except Exception:
+            logger.warning("Redis 配额后端读取失败", exc_info=True)
+            return None
+
+    async def save_quota(self, quota: TenantQuota) -> None:
+        key = f"quota:{quota.tenant_id}"
+        try:
+            await self._redis.set(key, quota.model_dump_json())
+            await self._redis.sadd("quota:__index__", quota.tenant_id)
+        except Exception:
+            logger.warning("Redis 配额后端写入失败", exc_info=True)
+
+    async def list_quotas(self) -> list[TenantQuota]:
+        try:
+            members = await self._redis.smembers("quota:__index__")
+            result = []
+            for tid in members:
+                if isinstance(tid, bytes):
+                    tid = tid.decode()
+                q = await self.get_quota(tid)
+                if q:
+                    result.append(q)
+            return result
+        except Exception:
+            logger.warning("Redis 配额后端列表失败", exc_info=True)
+            return []
+
+
+class TenantQuotaManager:
+    """按租户管理配额与用量，支持可插拔的存储后端。"""
+
+    def __init__(self, backend: QuotaBackend | None = None) -> None:
+        self._backend = backend or InMemoryQuotaBackend()
+        self._cache_quotas: dict[str, TenantQuota] = {}
+        self._cache_usage: dict[str, TenantUsage] = {}
+
     # ── 配额管理 ─────────────────────────────────────────────
 
     def set_quota(self, quota: TenantQuota) -> None:
-        """设置或更新租户配额。"""
-        self._quotas[quota.tenant_id] = quota
+        self._cache_quotas[quota.tenant_id] = quota
+
+    async def set_quota_async(self, quota: TenantQuota) -> None:
+        self._cache_quotas[quota.tenant_id] = quota
+        await self._backend.save_quota(quota)
 
     def get_quota(self, tenant_id: str) -> TenantQuota:
-        """获取租户配额，不存在则返回默认值。"""
-        return self._quotas.get(tenant_id, DEFAULT_QUOTA)
+        return self._cache_quotas.get(tenant_id, DEFAULT_QUOTA)
+
+    async def get_quota_async(self, tenant_id: str) -> TenantQuota:
+        if tenant_id in self._cache_quotas:
+            return self._cache_quotas[tenant_id]
+        q = await self._backend.get_quota(tenant_id)
+        if q:
+            self._cache_quotas[tenant_id] = q
+            return q
+        return DEFAULT_QUOTA
 
     def list_quotas(self) -> list[TenantQuota]:
-        return list(self._quotas.values())
+        return list(self._cache_quotas.values())
 
     # ── 用量追踪 ─────────────────────────────────────────────
 
     def _get_usage(self, tenant_id: str) -> TenantUsage:
-        if tenant_id not in self._usage:
-            self._usage[tenant_id] = TenantUsage(tenant_id=tenant_id)
-        usage = self._usage[tenant_id]
+        if tenant_id not in self._cache_usage:
+            self._cache_usage[tenant_id] = TenantUsage(tenant_id=tenant_id)
+        usage = self._cache_usage[tenant_id]
         self._maybe_reset(usage)
         return usage
 
     def _maybe_reset(self, usage: TenantUsage) -> None:
-        """每 24 小时重置日用量。"""
         now = time.time()
         if now - usage.last_reset >= 86400:
             usage.requests_today = 0
@@ -88,29 +215,36 @@ class TenantQuotaManager:
             usage.last_reset = now
 
     def record_request(self, tenant_id: str, tokens: int = 0) -> None:
-        """记录一次 API 调用和 token 用量。"""
         usage = self._get_usage(tenant_id)
         usage.requests_today += 1
         usage.tokens_today += tokens
 
+    async def record_request_async(self, tenant_id: str, tokens: int = 0) -> None:
+        usage = self._get_usage(tenant_id)
+        usage.requests_today += 1
+        usage.tokens_today += tokens
+        await self._backend.save_usage(usage)
+
     def record_storage(self, tenant_id: str, storage_mb: float) -> None:
-        """更新租户的存储用量。"""
         usage = self._get_usage(tenant_id)
         usage.storage_mb = storage_mb
 
     def record_agent_count(self, tenant_id: str, count: int) -> None:
-        """更新租户的 agent 数量。"""
         usage = self._get_usage(tenant_id)
         usage.agent_count = count
 
     def get_usage(self, tenant_id: str) -> TenantUsage:
-        """获取租户用量快照。"""
         return self._get_usage(tenant_id)
+
+    async def sync_from_backend(self, tenant_id: str) -> None:
+        """从后端加载用量到本地缓存（启动时或周期同步）。"""
+        remote = await self._backend.get_usage(tenant_id)
+        if remote:
+            self._cache_usage[tenant_id] = remote
 
     # ── 配额检查 ─────────────────────────────────────────────
 
     def check_request_quota(self, tenant_id: str) -> None:
-        """检查请求配额，超限则抛出 QuotaExceededError。"""
         quota = self.get_quota(tenant_id)
         usage = self._get_usage(tenant_id)
         if usage.requests_today >= quota.max_requests_per_day:
@@ -120,7 +254,6 @@ class TenantQuotaManager:
             )
 
     def check_token_quota(self, tenant_id: str, additional_tokens: int = 0) -> None:
-        """检查 token 配额。"""
         quota = self.get_quota(tenant_id)
         usage = self._get_usage(tenant_id)
         projected = usage.tokens_today + additional_tokens
@@ -131,7 +264,6 @@ class TenantQuotaManager:
             )
 
     def check_agent_quota(self, tenant_id: str) -> None:
-        """检查 agent 数量配额。"""
         quota = self.get_quota(tenant_id)
         usage = self._get_usage(tenant_id)
         if usage.agent_count >= quota.max_agents:
@@ -141,7 +273,6 @@ class TenantQuotaManager:
             )
 
     def check_all(self, tenant_id: str) -> list[str]:
-        """执行全部配额检查，返回违规项列表（空表示全部通过）。"""
         violations: list[str] = []
         quota = self.get_quota(tenant_id)
         usage = self._get_usage(tenant_id)
@@ -166,7 +297,6 @@ class TenantQuotaManager:
     # ── 报告 ─────────────────────────────────────────────────
 
     def get_tenant_report(self, tenant_id: str) -> dict[str, Any]:
-        """生成租户的配额使用报告。"""
         quota = self.get_quota(tenant_id)
         usage = self._get_usage(tenant_id)
         return {

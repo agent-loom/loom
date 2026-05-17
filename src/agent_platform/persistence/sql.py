@@ -943,8 +943,8 @@ class SqlApiKeyStore:
             await session.commit()
 
     def verify(self, key_plaintext: str) -> None:
-        raise NotImplementedError(
-            "Use verify_async for SqlApiKeyStore"
+        raise RuntimeError(
+            "SqlApiKeyStore 仅支持异步调用，请使用 verify_async()"
         )
 
     async def verify_async(self, key_plaintext: str):

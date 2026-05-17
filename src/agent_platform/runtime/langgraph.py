@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from agent_platform.domain.models import (
     AgentIdentity,
@@ -20,6 +20,9 @@ from agent_platform.tools import (
     create_default_tool_registry,
     load_agent_tools,
 )
+
+if TYPE_CHECKING:
+    from agent_platform.runtime.model_gateway import ModelGateway
 
 logger = logging.getLogger(__name__)
 
@@ -161,17 +164,18 @@ class StateGraph:
 # ---------------------------------------------------------------------------
 
 async def classify_intent(state: GraphState) -> GraphState:
-    """意图分类节点，通过关键词匹配确定应调用的工具。
-
-    设置 state 中的 matched_tool 和 pending_tool_calls。
-    """
+    """意图分类节点：优先使用 LLM，降级到关键词匹配。"""
     query = state.get("query", "")
     allowed_tools = state.get("allowed_tools", [])
     tool_executor: ToolExecutor | None = state.get("_tool_executor")  # type: ignore[assignment]
+    gateway: ModelGateway | None = state.get("_model_gateway")  # type: ignore[assignment]
 
     matched: str | None = None
 
-    if tool_executor is not None:
+    if gateway and allowed_tools and tool_executor:
+        matched = await _llm_classify(gateway, tool_executor, query, allowed_tools)
+
+    if matched is None and tool_executor is not None:
         for tool_name in allowed_tools:
             try:
                 defn = tool_executor.registry.get(tool_name)
@@ -184,6 +188,50 @@ async def classify_intent(state: GraphState) -> GraphState:
     state["matched_tool"] = matched
     state["pending_tool_calls"] = matched is not None
     return state
+
+
+async def _llm_classify(
+    gateway: ModelGateway,
+    tool_executor: ToolExecutor,
+    query: str,
+    allowed_tools: list[str],
+) -> str | None:
+    """通过 LLM 对用户 query 进行意图分类，返回最匹配的工具名称。"""
+    from agent_platform.runtime.model_gateway import ModelMessage
+
+    tool_descriptions: list[str] = []
+    for name in allowed_tools:
+        try:
+            defn = tool_executor.registry.get(name)
+            desc = defn.description or name
+            tool_descriptions.append(f"- {name}: {desc}")
+        except LookupError:
+            tool_descriptions.append(f"- {name}: (无描述)")
+
+    tools_text = "\n".join(tool_descriptions)
+    system_prompt = (
+        "你是意图分类器。根据用户输入，从可用工具列表中选择最匹配的工具。\n"
+        "仅返回工具名称（不含其他内容）。如果没有匹配的工具，返回 NONE。\n\n"
+        f"可用工具:\n{tools_text}"
+    )
+
+    try:
+        result = await gateway.chat(
+            messages=[
+                ModelMessage(role="system", content=system_prompt),
+                ModelMessage(role="user", content=query),
+            ],
+            temperature=0.0,
+            max_tokens=64,
+        )
+        answer = result.content.strip()
+        if answer and answer != "NONE" and answer in allowed_tools:
+            logger.debug("LLM 意图分类: %s -> %s", query[:50], answer)
+            return answer
+        return None
+    except Exception:
+        logger.warning("LLM 意图分类失败，降级到关键词匹配", exc_info=True)
+        return None
 
 
 async def call_tool(state: GraphState) -> GraphState:
@@ -223,8 +271,10 @@ async def call_tool(state: GraphState) -> GraphState:
 
 
 async def generate_response(state: GraphState) -> GraphState:
-    """响应生成节点，将工具执行结果格式化为最终回答。"""
+    """响应生成节点：优先使用 LLM 生成自然语言回答，降级到模板拼接。"""
     tool_results = state.get("tool_results") or []
+    query = state.get("query", "")
+    gateway: ModelGateway | None = state.get("_model_gateway")  # type: ignore[assignment]
 
     if tool_results:
         parts: list[str] = []
@@ -234,12 +284,69 @@ async def generate_response(state: GraphState) -> GraphState:
                 parts.append(summary)
             else:
                 parts.append(str(tr.get("output", {})))
-        state["final_answer"] = " | ".join(parts)
+        context = " | ".join(parts)
+
+        if gateway:
+            llm_answer = await _llm_generate(gateway, query, context)
+            if llm_answer:
+                state["final_answer"] = llm_answer
+                return state
+
+        state["final_answer"] = context
     else:
-        query = state.get("query", "")
+        if gateway:
+            llm_answer = await _llm_direct_answer(gateway, query)
+            if llm_answer:
+                state["final_answer"] = llm_answer
+                return state
         state["final_answer"] = f"Received: {query}"
 
     return state
+
+
+async def _llm_generate(
+    gateway: ModelGateway, query: str, context: str,
+) -> str | None:
+    """使用 LLM 基于工具结果生成自然语言回答。"""
+    from agent_platform.runtime.model_gateway import ModelMessage
+
+    try:
+        result = await gateway.chat(
+            messages=[
+                ModelMessage(
+                    role="system",
+                    content="基于工具执行结果，用简洁自然的语言回答用户问题。",
+                ),
+                ModelMessage(
+                    role="user",
+                    content=f"用户问题: {query}\n\n工具结果: {context}",
+                ),
+            ],
+            temperature=0.3,
+            max_tokens=512,
+        )
+        return result.content.strip() or None
+    except Exception:
+        logger.warning("LLM 响应生成失败，使用原始工具结果", exc_info=True)
+        return None
+
+
+async def _llm_direct_answer(gateway: ModelGateway, query: str) -> str | None:
+    """无工具结果时直接使用 LLM 回答。"""
+    from agent_platform.runtime.model_gateway import ModelMessage
+
+    try:
+        result = await gateway.chat(
+            messages=[
+                ModelMessage(role="user", content=query),
+            ],
+            temperature=0.5,
+            max_tokens=512,
+        )
+        return result.content.strip() or None
+    except Exception:
+        logger.warning("LLM 直接回答失败，使用默认响应", exc_info=True)
+        return None
 
 
 def should_continue(state: GraphState) -> str:
@@ -274,12 +381,14 @@ class LangGraphRuntimeBackend:
     name = "langgraph"
 
     def __init__(
-        self, tool_executor: ToolExecutor | None = None,
+        self,
+        tool_executor: ToolExecutor | None = None,
+        model_gateway: ModelGateway | None = None,
     ) -> None:
-        """初始化 LangGraph 后端，可选注入工具执行器。"""
         self.tool_executor = tool_executor or ToolExecutor(
             create_default_tool_registry()
         )
+        self.model_gateway = model_gateway
         self._loaded_agents: set[str] = set()
 
     def _ensure_agent_tools(self, agent_spec) -> None:
@@ -358,6 +467,7 @@ class LangGraphRuntimeBackend:
             "allowed_tools": allowed_tools,
             # Internal references (not part of the public GraphState schema)
             "_tool_executor": self.tool_executor,
+            "_model_gateway": self.model_gateway,
             "_max_iterations": max_iterations,
         }
 

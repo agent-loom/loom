@@ -83,3 +83,39 @@ class TestValidateStartupConfig:
             _validate_startup_config(s)
         cors_warnings = [r for r in caplog.records if "CORS" in r.message]
         assert len(cors_warnings) == 0
+
+    def test_production_mock_adapter_with_repo_raises(self):
+        """生产环境配置了 DevFlow 仓库但使用 mock adapter 时应阻断启动。"""
+        from agent_platform.api.app import _validate_startup_config
+        s = Settings(
+            env="production",
+            devflow_runner_adapter="mock",
+            devflow_repo_url="https://gitlab.example.com/repo.git",
+        )
+        with pytest.raises(ValueError, match="mock adapter"):
+            _validate_startup_config(s)
+
+    def test_production_mock_adapter_without_repo_warns(self, caplog):
+        """生产环境未配置 DevFlow 仓库时 mock adapter 仅告警不阻断。"""
+        from agent_platform.api.app import _validate_startup_config
+        s = Settings(
+            env="production",
+            devflow_runner_adapter="mock",
+            devflow_repo_url=None,
+        )
+        with caplog.at_level("WARNING"):
+            _validate_startup_config(s)
+        assert any("mock" in r.message for r in caplog.records)
+
+    def test_production_real_adapter_passes(self, caplog):
+        """生产环境使用真实 adapter 时不应报错。"""
+        from agent_platform.api.app import _validate_startup_config
+        s = Settings(
+            env="production",
+            devflow_runner_adapter="claude_code",
+            devflow_repo_url="https://gitlab.example.com/repo.git",
+            api_key="secret",
+            cors_allowed_origins="https://app.example.com",
+            service_jwt_secret="jwt-secret",
+        )
+        _validate_startup_config(s)

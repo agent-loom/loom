@@ -343,6 +343,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
 def _validate_startup_config(settings) -> None:
     """Log warnings for common configuration issues at startup."""
     if settings.devflow_runner_adapter == "mock":
+        if settings.env == "production" and settings.devflow_repo_url:
+            raise ValueError(
+                "生产环境禁止使用 mock adapter（DEVFLOW_RUNNER_ADAPTER=mock），"
+                "请设置为 'claude_code' 或 'codex'"
+            )
         logger.warning(
             "DEVFLOW_RUNNER_ADAPTER=mock — DevFlow will not execute real AI coding tasks. "
             "Set to 'claude_code' or 'codex' for production."
@@ -438,7 +443,16 @@ async def _app_lifespan(app: FastAPI):
         _dlq_task = _asyncio.create_task(_dlq_retry_loop())
         logger.info("DLQ 后台重试任务已启动（60s 间隔）")
 
+    # ── 知识同步调度器 ──
+    _knowledge_scheduler = getattr(app.state, "_knowledge_scheduler", None)
+    if _knowledge_scheduler is not None:
+        await _knowledge_scheduler.start()
+        logger.info("KnowledgeSyncScheduler 已启动")
+
     yield
+
+    if _knowledge_scheduler is not None:
+        await _knowledge_scheduler.stop()
 
     if _dlq_task:
         _dlq_task.cancel()
@@ -488,6 +502,13 @@ def create_app() -> FastAPI:
         )
         app_knowledge_service.register(weaviate_backend)
         logger.info("WeaviateKnowledgeBackend registered (url=%s)", settings.weaviate_url)
+
+        from agent_platform.knowledge.scheduler import KnowledgeSyncScheduler
+        from agent_platform.knowledge.sync import DataSynchronization
+        _data_sync = DataSynchronization(weaviate_backend)
+        _knowledge_scheduler = KnowledgeSyncScheduler(_data_sync, interval_seconds=3600.0)
+    else:
+        _knowledge_scheduler = None
 
     app_hook_registry = HookRegistry()
     app_metrics = MetricsCollector()
@@ -666,6 +687,7 @@ def create_app() -> FastAPI:
         app.state._closeables.append(("LangfuseTracer", langfuse_tracer))
     app.state.policy_engine = app_policy_engine
     app.state.knowledge_service = app_knowledge_service
+    app.state._knowledge_scheduler = _knowledge_scheduler
     app.state.langfuse = langfuse_tracer
     app.state.hook_registry = app_hook_registry
     app.state.semantic_router = app_semantic_router
@@ -678,8 +700,25 @@ def create_app() -> FastAPI:
 
     # ── 多租户配额管理 ──
     from agent_platform.api.tenant_quota import TenantQuotaManager
-    quota_manager = TenantQuotaManager()
+    _redis_client = None
+    if settings.redis_url:
+        try:
+            import redis.asyncio as aioredis
+            _redis_client = aioredis.from_url(
+                settings.redis_url, decode_responses=False,
+            )
+            logger.info("Redis 已连接: 限流 + 配额使用分布式后端")
+        except Exception:
+            logger.warning("Redis 连接失败，回退到内存后端", exc_info=True)
+
+    _quota_backend = None
+    if _redis_client is not None:
+        from agent_platform.api.tenant_quota import RedisQuotaBackend
+        _quota_backend = RedisQuotaBackend(_redis_client)
+    quota_manager = TenantQuotaManager(backend=_quota_backend)
     app.state.quota_manager = quota_manager
+    if _redis_client is not None:
+        app.state._closeables.append(("Redis (限流/配额)", _redis_client))
 
     app.state.admin_deps = AdminDeps(
         registry=registry,
@@ -726,7 +765,14 @@ def create_app() -> FastAPI:
         AuthMiddleware, api_key=settings.api_key, key_store=key_store,
         service_auth=service_auth,
     )
-    app.add_middleware(RateLimiterMiddleware, requests_per_minute=120, burst=20)
+    _rl_backend = None
+    if _redis_client is not None:
+        from agent_platform.api.rate_limiter import RedisRateLimiterBackend
+        _rl_backend = RedisRateLimiterBackend(_redis_client)
+    app.add_middleware(
+        RateLimiterMiddleware, requests_per_minute=120, burst=20,
+        backend=_rl_backend,
+    )
     app.add_middleware(AccessLogMiddleware)
     app.add_middleware(
         InputSanitizationMiddleware,
