@@ -772,8 +772,7 @@ async def retry_dead_letter_entry(
     deps = _deps(request)
     if deps.webhook_retry_service is None:
         raise HTTPException(status_code=501, detail="DLQ not configured")
-    entries = await deps.webhook_retry_service.dlq.list_entries()
-    entry = next((e for e in entries if e.id == entry_id), None)
+    entry = await deps.webhook_retry_service.dlq.get_entry(entry_id)
     if entry is None:
         raise HTTPException(status_code=404, detail=f"entry not found: {entry_id}")
     if entry.status == "resolved":
@@ -795,8 +794,7 @@ async def resolve_dead_letter_entry(
     deps = _deps(request)
     if deps.webhook_retry_service is None:
         raise HTTPException(status_code=501, detail="DLQ not configured")
-    entries = await deps.webhook_retry_service.dlq.list_entries()
-    entry = next((e for e in entries if e.id == entry_id), None)
+    entry = await deps.webhook_retry_service.dlq.get_entry(entry_id)
     if entry is None:
         raise HTTPException(status_code=404, detail=f"entry not found: {entry_id}")
     await deps.webhook_retry_service.dlq.mark_resolved(entry_id)

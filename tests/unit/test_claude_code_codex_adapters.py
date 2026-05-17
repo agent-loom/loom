@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from agent_platform.devflow.runner.adapters.claude_code import (
     ClaudeCodeAdapter,
-    _build_safe_env,
 )
 from agent_platform.devflow.runner.adapters.codex import CodexAdapter
-from agent_platform.devflow.task_pack import DevelopmentTask, TaskMetadata, RequirementSpec, RepositoryTarget
+from agent_platform.devflow.runner.adapters.utils import build_safe_env
+from agent_platform.devflow.task_pack import (
+    DevelopmentTask,
+    RepositoryTarget,
+    RequirementSpec,
+    TaskMetadata,
+)
 
 
 def _make_task() -> DevelopmentTask:
@@ -40,7 +44,7 @@ class TestBuildSafeEnv:
             "MY_PASSWORD": "pass",
             "NORMAL_VAR": "ok",
         }, clear=True):
-            env = _build_safe_env()
+            env = build_safe_env()
             assert "PLANE_API_KEY" not in env
             assert "GITLAB_TOKEN" not in env
             assert "MY_PASSWORD" not in env
@@ -162,6 +166,8 @@ class TestCodexAdapter:
         mock_proc.communicate = AsyncMock(side_effect=TimeoutError)
         mock_proc.returncode = None
         mock_proc.terminate = MagicMock()
+        mock_proc.wait = AsyncMock()
+        mock_proc.kill = MagicMock()
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
             result = await adapter.execute(

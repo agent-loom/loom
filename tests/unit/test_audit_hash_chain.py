@@ -8,7 +8,6 @@ from agent_platform.domain.models import AgentDeployment, AgentDeploymentStatus
 from agent_platform.persistence.memory import InMemoryDeploymentAuditRepository
 from agent_platform.registry.deployment import (
     DeploymentAuditLog,
-    DeploymentEvent,
     _compute_event_hash,
 )
 

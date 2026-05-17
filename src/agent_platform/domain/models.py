@@ -8,7 +8,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def _utc_now() -> datetime:
@@ -170,6 +170,9 @@ class InputMessage(BaseModel):
     content: str
 
 
+MAX_QUERY_LENGTH = 16_000
+
+
 class AgentInput(BaseModel):
     """Agent 请求的输入体，包含查询文本、消息历史及附件。"""
 
@@ -178,6 +181,15 @@ class AgentInput(BaseModel):
     messages: list[InputMessage] = Field(default_factory=list)
     attachments: list[dict[str, Any]] = Field(default_factory=list)
     capabilities: list[str] = Field(default_factory=list)
+
+    @field_validator("query")
+    @classmethod
+    def _validate_query_length(cls, v: str) -> str:
+        if len(v) > MAX_QUERY_LENGTH:
+            raise ValueError(
+                f"query 长度 {len(v)} 超过上限 {MAX_QUERY_LENGTH}",
+            )
+        return v
 
 
 class RequestOptions(BaseModel):

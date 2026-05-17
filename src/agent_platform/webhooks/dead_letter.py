@@ -70,6 +70,10 @@ class DeadLetterQueue(Protocol):
         """清除已解决的旧条目，返回清除数量。"""
         ...
 
+    async def get_entry(self, entry_id: str) -> DeadLetterEntry | None:
+        """按 ID 获取单条条目。"""
+        ...
+
 
 class InMemoryDeadLetterQueue:
     """基于内存的 Dead Letter Queue 实现。"""
@@ -140,6 +144,10 @@ class InMemoryDeadLetterQueue:
         for entry_id in to_remove:
             del self._entries[entry_id]
         return len(to_remove)
+
+    async def get_entry(self, entry_id: str) -> DeadLetterEntry | None:
+        """按 ID 获取单条条目（O(1) 查找）。"""
+        return self._entries.get(entry_id)
 
 
 def _calculate_backoff(retry_count: int, base_seconds: int = 60) -> timedelta:

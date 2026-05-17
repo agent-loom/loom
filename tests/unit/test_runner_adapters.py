@@ -13,10 +13,10 @@ import pytest
 
 from agent_platform.devflow.runner.adapters.claude_code import (
     ClaudeCodeAdapter,
-    _build_safe_env,
 )
 from agent_platform.devflow.runner.adapters.codex import CodexAdapter
 from agent_platform.devflow.runner.adapters.mock import MockRunnerAdapter
+from agent_platform.devflow.runner.adapters.utils import build_safe_env
 from agent_platform.devflow.runner.protocol import RunnerAdapter
 from agent_platform.devflow.task_pack import (
     DevelopmentTask,
@@ -98,7 +98,7 @@ class TestSafeEnv:
             "SAFE_VAR": "ok",
         }
         with patch.dict(os.environ, test_env, clear=True):
-            safe = _build_safe_env()
+            safe = build_safe_env()
             assert "PATH" in safe
             assert "HOME" in safe
             assert "SAFE_VAR" in safe
@@ -111,7 +111,7 @@ class TestSafeEnv:
     def test_case_insensitive_stripping(self):
         test_env = {"my_api_key": "val"}
         with patch.dict(os.environ, test_env, clear=True):
-            safe = _build_safe_env()
+            safe = build_safe_env()
             assert "my_api_key" not in safe
 
 
@@ -364,9 +364,11 @@ class TestCodexExecution:
     @pytest.mark.asyncio
     async def test_cancel_terminates_process(self):
         adapter = CodexAdapter()
-        mock_proc = MagicMock()
+        mock_proc = AsyncMock()
         mock_proc.returncode = None
         mock_proc.terminate = MagicMock()
+        mock_proc.wait = AsyncMock()
+        mock_proc.kill = MagicMock()
         adapter._process = mock_proc
 
         await adapter.cancel()

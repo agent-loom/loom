@@ -56,9 +56,9 @@ class TestModelGatewayAutoRegister:
 class TestAuditChainInitialization:
     @pytest.mark.asyncio
     async def test_initializes_from_existing_events(self):
+        from agent_platform.domain.models import AgentDeployment, AgentDeploymentStatus
         from agent_platform.persistence.memory import InMemoryDeploymentAuditRepository
         from agent_platform.registry.deployment import DeploymentAuditLog
-        from agent_platform.domain.models import AgentDeployment, AgentDeploymentStatus
 
         repo = InMemoryDeploymentAuditRepository()
         log1 = DeploymentAuditLog(repo=repo)
@@ -87,7 +87,6 @@ class TestAuditChainInitialization:
     async def test_genesis_when_no_events(self):
         from agent_platform.persistence.memory import InMemoryDeploymentAuditRepository
         from agent_platform.registry.deployment import DeploymentAuditLog
-        from agent_platform.domain.models import AgentDeployment, AgentDeploymentStatus
 
         repo = InMemoryDeploymentAuditRepository()
         log = DeploymentAuditLog(repo=repo)
@@ -107,7 +106,7 @@ class TestTenantQuotaRecord:
         assert usage.requests_today == 3
 
     def test_check_passes_under_limit(self):
-        from agent_platform.api.tenant_quota import TenantQuotaManager, TenantQuota
+        from agent_platform.api.tenant_quota import TenantQuota, TenantQuotaManager
 
         qm = TenantQuotaManager()
         qm.set_quota(TenantQuota(tenant_id="t-1", max_requests_per_day=1000))
@@ -116,9 +115,9 @@ class TestTenantQuotaRecord:
 
     def test_check_fails_over_limit(self):
         from agent_platform.api.tenant_quota import (
-            TenantQuotaManager,
-            TenantQuota,
             QuotaExceededError,
+            TenantQuota,
+            TenantQuotaManager,
         )
 
         qm = TenantQuotaManager()
