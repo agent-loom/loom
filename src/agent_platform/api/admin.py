@@ -654,10 +654,10 @@ async def list_devflow_states(request: Request) -> list[dict[str, Any]]:
     return [
         {
             "work_item_id": wid,
-            "current_state": sm.current_state.value,
-            "history_count": len(sm.history),
+            "current_state": info["current_state"],
+            "history_count": info["history_count"],
         }
-        for wid, sm in items.items()
+        for wid, info in items.items()
     ]
 
 
@@ -670,8 +670,7 @@ async def get_devflow_state(
     if deps.state_sync is None:
         raise HTTPException(status_code=501, detail="state sync not configured")
 
-    items = deps.state_sync.tracked_items
-    sm = items.get(work_item_id)
+    sm = deps.state_sync.get_state_machine(work_item_id)
     if sm is None:
         raise HTTPException(
             status_code=404,

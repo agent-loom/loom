@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any, Protocol, runtime_checkable
@@ -173,6 +174,7 @@ class TenantQuotaManager:
         self._backend = backend or InMemoryQuotaBackend()
         self._cache_quotas: dict[str, TenantQuota] = {}
         self._cache_usage: dict[str, TenantUsage] = {}
+        self._lock = asyncio.Lock()
 
     # ── 配额管理 ─────────────────────────────────────────────
 
@@ -180,7 +182,8 @@ class TenantQuotaManager:
         self._cache_quotas[quota.tenant_id] = quota
 
     async def set_quota_async(self, quota: TenantQuota) -> None:
-        self._cache_quotas[quota.tenant_id] = quota
+        async with self._lock:
+            self._cache_quotas[quota.tenant_id] = quota
         await self._backend.save_quota(quota)
 
     def get_quota(self, tenant_id: str) -> TenantQuota:
@@ -220,9 +223,10 @@ class TenantQuotaManager:
         usage.tokens_today += tokens
 
     async def record_request_async(self, tenant_id: str, tokens: int = 0) -> None:
-        usage = self._get_usage(tenant_id)
-        usage.requests_today += 1
-        usage.tokens_today += tokens
+        async with self._lock:
+            usage = self._get_usage(tenant_id)
+            usage.requests_today += 1
+            usage.tokens_today += tokens
         await self._backend.save_usage(usage)
 
     def record_storage(self, tenant_id: str, storage_mb: float) -> None:
@@ -240,7 +244,8 @@ class TenantQuotaManager:
         """从后端加载用量到本地缓存（启动时或周期同步）。"""
         remote = await self._backend.get_usage(tenant_id)
         if remote:
-            self._cache_usage[tenant_id] = remote
+            async with self._lock:
+                self._cache_usage[tenant_id] = remote
 
     # ── 配额检查 ─────────────────────────────────────────────
 

@@ -187,6 +187,16 @@ class DevFlowStateSync:
         )
 
     @property
-    def tracked_items(self) -> dict[str, DevFlowStateMachine]:
-        """当前正在跟踪的所有工作项状态机（只读）。"""
-        return dict(self._state_machines)
+    def tracked_items(self) -> dict[str, dict[str, Any]]:
+        """当前正在跟踪的所有工作项状态快照（只读）。"""
+        return {
+            wid: {
+                "current_state": sm.current_state.value,
+                "history_count": len(sm.history),
+            }
+            for wid, sm in self._state_machines.items()
+        }
+
+    def get_state_machine(self, work_item_id: str) -> DevFlowStateMachine | None:
+        """获取指定工作项的状态机实例。"""
+        return self._state_machines.get(work_item_id)

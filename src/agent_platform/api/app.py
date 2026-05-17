@@ -422,6 +422,19 @@ async def _app_lifespan(app: FastAPI):
     app.state.started_at = time.time()
     logger.info("Agent Platform started (env=%s)", settings.env if settings else "unknown")
 
+    # Bootstrap API key 初始化（需要在建表之后）
+    _key_store = getattr(app.state, "_key_store", None)
+    if _key_store is not None and settings and settings.api_key:
+        try:
+            await _key_store.add_key(
+                settings.api_key,
+                key_id="bootstrap-key",
+                role="platform_admin",
+                created_by="bootstrap",
+            )
+        except Exception:
+            logger.debug("Bootstrap key 可能已存在，跳过", exc_info=True)
+
     # DLQ 后台重试任务
     import asyncio as _asyncio
 
@@ -658,19 +671,6 @@ def create_app() -> FastAPI:
     if db_session_factory is not None:
         from agent_platform.persistence.sql import SqlApiKeyStore
         key_store = SqlApiKeyStore(db_session_factory)
-        if settings.api_key:
-            import asyncio
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
-            if loop is None:
-                asyncio.run(key_store.add_key(
-                    settings.api_key,
-                    key_id="bootstrap-key",
-                    role="platform_admin",
-                    created_by="bootstrap",
-                ))
 
     ws_manager = AgentWebSocketManager(
         router, runtime_manager,
@@ -763,6 +763,7 @@ def create_app() -> FastAPI:
     app.state.mcp_sse = mcp_sse
 
     app.state.key_store = key_store
+    app.state._key_store = key_store
     app.state.service_auth = service_auth
     app.state.routing_decision_repo = routing_decision_repo
     app.state.artifact_store = artifact_store
@@ -988,12 +989,14 @@ def create_app() -> FastAPI:
                 checks["weaviate"] = settings.weaviate_url
 
         if settings.redis_url:
-            try:
-                import httpx as _httpx
-                async with _httpx.AsyncClient(timeout=3) as _rc:
-                    _resp = await _rc.get(settings.redis_url.replace("redis://", "http://").rstrip("/"))
-                    checks["redis"] = "reachable"
-            except Exception:
+            _redis_client = getattr(app.state, "_redis_client", None)
+            if _redis_client is not None:
+                try:
+                    await _redis_client.ping()
+                    checks["redis"] = "ok"
+                except Exception:
+                    checks["redis"] = "unhealthy"
+            else:
                 checks["redis"] = "configured"
 
         return JSONResponse(

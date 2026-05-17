@@ -295,8 +295,13 @@ class RuntimeManager:
                 await self.session_store.save(session)
                 if self.metrics_collector:
                     try:
-                        sessions = await self.session_store.list_sessions()
-                        self.metrics_collector.set_active_sessions(len(sessions))
+                        count_fn = getattr(self.session_store, "count_sessions", None)
+                        if count_fn:
+                            count = await count_fn()
+                        else:
+                            sessions = await self.session_store.list_sessions()
+                            count = len(sessions)
+                        self.metrics_collector.set_active_sessions(count)
                     except Exception:
                         logger.exception("metrics set_active_sessions failed")
 

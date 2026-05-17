@@ -12,13 +12,17 @@ from agent_platform.domain.models import AgentRun, ToolCallTrace
 
 PII_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # Chinese mobile phone numbers (11 digits starting with 1[3-9])
-    (re.compile(r"(1[3-9]\d)\d{4}(\d{4})"), r"\1****\2"),
+    (re.compile(r"\b(1[3-9]\d)\d{4}(\d{4})\b"), r"\1****\2"),
     # Chinese national ID card (18 digits)
-    (re.compile(r"(\d{6})\d{8}(\d{4})"), r"\1****\2"),
-    # Bank card numbers (16-19 digits)
-    (re.compile(r"(\d{4})\d{8,12}(\d{4})"), r"\1****\2"),
+    (re.compile(r"\b(\d{6})\d{8}(\d{3}[\dXx])\b"), r"\1****\2"),
+    # Bank card numbers (16-19 digits, with word boundaries)
+    (re.compile(r"\b(\d{4})\d{8,12}(\d{4})\b"), r"\1****\2"),
     # Email addresses
     (re.compile(r"([a-zA-Z0-9])[a-zA-Z0-9.]*@"), r"\1***@"),
+    # International phone numbers (+country code)
+    (re.compile(r"\+\d{1,3}[\s-]?(\d{2,3})[\s-]?\d{3,4}[\s-]?(\d{4})"), r"+***\1****\2"),
+    # IPv4 addresses
+    (re.compile(r"\b(\d{1,3})\.\d{1,3}\.\d{1,3}\.(\d{1,3})\b"), r"\1.*.*.\2"),
 ]
 
 SECRET_PATTERNS: list[tuple[re.Pattern[str], str]] = [

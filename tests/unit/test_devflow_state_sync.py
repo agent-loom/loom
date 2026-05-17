@@ -93,7 +93,7 @@ class TestDevFlowStateSync:
             "wi-10", "Ready for AI Dev", actor="webhook",
         )
         assert record.to_state == DevFlowState.READY_FOR_AI_DEV
-        assert sync.tracked_items["wi-10"].current_state == DevFlowState.READY_FOR_AI_DEV
+        assert sync.tracked_items["wi-10"]["current_state"] == DevFlowState.READY_FOR_AI_DEV.value
 
     @pytest.mark.asyncio
     async def test_handle_external_transition_invalid(self) -> None:
@@ -114,7 +114,7 @@ class TestDevFlowStateSync:
 
         await sync.sync_to_plane("wi-20", "proj-1", DevFlowState.READY_FOR_AI_DEV)
 
-        assert sync.tracked_items["wi-20"].current_state == DevFlowState.READY_FOR_AI_DEV
+        assert sync.tracked_items["wi-20"]["current_state"] == DevFlowState.READY_FOR_AI_DEV.value
         mock_plane.update_work_item_state.assert_called_once_with(
             "proj-1", "wi-20", "Ready for AI Dev",
         )
@@ -131,9 +131,9 @@ class TestDevFlowStateSync:
             await sync.sync_to_plane("wi-21", "proj-1", DevFlowState.READY_FOR_AI_DEV)
 
         # 状态应已回滚
-        assert sync.tracked_items["wi-21"].current_state == DevFlowState.INTAKE
+        assert sync.tracked_items["wi-21"]["current_state"] == DevFlowState.INTAKE.value
         # 历史中不应有该转换记录
-        assert len(sync.tracked_items["wi-21"].history) == 0
+        assert sync.tracked_items["wi-21"]["history_count"] == 0
 
     @pytest.mark.asyncio
     async def test_sync_to_plane_without_adapter(self) -> None:
@@ -142,4 +142,4 @@ class TestDevFlowStateSync:
         sync.get_or_create("wi-22")
 
         await sync.sync_to_plane("wi-22", "proj-1", DevFlowState.READY_FOR_AI_DEV)
-        assert sync.tracked_items["wi-22"].current_state == DevFlowState.READY_FOR_AI_DEV
+        assert sync.tracked_items["wi-22"]["current_state"] == DevFlowState.READY_FOR_AI_DEV.value

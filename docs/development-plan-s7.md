@@ -10,8 +10,8 @@
 | 指标 | S6 结束 | S7 结束 |
 |---|---|---|
 | 测试 | 988 passed | 1075 passed, 1 skipped, ruff clean |
-| 新增测试 | — | +87 tests (S7) |
-| 成熟度均值 | ~75% | ~83% |
+| 新增测试 | — | +87 tests (S7), +525 tests (S8 Phase 1+安全修复) |
+| 成熟度均值 | ~75% | ~83% → ~88% |
 
 ---
 
@@ -65,7 +65,7 @@
 
 ## S8：生产交付 — 🔶 进行中
 
-### S8 Phase 1：可观测性与持久化增强 — 🔶 进行中
+### S8 Phase 1：可观测性与持久化增强 — ✅ 完成
 
 **目标**：补齐 Prometheus 指标导出、Session 持久化、Admin eval 报告增强端点。三条线并行。
 
@@ -74,9 +74,9 @@
 | 8.1.1 | Prometheus /metrics 端点 | implementation-gap §1.1 Observability | `GET /api/v1/admin/metrics` 返回 `text/plain; version=0.0.4`；HELP/TYPE 注释；所有预定义指标覆盖 | ✅ |
 | 8.1.2 | MetricsCollector.to_prometheus() | — | 与 format_prometheus() 输出一致；_HELP_DESCRIPTIONS 预定义描述 | ✅ |
 | 8.1.3 | record_error()/record_tool_duration() | — | 便捷记录方法；agent_request_errors_total + tool_call_duration_seconds | ✅ |
-| 8.1.4 | SqlAgentSessionRepository | implementation-gap §4.1 | Session ORM Row + SQL 实现 + contract tests；跨实例共享 | 🔶 |
-| 8.1.5 | Admin eval 增强端点 | implementation-gap §P1 Eval | POST /evals/{agent_id}/run 触发执行；GET /evals/compare 跨版本对比；/status 增强 | 🔶 |
-| 8.1.6 | 测试 + ruff + 提交 + 文档更新 | — | 全量测试通过；ruff clean；implementation-gap 校准 | ⬜ |
+| 8.1.4 | SqlAgentSessionRepository | implementation-gap §4.1 | Session ORM Row + SQL 实现 + contract tests；跨实例共享 | ✅ |
+| 8.1.5 | Admin eval 增强端点 | implementation-gap §P1 Eval | POST /evals/{agent_id}/run 触发执行；GET /evals/compare 跨版本对比；/status 增强 | ✅ |
+| 8.1.6 | 测试 + ruff + 提交 + 文档更新 | — | 全量测试通过；ruff clean；implementation-gap 校准 | ✅ |
 
 ### S8 Phase 2：真实 Runner 端到端联调
 

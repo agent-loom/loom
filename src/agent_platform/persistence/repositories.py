@@ -173,6 +173,15 @@ class AgentSessionRepository(Protocol):
         """列出会话，可按 agent_id 或租户过滤。"""
         ...
 
+    async def count_sessions(
+        self,
+        *,
+        agent_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> int:
+        """统计会话数，可按 agent_id 或租户过滤。"""
+        ...
+
 
 @runtime_checkable
 class WebhookDeliveryRepository(Protocol):

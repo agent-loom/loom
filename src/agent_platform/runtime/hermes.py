@@ -363,6 +363,7 @@ class ConversationEngine:
             for tc in model_response.tool_calls:
                 tool_name = tc.name
                 tool_input = tc.arguments
+                tool_call_id = tc.id
                 if self.tool_executor:
                     tool_result = await self.tool_executor.execute(
                         tool_name,
@@ -372,6 +373,7 @@ class ConversationEngine:
                     )
                     tool_output = tool_result.output
                     tool_call_traces.append({
+                        "id": tool_call_id,
                         "name": tool_name,
                         "status": tool_result.trace.status,
                         "latency_ms": tool_result.trace.latency_ms,
@@ -379,11 +381,16 @@ class ConversationEngine:
                 else:
                     tool_output = {"result": f"[stub] {tool_name} not executed"}
                     tool_call_traces.append({
+                        "id": tool_call_id,
                         "name": tool_name,
                         "status": "skipped",
                     })
 
-                messages.append(ModelMessage(role="tool", content=str(tool_output)))
+                messages.append(ModelMessage(
+                    role="tool",
+                    content=str(tool_output),
+                    tool_call_id=tool_call_id,
+                ))
 
         total_model_calls += 1
         final = await self.model_gateway.chat(

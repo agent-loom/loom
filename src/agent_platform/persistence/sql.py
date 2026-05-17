@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agent_platform.domain.models import (
@@ -126,8 +126,8 @@ class SqlAgentDefinitionRepository:
 
     async def update_status(
         self, agent_id: str, version: str, status: str
-    ) -> None:
-        """更新指定定义的状态字段。"""
+    ) -> bool:
+        """更新指定定义的状态字段，返回是否成功找到并更新。"""
         stmt = select(AgentDefinitionRow).where(
             AgentDefinitionRow.agent_id == agent_id,
             AgentDefinitionRow.version == version,
@@ -135,10 +135,12 @@ class SqlAgentDefinitionRepository:
         async with self._sf() as session:
             result = await session.execute(stmt)
             row = result.scalar_one_or_none()
-            if row is not None:
-                row.status = status
-                row.updated_at = datetime.now(UTC)
-                await session.commit()
+            if row is None:
+                return False
+            row.status = status
+            row.updated_at = datetime.now(UTC)
+            await session.commit()
+            return True
 
     @staticmethod
     def _to_domain(
@@ -633,6 +635,26 @@ class SqlAgentSessionRepository:
             result = await db.execute(stmt)
             rows = result.scalars().all()
             return [self._to_domain(r) for r in rows]
+
+    async def count_sessions(
+        self,
+        *,
+        agent_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> int:
+        """使用 COUNT(*) 高效统计会话数。"""
+        stmt = select(func.count(AgentSessionRow.id))
+        if agent_id is not None:
+            stmt = stmt.where(
+                AgentSessionRow.agent_id == agent_id
+            )
+        if tenant_id is not None:
+            stmt = stmt.where(
+                AgentSessionRow.tenant_id == tenant_id
+            )
+        async with self._sf() as db:
+            result = await db.execute(stmt)
+            return result.scalar_one()
 
     @staticmethod
     def _to_domain(
