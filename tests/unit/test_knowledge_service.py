@@ -87,7 +87,7 @@ class TestStubKnowledgeBackend:
         results = await backend.retrieve("test query", source)
         assert len(results) == 1
         assert results[0].source_id == source.id
-        assert results[0].score == 0.5
+        assert results[0].score == 0.0
         assert "Stub" in results[0].snippets[0]
 
     @pytest.mark.asyncio

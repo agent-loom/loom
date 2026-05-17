@@ -38,7 +38,10 @@ class KnowledgeBackend(Protocol):
 
 
 class StubKnowledgeBackend:
-    """Stub backend for development without a real vector store."""
+    """Stub backend for development without a real vector store.
+
+    生产环境应替换为真实后端（如 Weaviate）。
+    """
 
     name = "stub"
 
@@ -50,11 +53,16 @@ class StubKnowledgeBackend:
         top_k: int = 5,
         filters: dict[str, Any] | None = None,
     ) -> list[KnowledgeResult]:
+        logger.warning(
+            "Stub 知识后端被调用（collection=%s）— 生产环境请配置 Weaviate",
+            source.collection,
+        )
         return [
             KnowledgeResult(
                 source_id=source.id,
                 snippets=[f"[Stub] Knowledge result for '{query}' from {source.collection}"],
-                score=0.5,
+                score=0.0,
+                metadata={"stub": True},
             )
         ]
 

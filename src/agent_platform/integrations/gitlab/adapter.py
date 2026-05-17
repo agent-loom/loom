@@ -164,9 +164,12 @@ class GitLabAdapter:
         project_id: str,
         job_id: int,
     ) -> bytes:
-        client = self._http._get_client()
-        response = await client.get(
-            f"/api/v4/projects/{project_id}/jobs/{job_id}/artifacts"
-        )
-        response.raise_for_status()
-        return response.content
+        try:
+            client = self._http._get_client()
+            response = await client.get(
+                f"/api/v4/projects/{project_id}/jobs/{job_id}/artifacts"
+            )
+            response.raise_for_status()
+            return response.content
+        except Exception as exc:
+            raise ScmError(f"下载 artifacts 失败 (job={job_id}): {exc}") from exc

@@ -388,6 +388,10 @@ def _validate_startup_config(settings) -> None:
                 "DevFlow state sync may be incomplete — missing: %s",
                 ", ".join(missing),
             )
+    if settings.env == "production" and not settings.weaviate_url:
+        logger.warning(
+            "生产环境未配置 WEAVIATE_URL — 知识检索将使用 Stub 后端返回空结果"
+        )
 
 
 @asynccontextmanager
