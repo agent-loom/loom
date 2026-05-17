@@ -167,6 +167,11 @@ class InMemoryDeploymentAuditRepository:
             result = [
                 e for e in result if e.channel == channel
             ]
+        if tenant_id is not None:
+            result = [
+                e for e in result
+                if getattr(e, "metadata", {}).get("tenant_id") == tenant_id
+            ]
         return result[-limit:]
 
     async def get_rollback_version(

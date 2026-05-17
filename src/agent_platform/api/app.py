@@ -649,7 +649,12 @@ def create_app() -> FastAPI:
     )
 
     cors_raw = settings.cors_allowed_origins
-    if cors_raw and cors_raw != "*":
+    if settings.env == "production" and (not cors_raw or cors_raw == "*"):
+        logger.warning(
+            "生产环境 CORS 默认拒绝所有跨域请求 — 通过 CORS_ALLOWED_ORIGINS 显式配置"
+        )
+        cors_origins: list[str] = []
+    elif cors_raw and cors_raw != "*":
         cors_origins = [o.strip() for o in cors_raw.split(",") if o.strip()]
     else:
         cors_origins = ["*"]
@@ -678,6 +683,7 @@ def create_app() -> FastAPI:
         )
 
     devflow: DevFlowOrchestrator | None = None
+    devflow_state_sync: Any = None
     if (
         settings.plane_base_url
         and settings.plane_api_key
@@ -736,6 +742,11 @@ def create_app() -> FastAPI:
             ai_developing_state_id=settings.plane_ai_developing_state_id,
             default_branch=settings.devflow_default_branch,
         )
+
+        # DevFlow 状态同步服务
+        from agent_platform.devflow.state_sync import DevFlowStateSync
+        devflow_state_sync = DevFlowStateSync(plane_adapter=plane_adapter)
+
         logger.info(
             "DevFlow enabled: adapter=%s, project=%s",
             settings.devflow_runner_adapter,
@@ -756,6 +767,8 @@ def create_app() -> FastAPI:
         )
 
     app.state.devflow_enabled = devflow is not None
+    if devflow_state_sync is not None:
+        app.state.admin_deps.state_sync = devflow_state_sync
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -1392,6 +1405,14 @@ def create_app() -> FastAPI:
             )
 
         runtime_response = await runtime_manager.run(runtime_request)
+
+        # 成功后记录配额用量
+        if _tenant_id and quota_manager:
+            try:
+                quota_manager.record_request(_tenant_id)
+            except Exception:
+                logger.debug("配额用量记录失败", exc_info=True)
+
         return runtime_response.response
 
     async def _run_devflow(devflow_inst, event, payload):

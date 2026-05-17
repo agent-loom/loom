@@ -56,6 +56,22 @@ class DeploymentAuditLog:
         else:
             self._repo = repo
         self._last_hash: str = self.GENESIS_HASH
+        self._initialized = False
+
+    async def _ensure_chain_initialized(self) -> None:
+        """首次写入前从持久化中恢复哈希链末端状态，确保多进程安全。"""
+        if self._initialized:
+            return
+        self._initialized = True
+        try:
+            events = await self._repo.list_events(limit=1)
+            if events:
+                events.sort(key=lambda e: e.timestamp, reverse=True)
+                last = events[0]
+                if last.integrity_hash:
+                    self._last_hash = last.integrity_hash
+        except Exception:
+            logger.debug("从持久化恢复哈希链状态失败，使用 GENESIS", exc_info=True)
 
     def _seal_event(self, event: DeploymentEvent) -> DeploymentEvent:
         """为事件计算完整性哈希并链接到前一事件。"""
@@ -86,6 +102,7 @@ class DeploymentAuditLog:
         artifact_id: str | None = None,
     ) -> DeploymentEvent:
         """记录一次部署事件。"""
+        await self._ensure_chain_initialized()
         event = DeploymentEvent(
             event_type="deploy",
             agent_id=deployment.agent_id,
@@ -120,6 +137,7 @@ class DeploymentAuditLog:
         actor: str = "system",
     ) -> DeploymentEvent:
         """记录一次回滚事件。"""
+        await self._ensure_chain_initialized()
         event = DeploymentEvent(
             event_type="rollback",
             agent_id=agent_id,

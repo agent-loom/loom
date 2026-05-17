@@ -486,9 +486,32 @@ class ModelGateway:
         *,
         metrics_collector: MetricsCollector | None = None,
     ) -> ModelGateway:
-        """Create a gateway pre-loaded with the stub provider for testing/dev."""
+        """创建网关并根据环境变量自动注册可用的 LLM provider。"""
+        import os
+
         gateway = cls(default_provider="stub", metrics_collector=metrics_collector)
         gateway.register(StubModelProvider())
+
+        openai_key = os.getenv("OPENAI_API_KEY")
+        if openai_key:
+            openai_base = os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1")
+            provider = OpenAICompatibleProvider(
+                base_url=openai_base,
+                api_key=openai_key,
+                provider_name="openai",
+            )
+            gateway.register(provider)
+            gateway._default_provider = "openai"
+            logger.info("已注册 OpenAI provider 为默认 LLM 提供商")
+
+        anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+        if anthropic_key:
+            provider = AnthropicProvider(api_key=anthropic_key)
+            gateway.register(provider)
+            if not openai_key:
+                gateway._default_provider = "anthropic"
+            logger.info("已注册 Anthropic provider")
+
         return gateway
 
     def register(
