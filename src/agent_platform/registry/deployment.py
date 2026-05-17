@@ -36,6 +36,8 @@ class DeploymentEvent(BaseModel):
     previous_version: str | None = None
     actor: str = "system"
     artifact_id: str | None = None
+    eval_report_id: str | None = None
+    manifest_sha256: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     integrity_hash: str = ""
     prev_hash: str = ""
@@ -100,6 +102,8 @@ class DeploymentAuditLog:
         previous_version: str | None = None,
         actor: str = "system",
         artifact_id: str | None = None,
+        eval_report_id: str | None = None,
+        manifest_sha256: str | None = None,
     ) -> DeploymentEvent:
         """记录一次部署事件。"""
         await self._ensure_chain_initialized()
@@ -113,6 +117,8 @@ class DeploymentAuditLog:
             previous_version=previous_version,
             actor=actor,
             artifact_id=artifact_id,
+            eval_report_id=eval_report_id,
+            manifest_sha256=manifest_sha256,
         )
         sealed = self._seal_event(event)
         await self._repo.record(sealed)

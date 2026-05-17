@@ -74,7 +74,7 @@ class TestListSessions:
         m = _make_manager(session_store=store)
         result = await m.list_sessions(agent_id="echo")
         assert result == ["ses-1"]
-        store.list_sessions.assert_called_once_with(agent_id="echo")
+        store.list_sessions.assert_called_once_with(agent_id="echo", tenant_id=None)
 
 
 class TestLoadSession:

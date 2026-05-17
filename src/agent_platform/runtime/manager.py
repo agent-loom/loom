@@ -494,8 +494,11 @@ class RuntimeManager:
         self,
         *,
         agent_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> list[AgentSession]:
-        return await self.session_store.list_sessions(agent_id=agent_id)
+        return await self.session_store.list_sessions(
+            agent_id=agent_id, tenant_id=tenant_id,
+        )
 
     async def load_session(self, session_id: str) -> AgentSession | None:
         return await self.session_store.load(session_id)

@@ -1113,8 +1113,15 @@ def create_app() -> FastAPI:
         return [run.model_dump(mode="json") for run in runs]
 
     @app.get("/api/v1/agent-deployments")
-    async def list_agent_deployments() -> list[dict]:
+    async def list_agent_deployments(
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> list[dict]:
         deployments = await registry.list_deployments()
+        if _auth.role != "platform_admin" and _auth.tenant_id:
+            deployments = [
+                d for d in deployments
+                if d.tenant_id is None or d.tenant_id == _auth.tenant_id
+            ]
         return [deployment.model_dump(mode="json") for deployment in deployments]
 
     @app.get("/api/v1/agent-deployments/{deployment_id}/metrics")
@@ -1160,8 +1167,14 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/api/v1/sessions")
-    async def list_sessions(agent_id: str | None = None) -> list[dict]:
-        sessions = await runtime_manager.list_sessions(agent_id=agent_id)
+    async def list_sessions(
+        agent_id: str | None = None,
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> list[dict]:
+        tenant_id = None if _auth.role == "platform_admin" else _auth.tenant_id
+        sessions = await runtime_manager.list_sessions(
+            agent_id=agent_id, tenant_id=tenant_id,
+        )
         return [s.model_dump(mode="json") for s in sessions]
 
     @app.get("/api/v1/sessions/{session_id}")
@@ -1305,10 +1318,24 @@ def create_app() -> FastAPI:
         # 产物签名：计算 manifest SHA-256 并记录
         manifest_sha256 = artifact_signer.sign_manifest(spec.manifest)
 
+        # 产物签名验证：部署前验证 manifest 完整性
+        if not artifact_signer.verify_manifest(spec.manifest, manifest_sha256):
+            raise HTTPException(
+                status_code=409,
+                detail="产物签名验证失败：manifest SHA-256 不一致",
+            )
+
+        eval_report_id = (
+            f"{eval_report.agent_id}@{eval_report.agent_version}"
+            if eval_report else None
+        )
+
         await audit_log.record_deploy(
             deployment,
             previous_version=previous_deployment.version if previous_deployment else None,
             artifact_id=artifact_meta.artifact_id,
+            eval_report_id=eval_report_id,
+            manifest_sha256=manifest_sha256,
         )
         result = deployment.model_dump(mode="json")
         result["artifact_id"] = artifact_meta.artifact_id
