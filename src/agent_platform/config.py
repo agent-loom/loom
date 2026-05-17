@@ -48,6 +48,10 @@ class Settings(BaseModel):
     weaviate_url: str | None = None
     weaviate_api_key: str | None = None
 
+    service_jwt_secret: str | None = None
+    service_shared_secrets: str | None = None
+    max_request_body_bytes: int = 10 * 1024 * 1024  # 10MB
+
 
 @lru_cache
 def get_settings() -> Settings:
@@ -85,4 +89,7 @@ def get_settings() -> Settings:
         langfuse_host=os.getenv("LANGFUSE_HOST"),
         weaviate_url=os.getenv("WEAVIATE_URL"),
         weaviate_api_key=os.getenv("WEAVIATE_API_KEY"),
+        service_jwt_secret=os.getenv("SERVICE_JWT_SECRET"),
+        service_shared_secrets=os.getenv("SERVICE_SHARED_SECRETS"),
+        max_request_body_bytes=int(os.getenv("MAX_REQUEST_BODY_BYTES", str(10 * 1024 * 1024))),
     )

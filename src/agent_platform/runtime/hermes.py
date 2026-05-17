@@ -21,8 +21,10 @@ from agent_platform.domain.models import (
     ToolCallTrace,
 )
 from agent_platform.runtime.hermes_errors import HermesErrorHandler
+from agent_platform.runtime.hermes_hitl import HermesHITLBridge
 from agent_platform.runtime.hermes_memory import HermesMemoryBridge, PlatformMemoryProvider
 from agent_platform.runtime.model_gateway import ModelMessage
+from agent_platform.tools.approval import ApprovalGate
 
 logger = logging.getLogger(__name__)
 
@@ -424,6 +426,7 @@ class HermesRuntimeBackend:
         model_gateway: Any | None = None,
         tool_executor: Any | None = None,
         session_store: Any | None = None,
+        approval_gate: ApprovalGate | None = None,
     ):
         self.manifest_mapper = ManifestMapper()
         self.tool_bridge = ToolBridge()
@@ -439,6 +442,10 @@ class HermesRuntimeBackend:
             model_gateway=model_gateway,
             tool_executor=tool_executor,
         )
+        # HITL 审批桥接：当提供 approval_gate 时启用
+        self.hitl_bridge: HermesHITLBridge | None = None
+        if approval_gate is not None:
+            self.hitl_bridge = HermesHITLBridge(approval_gate=approval_gate)
 
     # P1-5: fallback dispatch --------------------------------------------------
 

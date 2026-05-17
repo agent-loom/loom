@@ -18,7 +18,9 @@ from agent_platform.api.access_log import AccessLogMiddleware
 from agent_platform.api.admin import router as admin_router
 from agent_platform.api.admin_deps import AdminDeps
 from agent_platform.api.auth import AuthIdentity, require_role, require_scope
+from agent_platform.api.input_sanitizer import InputSanitizationMiddleware
 from agent_platform.api.rate_limiter import RateLimiterMiddleware
+from agent_platform.api.service_auth import ServiceAuthError, ServiceAuthProvider
 from agent_platform.api.streaming import stream_agent_response
 from agent_platform.api.websocket import AgentWebSocketManager
 from agent_platform.artifacts.signer import ArtifactSigner
@@ -186,20 +188,70 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
     校验传入请求的 API 密钥并将 AuthIdentity 填入 request.state.auth，
     使得下游 require_role()/require_scope() 依赖可正常工作。
-    支持同步 ApiKeyStore（内存）和异步 SqlApiKeyStore（持久化）。
+    支持三种认证模式：API Key、Service Token（JWT/Shared Secret）、匿名。
     """
 
     _ALL_SCOPES = ["chat", "deploy", "admin", "eval", "register", "rollback", "read"]
+    _SERVICE_SCOPES = ["chat", "deploy", "eval", "read"]
     _SKIP_PATHS = {"/health", "/health/ready", "/metrics", "/docs", "/openapi.json", "/redoc"}
 
-    def __init__(self, app, api_key: str | None = None, key_store=None):
+    def __init__(
+        self,
+        app,
+        api_key: str | None = None,
+        key_store=None,
+        service_auth: ServiceAuthProvider | None = None,
+    ):
         super().__init__(app)
         self.api_key = api_key
         self.key_store = key_store
+        self.service_auth = service_auth
 
     async def dispatch(self, request: Request, call_next):
         if request.url.path in self._SKIP_PATHS:
             return await call_next(request)
+
+        # 服务间鉴权：JWT service token
+        service_token = request.headers.get("x-service-token")
+        if service_token and self.service_auth:
+            try:
+                identity = self.service_auth.verify_token(service_token)
+                self._set_auth_context(request, AuthIdentity(
+                    subject=identity.service_id,
+                    tenant_id=request.headers.get("x-tenant-id", "default"),
+                    role="service",
+                    scopes=identity.permissions or self._SERVICE_SCOPES,
+                ))
+                return await call_next(request)
+            except ServiceAuthError:
+                return JSONResponse(
+                    status_code=401,
+                    content={"error": {"code": "UNAUTHORIZED", "message": "invalid service token"}},
+                )
+
+        # 服务间鉴权：Shared Secret
+        service_id = request.headers.get("x-service-id")
+        service_secret = request.headers.get("x-service-secret")
+        if service_id and service_secret and self.service_auth:
+            try:
+                identity = self.service_auth.verify_shared_secret(service_id, service_secret)
+                self._set_auth_context(request, AuthIdentity(
+                    subject=identity.service_id,
+                    tenant_id=request.headers.get("x-tenant-id", "default"),
+                    role="service",
+                    scopes=identity.permissions or self._SERVICE_SCOPES,
+                ))
+                return await call_next(request)
+            except ServiceAuthError:
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "error": {
+                            "code": "UNAUTHORIZED",
+                            "message": "invalid service credentials",
+                        }
+                    },
+                )
 
         if not self.api_key and self.key_store is None:
             self._set_auth_context(request, AuthIdentity(
@@ -509,6 +561,15 @@ def create_app() -> FastAPI:
         key_store=key_store,
     )
 
+    # ── 服务间鉴权 ──
+    service_auth: ServiceAuthProvider | None = None
+    if settings.service_jwt_secret:
+        service_auth = ServiceAuthProvider(
+            jwt_secret=settings.service_jwt_secret,
+            shared_secrets=_parse_service_secrets(settings.service_shared_secrets),
+        )
+        logger.info("Service-to-service auth enabled (JWT + Shared Secret)")
+
     app = FastAPI(title="Agent Platform", version="0.2.0", lifespan=_app_lifespan)
     app.state._settings = settings
     app.state._closeables = []
@@ -553,12 +614,18 @@ def create_app() -> FastAPI:
     )
 
     app.state.key_store = key_store
+    app.state.service_auth = service_auth
 
     app.add_middleware(
         AuthMiddleware, api_key=settings.api_key, key_store=key_store,
+        service_auth=service_auth,
     )
     app.add_middleware(RateLimiterMiddleware, requests_per_minute=120, burst=20)
     app.add_middleware(AccessLogMiddleware)
+    app.add_middleware(
+        InputSanitizationMiddleware,
+        max_body_bytes=settings.max_request_body_bytes,
+    )
 
     cors_raw = settings.cors_allowed_origins
     if cors_raw and cors_raw != "*":
@@ -1458,3 +1525,16 @@ def _deployment_status(channel: str, traffic_percent: int) -> AgentDeploymentSta
     if channel == "prod":
         return AgentDeploymentStatus.PROD
     return AgentDeploymentStatus.REGISTERED
+
+
+def _parse_service_secrets(raw: str | None) -> dict[str, str] | None:
+    """解析 'svc-id1:secret1,svc-id2:secret2' 格式的服务密钥。"""
+    if not raw:
+        return None
+    result: dict[str, str] = {}
+    for pair in raw.split(","):
+        pair = pair.strip()
+        if ":" in pair:
+            svc_id, secret = pair.split(":", 1)
+            result[svc_id.strip()] = secret.strip()
+    return result or None
