@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Agent Platform{% endblock %} — Admin</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+  </style>
+</head>
+<body class="h-full bg-gray-50" x-data="{ sidebarOpen: true }">
+  <div class="flex h-full">
+    <!-- 侧边栏 -->
+    <aside class="w-64 bg-gray-900 text-white flex-shrink-0" x-show="sidebarOpen" x-cloak>
+      <div class="p-4 border-b border-gray-700">
+        <h1 class="text-lg font-bold">Agent Platform</h1>
+        <p class="text-xs text-gray-400 mt-1">管理控制台</p>
+      </div>
+      <nav class="mt-4 space-y-1 px-2">
+        <a href="/admin/" class="flex items-center px-3 py-2 text-sm rounded-lg hover:bg-gray-800 {% block nav_dashboard %}{% endblock %}">
+          <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+          </svg>
+          仪表盘
+        </a>
+        <a href="/admin/agents" class="flex items-center px-3 py-2 text-sm rounded-lg hover:bg-gray-800 {% block nav_agents %}{% endblock %}">
+          <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+          </svg>
+          Agent 管理
+        </a>
+        <a href="/admin/evals" class="flex items-center px-3 py-2 text-sm rounded-lg hover:bg-gray-800 {% block nav_evals %}{% endblock %}">
+          <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+          </svg>
+          Eval 报告
+        </a>
+        <a href="/admin/devflow" class="flex items-center px-3 py-2 text-sm rounded-lg hover:bg-gray-800 {% block nav_devflow %}{% endblock %}">
+          <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"/>
+          </svg>
+          DevFlow 看板
+        </a>
+        <a href="/admin/deployments" class="flex items-center px-3 py-2 text-sm rounded-lg hover:bg-gray-800 {% block nav_deployments %}{% endblock %}">
+          <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+          </svg>
+          部署管理
+        </a>
+        <a href="/admin/sessions" class="flex items-center px-3 py-2 text-sm rounded-lg hover:bg-gray-800 {% block nav_sessions %}{% endblock %}">
+          <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+          </svg>
+          会话管理
+        </a>
+        <a href="/admin/observability" class="flex items-center px-3 py-2 text-sm rounded-lg hover:bg-gray-800 {% block nav_observability %}{% endblock %}">
+          <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+          </svg>
+          可观测性
+        </a>
+      </nav>
+    </aside>
+
+    <!-- 主内容 -->
+    <main class="flex-1 overflow-y-auto">
+      <header class="bg-white shadow-sm border-b px-6 py-3 flex items-center justify-between">
+        <div class="flex items-center">
+          <button @click="sidebarOpen = !sidebarOpen" class="mr-4 text-gray-500 hover:text-gray-700">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+            </svg>
+          </button>
+          <h2 class="text-lg font-semibold text-gray-800">{% block page_title %}仪表盘{% endblock %}</h2>
+        </div>
+        <div class="flex items-center space-x-4" x-data="{ loggedIn: localStorage.getItem('api_key') }">
+          <span class="text-sm text-gray-500" x-show="loggedIn">已认证</span>
+          <a href="/admin/login" class="text-sm text-blue-600 hover:underline" x-show="!loggedIn">登录</a>
+        </div>
+      </header>
+      <div class="p-6">
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const API_BASE = '';
+    function apiHeaders() {
+      const key = localStorage.getItem('api_key');
+      const h = {'Content-Type': 'application/json'};
+      if (key) h['Authorization'] = 'Bearer ' + key;
+      return h;
+    }
+    async function apiFetch(path) {
+      const resp = await fetch(API_BASE + path, {headers: apiHeaders()});
+      if (!resp.ok) throw new Error(`API 错误: ${resp.status}`);
+      return resp.json();
+    }
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

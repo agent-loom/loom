@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Agent 管理{% endblock %}
+{% block page_title %}Agent 管理{% endblock %}
+{% block nav_agents %}bg-gray-800 text-white{% endblock %}
+
+{% block content %}
+<div x-data="agentsData()" x-init="init()">
+  <!-- Agent 列表 -->
+  <div class="bg-white rounded-xl shadow">
+    <div class="px-6 py-4 border-b flex items-center justify-between">
+      <h3 class="text-lg font-semibold">已注册 Agent</h3>
+      <button @click="init()" class="text-sm text-blue-600 hover:underline">刷新</button>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Agent ID</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">名称</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">版本</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">运行时后端</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">健康状态</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">成功率</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">活跃会话</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          <template x-for="agent in agents" :key="agent.agent_id">
+            <tr class="hover:bg-gray-50 cursor-pointer" @click="selectAgent(agent)">
+              <td class="px-6 py-4 text-sm font-medium text-blue-600" x-text="agent.agent_id"></td>
+              <td class="px-6 py-4 text-sm text-gray-900" x-text="agent.name"></td>
+              <td class="px-6 py-4 text-sm text-gray-500" x-text="agent.version"></td>
+              <td class="px-6 py-4">
+                <span class="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-700" x-text="agent.runtime_backend"></span>
+              </td>
+              <td class="px-6 py-4">
+                <span class="text-xs px-2 py-1 rounded-full"
+                      :class="(agent.health_info?.health || 'unknown') === 'healthy' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'"
+                      x-text="agent.health_info?.health || '未知'"></span>
+              </td>
+              <td class="px-6 py-4 text-sm text-gray-500"
+                  x-text="agent.health_info ? (agent.health_info.success_rate * 100).toFixed(0) + '%' : '-'"></td>
+              <td class="px-6 py-4 text-sm text-gray-500"
+                  x-text="agent.health_info?.active_sessions ?? '-'"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+      <p x-show="agents.length === 0" class="px-6 py-8 text-center text-gray-400">暂无注册 Agent</p>
+    </div>
+  </div>
+
+  <!-- Agent 详情面板 -->
+  <div x-show="selected" x-cloak class="mt-6 bg-white rounded-xl shadow p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-lg font-semibold" x-text="'Agent: ' + (selected?.agent_id || '')"></h3>
+      <button @click="selected = null" class="text-gray-400 hover:text-gray-600">关闭</button>
+    </div>
+    <div class="grid grid-cols-2 gap-4">
+      <div><span class="text-sm text-gray-500">ID:</span> <span class="text-sm font-medium" x-text="selected?.agent_id"></span></div>
+      <div><span class="text-sm text-gray-500">名称:</span> <span class="text-sm font-medium" x-text="selected?.name"></span></div>
+      <div><span class="text-sm text-gray-500">版本:</span> <span class="text-sm font-medium" x-text="selected?.version"></span></div>
+      <div><span class="text-sm text-gray-500">后端:</span> <span class="text-sm font-medium" x-text="selected?.runtime_backend"></span></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function agentsData() {
+  return {
+    agents: [],
+    selected: null,
+    async init() {
+      try {
+        const list = await apiFetch('/api/v1/agents');
+        const withHealth = await Promise.all(list.map(async (a) => {
+          try {
+            a.health_info = await apiFetch(`/api/v1/agents/${a.agent_id}/health`);
+          } catch { a.health_info = null; }
+          return a;
+        }));
+        this.agents = withHealth;
+      } catch (e) {
+        console.error('加载 Agent 列表失败:', e);
+      }
+    },
+    selectAgent(agent) {
+      this.selected = agent;
+    }
+  };
+}
+</script>
+{% endblock %}

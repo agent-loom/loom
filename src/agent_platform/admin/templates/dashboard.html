@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}仪表盘{% endblock %}
+{% block nav_dashboard %}bg-gray-800 text-white{% endblock %}
+
+{% block content %}
+<div x-data="dashboardData()" x-init="init()">
+  <!-- 概览卡片 -->
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+    <div class="bg-white rounded-xl shadow p-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm text-gray-500">注册 Agent</p>
+          <p class="text-3xl font-bold text-gray-900" x-text="stats.agents"></p>
+        </div>
+        <div class="bg-blue-100 p-3 rounded-lg">
+          <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl shadow p-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm text-gray-500">活跃会话</p>
+          <p class="text-3xl font-bold text-gray-900" x-text="stats.sessions"></p>
+        </div>
+        <div class="bg-green-100 p-3 rounded-lg">
+          <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl shadow p-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm text-gray-500">部署</p>
+          <p class="text-3xl font-bold text-gray-900" x-text="stats.deployments"></p>
+        </div>
+        <div class="bg-purple-100 p-3 rounded-lg">
+          <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl shadow p-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm text-gray-500">系统状态</p>
+          <p class="text-xl font-bold" :class="health.ok ? 'text-green-600' : 'text-red-600'"
+             x-text="health.ok ? '正常' : '异常'"></p>
+        </div>
+        <div :class="health.ok ? 'bg-green-100' : 'bg-red-100'" class="p-3 rounded-lg">
+          <svg class="w-6 h-6" :class="health.ok ? 'text-green-600' : 'text-red-600'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 健康检查详情 -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+    <div class="bg-white rounded-xl shadow p-6">
+      <h3 class="text-lg font-semibold mb-4">系统健康检查</h3>
+      <div class="space-y-3">
+        <template x-for="(val, key) in health.checks" :key="key">
+          <div class="flex items-center justify-between py-2 border-b border-gray-100">
+            <span class="text-sm text-gray-600" x-text="key"></span>
+            <span class="text-sm px-2 py-1 rounded-full"
+                  :class="['ok','enabled','in_memory'].includes(val) ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'"
+                  x-text="val"></span>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl shadow p-6">
+      <h3 class="text-lg font-semibold mb-4">最近运行</h3>
+      <div class="space-y-2">
+        <template x-for="run in runs" :key="run.run_id || run">
+          <div class="flex items-center justify-between py-2 border-b border-gray-100">
+            <div>
+              <span class="text-sm font-medium" x-text="run.agent_id || '-'"></span>
+              <span class="text-xs text-gray-400 ml-2" x-text="run.run_id || ''"></span>
+            </div>
+            <span class="text-xs px-2 py-1 rounded-full"
+                  :class="run.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'"
+                  x-text="run.status || 'unknown'"></span>
+          </div>
+        </template>
+        <p x-show="runs.length === 0" class="text-sm text-gray-400">暂无运行记录</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function dashboardData() {
+  return {
+    stats: { agents: 0, sessions: 0, deployments: 0 },
+    health: { ok: false, checks: {} },
+    runs: [],
+    async init() {
+      try {
+        const [agents, sessions, deployments, healthData, readyData, runs] = await Promise.allSettled([
+          apiFetch('/api/v1/agents'),
+          apiFetch('/api/v1/sessions'),
+          apiFetch('/api/v1/agent-deployments'),
+          apiFetch('/health'),
+          apiFetch('/health/ready'),
+          apiFetch('/api/v1/agent-runs'),
+        ]);
+        this.stats.agents = agents.status === 'fulfilled' ? agents.value.length : 0;
+        this.stats.sessions = sessions.status === 'fulfilled' ? sessions.value.length : 0;
+        this.stats.deployments = deployments.status === 'fulfilled' ? deployments.value.length : 0;
+        this.health.ok = healthData.status === 'fulfilled' && healthData.value.status === 'ok';
+        if (readyData.status === 'fulfilled') {
+          this.health.checks = readyData.value.checks || {};
+        }
+        this.runs = runs.status === 'fulfilled' ? runs.value.slice(0, 10) : [];
+      } catch (e) {
+        console.error('加载仪表盘数据失败:', e);
+      }
+    }
+  };
+}
+</script>
+{% endblock %}

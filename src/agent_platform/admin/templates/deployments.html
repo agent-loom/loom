@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}部署管理{% endblock %}
+{% block page_title %}部署管理{% endblock %}
+{% block nav_deployments %}bg-gray-800 text-white{% endblock %}
+
+{% block content %}
+<div x-data="deploymentsData()" x-init="init()">
+  <div class="bg-white rounded-xl shadow">
+    <div class="px-6 py-4 border-b flex items-center justify-between">
+      <h3 class="text-lg font-semibold">部署列表</h3>
+      <button @click="init()" class="text-sm text-blue-600 hover:underline">刷新</button>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">部署 ID</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Agent</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">版本</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">通道</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">状态</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">流量比例</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">指标</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          <template x-for="d in deployments" :key="d.deployment_id">
+            <tr class="hover:bg-gray-50">
+              <td class="px-6 py-4 text-sm font-mono" x-text="d.deployment_id?.substring(0,12) + '...'"></td>
+              <td class="px-6 py-4 text-sm font-medium" x-text="d.agent_id"></td>
+              <td class="px-6 py-4 text-sm" x-text="d.version"></td>
+              <td class="px-6 py-4">
+                <span class="text-xs px-2 py-1 rounded-full"
+                      :class="{
+                        'bg-green-100 text-green-700': d.channel === 'prod',
+                        'bg-yellow-100 text-yellow-700': d.channel === 'staging',
+                        'bg-blue-100 text-blue-700': d.channel === 'canary',
+                        'bg-gray-100 text-gray-700': !['prod','staging','canary'].includes(d.channel)
+                      }"
+                      x-text="d.channel"></span>
+              </td>
+              <td class="px-6 py-4">
+                <span class="text-xs px-2 py-1 rounded-full"
+                      :class="{
+                        'bg-green-100 text-green-700': d.status === 'prod',
+                        'bg-yellow-100 text-yellow-700': d.status === 'staging',
+                        'bg-gray-100 text-gray-700': true
+                      }"
+                      x-text="d.status"></span>
+              </td>
+              <td class="px-6 py-4 text-sm" x-text="d.traffic_pct != null ? d.traffic_pct + '%' : '-'"></td>
+              <td class="px-6 py-4">
+                <button @click="loadMetrics(d.deployment_id)" class="text-sm text-blue-600 hover:underline">查看指标</button>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+      <p x-show="deployments.length === 0" class="px-6 py-8 text-center text-gray-400">暂无部署</p>
+    </div>
+  </div>
+
+  <!-- 指标面板 -->
+  <div x-show="metrics" x-cloak class="mt-6 bg-white rounded-xl shadow p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-lg font-semibold">部署指标</h3>
+      <button @click="metrics = null" class="text-gray-400 hover:text-gray-600">关闭</button>
+    </div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="bg-blue-50 p-4 rounded-lg text-center">
+        <p class="text-xs text-gray-500">总请求</p>
+        <p class="text-2xl font-bold" x-text="metrics?.total_requests ?? '-'"></p>
+      </div>
+      <div class="bg-green-50 p-4 rounded-lg text-center">
+        <p class="text-xs text-gray-500">成功率</p>
+        <p class="text-2xl font-bold text-green-600" x-text="metrics?.success_rate != null ? (metrics.success_rate * 100).toFixed(1) + '%' : '-'"></p>
+      </div>
+      <div class="bg-yellow-50 p-4 rounded-lg text-center">
+        <p class="text-xs text-gray-500">P95 延迟</p>
+        <p class="text-2xl font-bold text-yellow-600" x-text="metrics?.p95_latency_ms != null ? metrics.p95_latency_ms.toFixed(0) + 'ms' : '-'"></p>
+      </div>
+      <div class="bg-red-50 p-4 rounded-lg text-center">
+        <p class="text-xs text-gray-500">错误数</p>
+        <p class="text-2xl font-bold text-red-600" x-text="metrics?.error_count ?? '-'"></p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function deploymentsData() {
+  return {
+    deployments: [],
+    metrics: null,
+    async init() {
+      try {
+        this.deployments = await apiFetch('/api/v1/agent-deployments');
+      } catch (e) {
+        console.error('加载部署列表失败:', e);
+      }
+    },
+    async loadMetrics(deploymentId) {
+      try {
+        this.metrics = await apiFetch('/api/v1/agent-deployments/' + deploymentId + '/metrics');
+      } catch (e) {
+        console.error('加载指标失败:', e);
+        this.metrics = {};
+      }
+    }
+  };
+}
+</script>
+{% endblock %}

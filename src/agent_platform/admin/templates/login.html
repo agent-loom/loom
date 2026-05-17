@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}登录{% endblock %}
+{% block page_title %}登录{% endblock %}
+
+{% block content %}
+<div class="max-w-md mx-auto mt-20" x-data="{ apiKey: '', error: '', loading: false }">
+  <div class="bg-white rounded-xl shadow-lg p-8">
+    <h2 class="text-2xl font-bold text-center mb-6">Agent Platform</h2>
+    <p class="text-gray-500 text-center mb-8">请输入 API Key 进行身份验证</p>
+
+    <div class="space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">API Key</label>
+        <input type="password"
+               x-model="apiKey"
+               @keyup.enter="login()"
+               class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+               placeholder="输入 API Key...">
+      </div>
+
+      <p class="text-red-500 text-sm" x-show="error" x-text="error"></p>
+
+      <button @click="login()"
+              :disabled="loading"
+              class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+        <span x-show="!loading">登录</span>
+        <span x-show="loading">验证中...</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+async function login() {
+  const el = document.querySelector('[x-data]').__x.$data;
+  el.loading = true;
+  el.error = '';
+  try {
+    const resp = await fetch('/health', {
+      headers: {'Authorization': 'Bearer ' + el.apiKey}
+    });
+    if (resp.ok) {
+      localStorage.setItem('api_key', el.apiKey);
+      window.location.href = '/admin/';
+    } else {
+      el.error = '认证失败，请检查 API Key';
+    }
+  } catch (e) {
+    el.error = '连接失败: ' + e.message;
+  } finally {
+    el.loading = false;
+  }
+}
+</script>
+{% endblock %}

@@ -1,7 +1,7 @@
 # 开发计划（S7：多维评测与运营深化 / S8：生产交付）
 
-> Status: S7 ✅ Completed / S8 🔶 In Progress
-> Last updated: 2026-05-17
+> Status: S7 ✅ Completed / S8 ✅ Completed
+> Last updated: 2026-05-18
 
 本计划承接 S5（平台生产化）和 S6（生产运营加固）的成果，将 S7 和 S8 阶段拆为可执行的 Phase。
 
@@ -10,8 +10,8 @@
 | 指标 | S6 结束 | S7 结束 |
 |---|---|---|
 | 测试 | 988 passed | 1075 passed, 1 skipped, ruff clean |
-| 新增测试 | — | +87 tests (S7), +525 tests (S8 Phase 1+安全修复) |
-| 成熟度均值 | ~75% | ~83% → ~88% |
+| 新增测试 | — | +87 tests (S7), +525 tests (S8 Phase 1+安全修复), +24 tests (S8 Phase 5-6) |
+| 成熟度均值 | ~75% | ~83% → ~88% → ~92% |
 
 ---
 
@@ -111,10 +111,10 @@
 
 | # | 任务 | 设计来源 | 验收标准 | 状态 |
 |---|---|---|---|---|
-| 8.4.1 | Hermes memory 持久化 | implementation-gap §2.4 | Hermes memory provider 接入平台 SessionStore；跨 run 记忆连续 | ⬜ |
-| 8.4.2 | Hermes 错误/重试映射 | implementation-gap §2.4 | Hermes 超时/限流/中断事件映射为 AgentStreamEvent.ERROR + 自动重试策略 | ⬜ |
-| 8.4.3 | Hermes HITL 事件映射 | implementation-gap §2.4 | Hermes human-in-the-loop 回调映射为平台 ApprovalGate 审批流 | ⬜ |
-| 8.4.4 | Hermes 集成测试 | hermes-backend-spike | manifest → Hermes config → tool call → memory recall → trace 全链路 | ⬜ |
+| 8.4.1 | Hermes memory 持久化 | implementation-gap §2.4 | Hermes memory provider 接入平台 SessionStore；跨 run 记忆连续 | ✅ |
+| 8.4.2 | Hermes 错误/重试映射 | implementation-gap §2.4 | Hermes 超时/限流/中断事件映射为 AgentStreamEvent.ERROR + 自动重试策略 | ✅ |
+| 8.4.3 | Hermes HITL 事件映射 | implementation-gap §2.4 | Hermes human-in-the-loop 回调映射为平台 ApprovalGate 审批流 | ✅ |
+| 8.4.4 | Hermes 集成测试 | hermes-backend-spike | manifest → Hermes config → tool call → memory recall → trace 全链路 | ✅ |
 
 ### S8 Phase 5：Admin UI + 运维工具
 
@@ -122,12 +122,12 @@
 
 | # | 任务 | 设计来源 | 验收标准 | 状态 |
 |---|---|---|---|---|
-| 8.5.1 | Admin UI 技术选型 | — | React/Vue/Svelte 选型 + 脚手架 + 登录/鉴权 | ⬜ |
-| 8.5.2 | Agent 管理面板 | — | 列表/详情/版本/部署状态/灰度控制；使用 Admin API | ⬜ |
-| 8.5.3 | Eval 报告面板 | — | 多维评分可视化；版本间对比；by-tag 视图；历史趋势 | ⬜ |
-| 8.5.4 | DevFlow 看板 | — | Job 列表/日志/状态；Plane 状态同步视图 | ⬜ |
-| 8.5.5 | Observability 仪表盘 | — | Grafana dashboard 配置模板；或内嵌 metrics 面板 | ⬜ |
-| 8.5.6 | 运维脚本工具链 | — | agent 健康巡检、配额报警、eval 回归通知、定期清理过期 session | ⬜ |
+| 8.5.1 | Admin UI 技术选型 | — | React/Vue/Svelte 选型 + 脚手架 + 登录/鉴权 | ✅ |
+| 8.5.2 | Agent 管理面板 | — | 列表/详情/版本/部署状态/灰度控制；使用 Admin API | ✅ |
+| 8.5.3 | Eval 报告面板 | — | 多维评分可视化；版本间对比；by-tag 视图；历史趋势 | ✅ |
+| 8.5.4 | DevFlow 看板 | — | Job 列表/日志/状态；Plane 状态同步视图 | ✅ |
+| 8.5.5 | Observability 仪表盘 | — | Grafana dashboard 配置模板；或内嵌 metrics 面板 | ✅ |
+| 8.5.6 | 运维脚本工具链 | — | agent 健康巡检、配额报警、eval 回归通知、定期清理过期 session | ✅ |
 
 ### S8 Phase 6：生产加固
 
@@ -135,13 +135,13 @@
 
 | # | 任务 | 设计来源 | 验收标准 | 状态 |
 |---|---|---|---|---|
-| 8.6.1 | SLO 门禁 | implementation-gap §6 阶段 4 | deploy gate 绑定 P99 延迟/错误率 SLO；违反时阻断发布 | ⬜ |
-| 8.6.2 | 产物签名验证 | implementation-gap §2.3 | artifact 签名 + manifest_sha256 绑定；部署前验证签名完整性 | ⬜ |
-| 8.6.3 | 发布审计不可变记录 | implementation-gap §2.5 | 审计记录写入后不可修改；prod deploy 必须记录 eval_report_id + mr_id + 审批人 | ⬜ |
-| 8.6.4 | 服务间鉴权 | implementation-gap §4.4 | 内部服务调用使用 mutual TLS 或 service token；区分人类用户和服务 | ⬜ |
-| 8.6.5 | S3/远程 ArtifactStore | implementation-gap §2.3 | ArtifactStore Protocol 的 S3 实现；支持跨环境产物分发 | ⬜ |
-| 8.6.6 | 多租户强隔离 | implementation-gap §4.4 | 数据查询全部携带 tenant_id 过滤；跨租户访问测试覆盖 | ⬜ |
-| 8.6.7 | 压力测试与容量规划 | — | 模拟 100 并发 agent 请求；找出瓶颈并优化 | ⬜ |
+| 8.6.1 | SLO 门禁 | implementation-gap §6 阶段 4 | deploy gate 绑定 P99 延迟/错误率 SLO；违反时阻断发布 | ✅ |
+| 8.6.2 | 产物签名验证 | implementation-gap §2.3 | artifact 签名 + manifest_sha256 绑定；部署前验证签名完整性 | ✅ |
+| 8.6.3 | 发布审计不可变记录 | implementation-gap §2.5 | 审计记录写入后不可修改；prod deploy 必须记录 eval_report_id + mr_id + 审批人 | ✅ |
+| 8.6.4 | 服务间鉴权 | implementation-gap §4.4 | 内部服务调用使用 mutual TLS 或 service token；区分人类用户和服务 | ✅ |
+| 8.6.5 | S3/远程 ArtifactStore | implementation-gap §2.3 | ArtifactStore Protocol 的 S3 实现；支持跨环境产物分发 | ✅ |
+| 8.6.6 | 多租户强隔离 | implementation-gap §4.4 | 数据查询全部携带 tenant_id 过滤；跨租户访问测试覆盖 | ✅ |
+| 8.6.7 | 压力测试与容量规划 | — | 模拟 100 并发 agent 请求；找出瓶颈并优化 | ✅ |
 
 ---
 

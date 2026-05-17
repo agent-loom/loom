@@ -763,6 +763,9 @@ def create_app() -> FastAPI:
     app.include_router(mcp_sse.router)
     app.state.mcp_sse = mcp_sse
 
+    from agent_platform.admin.routes import router as admin_ui_router
+    app.include_router(admin_ui_router)
+
     app.state.key_store = key_store
     app.state._key_store = key_store
     app.state.service_auth = service_auth
