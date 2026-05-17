@@ -105,7 +105,7 @@ class EvalReport(BaseModel):
 
 
 def load_dataset(path: str | Path) -> list[EvalCase]:
-    """从 YAML 或 JSON 文件加载评测数据集。"""
+    """从 YAML 或 JSON 文件加载评测数据集，支持顶层列表或 {cases: [...]} 格式。"""
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"eval dataset not found: {p}")
@@ -209,7 +209,7 @@ class EvalRunner:
         *,
         trigger: str = "dataset",
     ) -> EvalReport:
-        """仅运行外部数据集（不加载 manifest 自带用例）。"""
+        """仅运行外部数据集（不加载 manifest 自带用例），独立生成评测报告。"""
         cases = load_dataset(dataset_path)
         sources = [str(dataset_path)]
         results: list[EvalCaseResult] = []
@@ -315,6 +315,7 @@ class EvalRunner:
     # ── 汇总统计 ────────────────────────────────────────────
 
     def _compute_summary(self, results: list[EvalCaseResult]) -> EvalSummaryStats:
+        """汇总所有用例结果，计算准确率均值、延迟分位数、成本合计及按标签分组统计。"""
         if not results:
             return EvalSummaryStats()
 
@@ -361,6 +362,7 @@ class EvalRunner:
         )
 
     def _compute_by_tag(self, results: list[EvalCaseResult]) -> dict[str, dict[str, Any]]:
+        """按标签分组聚合评测结果，为每个标签计算通过率和平均指标。"""
         tag_groups: dict[str, list[EvalCaseResult]] = {}
         for r in results:
             for tag in r.tags:
@@ -383,6 +385,7 @@ class EvalRunner:
 
     @staticmethod
     def _percentile(sorted_values: list[int | float], p: int) -> float:
+        """计算已排序数组的第 p 百分位数（线性插值）。"""
         if not sorted_values:
             return 0.0
         k = (len(sorted_values) - 1) * p / 100.0

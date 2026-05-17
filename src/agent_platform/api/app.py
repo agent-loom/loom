@@ -21,6 +21,7 @@ from agent_platform.api.auth import AuthIdentity, require_role, require_scope
 from agent_platform.api.rate_limiter import RateLimiterMiddleware
 from agent_platform.api.streaming import stream_agent_response
 from agent_platform.api.websocket import AgentWebSocketManager
+from agent_platform.artifacts.signer import ArtifactSigner
 from agent_platform.config import get_settings
 from agent_platform.devflow.agents import ArchitectureDesignAgent, TestGenerationAgent
 from agent_platform.devflow.issue_generator import IssueGenerator
@@ -456,6 +457,19 @@ def create_app() -> FastAPI:
     test_agent = TestGenerationAgent()
     audit_log = DeploymentAuditLog(repo=audit_repo)
     artifact_store = ArtifactStore()
+    artifact_signer = ArtifactSigner()
+
+    # ── SLO 门禁 ──
+    from agent_platform.governance.slo import SLOGate
+    slo_gate = SLOGate(metrics=app_metrics)
+
+    # ── Dead Letter Queue ──
+    from agent_platform.webhooks.dead_letter import (
+        InMemoryDeadLetterQueue,
+        WebhookRetryService,
+    )
+    dlq = InMemoryDeadLetterQueue()
+    webhook_retry_service = WebhookRetryService(dlq=dlq)
 
     key_store = None
     if db_session_factory is not None:
@@ -516,6 +530,8 @@ def create_app() -> FastAPI:
         tool_audit_repo=tool_audit_repo,
         quota_manager=quota_manager,
         eval_runner=eval_runner,
+        slo_gate=slo_gate,
+        webhook_retry_service=webhook_retry_service,
     )
     app.include_router(
         admin_router,
@@ -920,6 +936,22 @@ def create_app() -> FastAPI:
                 )
             eval_report = report
 
+        # SLO 门禁：staging/prod 部署前检查 SLO 是否满足
+        slo_results = None
+        if payload.channel in {"staging", "prod"}:
+            all_passed, slo_checks = slo_gate.check_all(agent_id)
+            slo_results = [r.model_dump(mode="json") for r in slo_checks]
+            if not all_passed:
+                violations = [r.message for r in slo_checks if not r.passed]
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "message": "SLO gate failed",
+                        "violations": violations,
+                        "results": slo_results,
+                    },
+                )
+
         status = _deployment_status(payload.channel, payload.traffic_percent)
         previous_deployment = await registry.resolve_deployment(
             agent_id=agent_id,
@@ -941,6 +973,9 @@ def create_app() -> FastAPI:
             package_path=spec.package_path,
         )
 
+        # 产物签名：计算 manifest SHA-256 并记录
+        manifest_sha256 = artifact_signer.sign_manifest(spec.manifest)
+
         await audit_log.record_deploy(
             deployment,
             previous_version=previous_deployment.version if previous_deployment else None,
@@ -948,6 +983,9 @@ def create_app() -> FastAPI:
         )
         result = deployment.model_dump(mode="json")
         result["artifact_id"] = artifact_meta.artifact_id
+        result["manifest_sha256"] = manifest_sha256
+        if slo_results:
+            result["slo_checks"] = slo_results
         if eval_report:
             result["eval"] = eval_report.model_dump(mode="json")
         return result

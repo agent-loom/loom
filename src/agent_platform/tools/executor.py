@@ -16,6 +16,7 @@ from agent_platform.observability.instrumentation import instrument_tool_call
 from agent_platform.observability.tracing import get_tracer
 from agent_platform.tools.approval import ApprovalGate, ApprovalRequest, ApprovalStatus
 from agent_platform.tools.registry import ToolRegistry
+from agent_platform.tools.schema_validator import validate_tool_input
 
 logger = logging.getLogger(__name__)
 tracer = get_tracer("agent_platform.tools")
@@ -340,24 +341,8 @@ class ToolExecutor:
 
     @staticmethod
     def _validate_input(schema: dict[str, Any], payload: dict[str, Any]) -> str | None:
-        if not schema:
-            return None
-        required = schema.get("required", [])
-        properties = schema.get("properties", {})
-        for field in required:
-            if field not in payload:
-                return f"missing required field: {field}"
-        for key, value in payload.items():
-            if key in properties:
-                prop_spec = properties[key]
-                expected_type = prop_spec.get("type")
-                if expected_type and not _check_type(value, expected_type):
-                    return (
-                        f"field '{key}' expected type "
-                        f"'{expected_type}', got "
-                        f"'{type(value).__name__}'"
-                    )
-        return None
+        """校验工具调用参数，优先使用 JSON Schema 完整校验。"""
+        return validate_tool_input(schema, payload)
 
     @staticmethod
     def _latency_ms(started: float) -> int:
@@ -385,18 +370,3 @@ class ToolExecutor:
             )
         except Exception:
             logger.exception("failed to persist tool audit for %s", result.tool_name)
-
-
-def _check_type(value: Any, expected: str) -> bool:
-    type_map = {
-        "string": str,
-        "integer": int,
-        "number": (int, float),
-        "boolean": bool,
-        "array": list,
-        "object": dict,
-    }
-    expected_types = type_map.get(expected)
-    if expected_types is None:
-        return True
-    return isinstance(value, expected_types)

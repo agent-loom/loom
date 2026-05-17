@@ -624,3 +624,178 @@ async def verify_artifact(
         "manifest_sha256": metadata.manifest_sha256,
         "valid": valid,
     }
+
+
+# ---------------------------------------------------------------------------
+# DevFlow 状态管理
+# ---------------------------------------------------------------------------
+
+
+class TransitionRequest(BaseModel):
+    """手动触发状态转换的请求体。"""
+
+    to_state: str
+    actor: str = "admin"
+    reason: str = ""
+
+
+@router.get("/devflow/states")
+async def list_devflow_states(request: Request) -> list[dict[str, Any]]:
+    """列出所有已跟踪的 work item 状态。"""
+    deps = _deps(request)
+    if deps.state_sync is None:
+        raise HTTPException(status_code=501, detail="state sync not configured")
+
+    items = deps.state_sync.tracked_items
+    return [
+        {
+            "work_item_id": wid,
+            "current_state": sm.current_state.value,
+            "history_count": len(sm.history),
+        }
+        for wid, sm in items.items()
+    ]
+
+
+@router.get("/devflow/states/{work_item_id}")
+async def get_devflow_state(
+    work_item_id: str, request: Request,
+) -> dict[str, Any]:
+    """获取特定 work item 的状态和历史。"""
+    deps = _deps(request)
+    if deps.state_sync is None:
+        raise HTTPException(status_code=501, detail="state sync not configured")
+
+    items = deps.state_sync.tracked_items
+    sm = items.get(work_item_id)
+    if sm is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"work item not found: {work_item_id}",
+        )
+
+    return {
+        "work_item_id": work_item_id,
+        "current_state": sm.current_state.value,
+        "available_transitions": sorted(s.value for s in sm.available_transitions()),
+        "history": [t.model_dump(mode="json") for t in sm.history],
+    }
+
+
+@router.post("/devflow/states/{work_item_id}/transition")
+async def transition_devflow_state(
+    work_item_id: str,
+    body: TransitionRequest,
+    request: Request,
+) -> dict[str, Any]:
+    """手动触发状态转换。"""
+    deps = _deps(request)
+    if deps.state_sync is None:
+        raise HTTPException(status_code=501, detail="state sync not configured")
+
+    from agent_platform.devflow.state_machine import DevFlowState, InvalidTransitionError
+
+    # 校验目标状态是否合法
+    try:
+        to_state = DevFlowState(body.to_state)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"invalid state: {body.to_state}",
+        ) from exc
+
+    sm = deps.state_sync.get_or_create(work_item_id)
+    try:
+        record = sm.transition(to_state, actor=body.actor, reason=body.reason)
+    except InvalidTransitionError as exc:
+        raise HTTPException(status_code=409, detail=exc.message) from exc
+
+    return {
+        "work_item_id": work_item_id,
+        "transition": record.model_dump(mode="json"),
+        "current_state": sm.current_state.value,
+    }
+
+
+# ---------------------------------------------------------------------------
+# SLO 门禁管理
+# ---------------------------------------------------------------------------
+
+
+@router.get("/slo/{agent_id}")
+async def get_agent_slo(
+    agent_id: str,
+    request: Request,
+) -> dict[str, Any]:
+    """查看指定 agent 的当前 SLO 状态。"""
+    deps = _deps(request)
+    if deps.slo_gate is None:
+        raise HTTPException(status_code=501, detail="SLO gate not configured")
+    all_passed, results = deps.slo_gate.check_all(agent_id)
+    return {
+        "agent_id": agent_id,
+        "all_passed": all_passed,
+        "results": [r.model_dump(mode="json") for r in results],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Dead Letter Queue 管理
+# ---------------------------------------------------------------------------
+
+
+@router.get("/dlq")
+async def list_dead_letter_entries(
+    request: Request,
+    status: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """列出 Dead Letter Queue 中的条目。"""
+    deps = _deps(request)
+    if deps.webhook_retry_service is None:
+        raise HTTPException(status_code=501, detail="DLQ not configured")
+    entries = await deps.webhook_retry_service.dlq.list_entries(
+        status=status, limit=limit,
+    )
+    return [e.model_dump(mode="json") for e in entries]
+
+
+@router.post("/dlq/{entry_id}/retry")
+async def retry_dead_letter_entry(
+    entry_id: str,
+    request: Request,
+) -> dict[str, Any]:
+    """手动重试指定的 Dead Letter 条目。"""
+    deps = _deps(request)
+    if deps.webhook_retry_service is None:
+        raise HTTPException(status_code=501, detail="DLQ not configured")
+    entries = await deps.webhook_retry_service.dlq.list_entries()
+    entry = next((e for e in entries if e.id == entry_id), None)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"entry not found: {entry_id}")
+    if entry.status == "resolved":
+        raise HTTPException(status_code=409, detail="entry already resolved")
+    # 重置重试状态，让其立即可被处理
+    from agent_platform.webhooks.dead_letter import _utc_now
+    await deps.webhook_retry_service.dlq.update_retry(
+        entry_id, _utc_now(), entry.retry_count,
+    )
+    return {"status": "queued_for_retry", "entry_id": entry_id}
+
+
+@router.delete("/dlq/{entry_id}")
+async def resolve_dead_letter_entry(
+    entry_id: str,
+    request: Request,
+) -> dict[str, Any]:
+    """标记 Dead Letter 条目为已解决。"""
+    deps = _deps(request)
+    if deps.webhook_retry_service is None:
+        raise HTTPException(status_code=501, detail="DLQ not configured")
+    entries = await deps.webhook_retry_service.dlq.list_entries()
+    entry = next((e for e in entries if e.id == entry_id), None)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"entry not found: {entry_id}")
+    await deps.webhook_retry_service.dlq.mark_resolved(entry_id)
+    return {"status": "resolved", "entry_id": entry_id}
+

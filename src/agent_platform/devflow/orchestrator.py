@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from agent_platform.devflow.runner.models import CodingJob
+from agent_platform.devflow.state_machine import DevFlowState
+from agent_platform.devflow.state_sync import DevFlowStateSync
 from agent_platform.devflow.task_pack import DevelopmentTask, TaskPackGenerator
 from agent_platform.integrations.plane.adapter import PlaneAdapter
 from agent_platform.integrations.scm.protocol import ScmAdapter
@@ -45,6 +47,7 @@ class DevFlowOrchestrator:
         job_queue: Any | None = None,
         ai_developing_state_id: str | None = None,
         default_branch: str = "main",
+        state_sync: DevFlowStateSync | None = None,
     ):
         self.plane = plane
         self.gitlab = gitlab
@@ -54,6 +57,7 @@ class DevFlowOrchestrator:
         self.job_queue = job_queue
         self.ai_developing_state_id = ai_developing_state_id
         self.default_branch = default_branch
+        self.state_sync = state_sync
         self.task_pack_generator = TaskPackGenerator()
         self._processed_items: set[str] = set()
 
@@ -94,6 +98,12 @@ class DevFlowOrchestrator:
         work_item_detail = await self._fetch_work_item_detail(project_id, work_item_id)
         agent_id = self._extract_agent_id(work_item_detail)
         task_type = self._extract_task_type(work_item_detail)
+
+        # 状态同步：需求解析完成 → READY_FOR_AI_DEV
+        await self._sync_state(
+            work_item_id, project_id, DevFlowState.READY_FOR_AI_DEV,
+            reason="需求解析完成，准备 AI 开发",
+        )
 
         # 基于需求详情生成开发任务包
         task_pack = self.task_pack_generator.from_requirement(
@@ -154,6 +164,11 @@ class DevFlowOrchestrator:
         coding_job: CodingJob | None = None
         job_submitted = False
         if self.coding_runner is not None and mr_iid is not None:
+            # 状态同步：Runner 开始执行 → AI_DEVELOPING
+            await self._sync_state(
+                work_item_id, project_id, DevFlowState.AI_DEVELOPING,
+                reason="Runner 开始执行编码任务",
+            )
             coding_job, job_submitted = await self._dispatch_runner(
                 task_pack, mr_iid=mr_iid,
                 plane_project_id=project_id,
@@ -289,3 +304,28 @@ class DevFlowOrchestrator:
         """
         props = work_item.get("properties") or work_item.get("custom_properties") or {}
         return props.get("task_type", "platform:change")
+
+    async def _sync_state(
+        self,
+        work_item_id: str,
+        project_id: str,
+        new_state: DevFlowState,
+        *,
+        reason: str = "",
+    ) -> None:
+        """向后兼容的状态同步辅助方法。
+
+        如果 state_sync 不存在则跳过，失败时仅记录警告不阻塞主流程。
+        """
+        if self.state_sync is None:
+            return
+        try:
+            await self.state_sync.sync_to_plane(
+                work_item_id, project_id, new_state, reason=reason,
+            )
+        except Exception:
+            logger.warning(
+                "状态同步失败: work_item=%s, target_state=%s",
+                work_item_id,
+                new_state.value,
+            )

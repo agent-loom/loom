@@ -20,6 +20,8 @@ from agent_platform.domain.models import (
     RuntimeResponse,
     ToolCallTrace,
 )
+from agent_platform.runtime.hermes_errors import HermesErrorHandler
+from agent_platform.runtime.hermes_memory import HermesMemoryBridge, PlatformMemoryProvider
 from agent_platform.runtime.model_gateway import ModelMessage
 
 logger = logging.getLogger(__name__)
@@ -421,6 +423,7 @@ class HermesRuntimeBackend:
         self,
         model_gateway: Any | None = None,
         tool_executor: Any | None = None,
+        session_store: Any | None = None,
     ):
         self.manifest_mapper = ManifestMapper()
         self.tool_bridge = ToolBridge()
@@ -430,12 +433,27 @@ class HermesRuntimeBackend:
         self.policy_enforcer = PolicyEnforcer()
         self.model_gateway = model_gateway
         self.tool_executor = tool_executor
+        self.session_store = session_store
+        self.error_handler = HermesErrorHandler()
         self.conversation_engine = ConversationEngine(
             model_gateway=model_gateway,
             tool_executor=tool_executor,
         )
 
     # P1-5: fallback dispatch --------------------------------------------------
+
+    def _build_memory_bridge(
+        self, agent_id: str, session_id: str,
+    ) -> HermesMemoryBridge | None:
+        """构建记忆桥接器（如果 session_store 已配置）。"""
+        if self.session_store is None or not session_id:
+            return None
+        provider = PlatformMemoryProvider(
+            session_store=self.session_store,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+        return HermesMemoryBridge(provider=provider)
 
     async def run(self, request: RuntimeRequest) -> RuntimeResponse:
         violations = self.policy_enforcer.check_pre_run(request.agent_spec)
@@ -444,13 +462,39 @@ class HermesRuntimeBackend:
 
         hermes_config = self.manifest_mapper.to_hermes_config(request.agent_spec)
 
-        if HERMES_AVAILABLE:
-            try:
-                return await self._run_with_hermes(request, hermes_config)
-            except Exception as e:
-                logger.error("Hermes SDK run failed, falling back to engine: %s", e)
+        # 记忆桥接：加载历史
+        agent_id = request.agent_spec.agent_id
+        session_id = request.request.session_id or ""
+        memory_bridge = self._build_memory_bridge(agent_id, session_id)
 
-        return await self._run_with_engine(request, hermes_config)
+        prior_messages: list[dict[str, str]] = []
+        if memory_bridge and session_id:
+            prior_messages = await memory_bridge.prepare(session_id)
+
+        async def _execute() -> RuntimeResponse:
+            if HERMES_AVAILABLE:
+                try:
+                    return await self._run_with_hermes(
+                        request, hermes_config, prior_messages,
+                    )
+                except Exception as e:
+                    logger.error(
+                        "Hermes SDK run failed, falling back to engine: %s", e,
+                    )
+            return await self._run_with_engine(request, hermes_config)
+
+        # 使用错误处理器执行（带重试）
+        result = await self.error_handler.handle_with_retry(_execute)
+
+        # 记忆桥接：保存新消息
+        if memory_bridge and session_id:
+            user_msg = {"role": "user", "content": request.request.input.query}
+            response_text = result.response.output.text.display
+            assistant_msg = {"role": "assistant", "content": response_text}
+            all_messages = prior_messages + [user_msg, assistant_msg]
+            await memory_bridge.commit(session_id, all_messages)
+
+        return result
 
     # Spike A path --------------------------------------------------------------
 
@@ -481,7 +525,10 @@ class HermesRuntimeBackend:
     # P1-3: Hermes SDK path -----------------------------------------------------
 
     async def _run_with_hermes(
-        self, request: RuntimeRequest, hermes_config: dict[str, Any]
+        self,
+        request: RuntimeRequest,
+        hermes_config: dict[str, Any],
+        prior_messages: list[dict[str, str]] | None = None,
     ) -> RuntimeResponse:
         import anyio
 
@@ -508,7 +555,10 @@ class HermesRuntimeBackend:
             system_prompt += f"\n\n[Knowledge Context]\n{knowledge_block}"
 
         conversation_history: list[dict[str, str]] = []
-        if request.runtime_context and getattr(request.runtime_context, "messages", None):
+        # 优先使用记忆桥接加载的历史消息
+        if prior_messages:
+            conversation_history = list(prior_messages)
+        elif request.runtime_context and getattr(request.runtime_context, "messages", None):
             msgs = request.runtime_context.messages
             if (
                 msgs

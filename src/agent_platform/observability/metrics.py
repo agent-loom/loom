@@ -126,6 +126,68 @@ class MetricsCollector:
         self.set_gauge("active_sessions", float(count))
 
     # ------------------------------------------------------------------
+    # Structured metrics retrieval for SLO evaluation
+    # ------------------------------------------------------------------
+
+    def get_metrics(self, agent_id: str) -> dict[str, float]:
+        """获取指定 agent 的聚合指标，用于 SLO 评估。
+
+        返回的指标包括：
+        - total_requests: 总请求数
+        - error_count: 错误数
+        - error_rate: 错误率
+        - success_rate: 成功率
+        - p99_latency_ms: P99 延迟（毫秒）
+        - p90_latency_ms: P90 延迟（毫秒）
+        - p50_latency_ms: P50 延迟（毫秒）
+        - avg_latency_ms: 平均延迟（毫秒）
+        """
+        result: dict[str, float] = {}
+        agent_label = (("agent_id", agent_id),)
+
+        with self._lock:
+            # 请求总数
+            total = 0.0
+            for label_key, val in self._counters.get("agent_requests_total", {}).items():
+                if any(k == "agent_id" and v == agent_id for k, v in label_key):
+                    total += val
+            result["total_requests"] = total
+
+            # 错误数
+            error_count = self._counters.get(
+                "agent_request_errors_total", {},
+            ).get(agent_label, 0.0)
+            result["error_count"] = error_count
+
+            # 错误率与成功率
+            if total > 0:
+                result["error_rate"] = error_count / total
+                result["success_rate"] = 1.0 - (error_count / total)
+            else:
+                result["error_rate"] = 0.0
+                result["success_rate"] = 1.0
+
+            # 延迟分位数（从观测数据计算）
+            observations = self._observations.get(
+                "agent_request_duration_seconds", {},
+            ).get(agent_label, [])
+            if observations:
+                sorted_obs = sorted(observations)
+                count = len(sorted_obs)
+                # 转换为毫秒
+                result["p50_latency_ms"] = sorted_obs[min(int(0.5 * count), count - 1)] * 1000
+                result["p90_latency_ms"] = sorted_obs[min(int(0.9 * count), count - 1)] * 1000
+                result["p99_latency_ms"] = sorted_obs[min(int(0.99 * count), count - 1)] * 1000
+                result["avg_latency_ms"] = (sum(sorted_obs) / count) * 1000
+            else:
+                result["p50_latency_ms"] = 0.0
+                result["p90_latency_ms"] = 0.0
+                result["p99_latency_ms"] = 0.0
+                result["avg_latency_ms"] = 0.0
+
+        return result
+
+    # ------------------------------------------------------------------
     # Context manager for timing requests
     # ------------------------------------------------------------------
 
