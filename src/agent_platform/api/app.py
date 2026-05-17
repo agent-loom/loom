@@ -64,6 +64,7 @@ from agent_platform.persistence.memory import (
     InMemoryCodingJobRepository,
     InMemoryDeploymentAuditRepository,
     InMemoryEvalRunRepository,
+    InMemoryToolAuditRepository,
     InMemoryWebhookDeliveryRepository,
 )
 from agent_platform.policy import PolicyEngine
@@ -398,6 +399,7 @@ def create_app() -> FastAPI:
             SqlAgentSessionRepository,
             SqlDeploymentAuditRepository,
             SqlEvalRunRepository,
+            SqlToolAuditRepository,
             SqlWebhookDeliveryRepository,
         )
 
@@ -408,6 +410,7 @@ def create_app() -> FastAPI:
         eval_repo = SqlEvalRunRepository(db_session_factory)
         definition_repo = SqlAgentDefinitionRepository(db_session_factory)
         deployment_repo = SqlAgentDeploymentRepository(db_session_factory)
+        tool_audit_repo = SqlToolAuditRepository(db_session_factory)
     else:
         run_repo = InMemoryAgentRunRepository()
         session_repo = InMemoryAgentSessionRepository()
@@ -416,8 +419,10 @@ def create_app() -> FastAPI:
         eval_repo = InMemoryEvalRunRepository()
         definition_repo = None
         deployment_repo = None
+        tool_audit_repo = InMemoryToolAuditRepository()
 
     coding_job_repo = InMemoryCodingJobRepository()
+    tool_executor.audit_repo = tool_audit_repo
 
     registry = AgentRegistry(
         Path(settings.registry_root),
@@ -500,6 +505,7 @@ def create_app() -> FastAPI:
         metrics=app_metrics,
         key_store=key_store,
         eval_repo=eval_repo,
+        tool_audit_repo=tool_audit_repo,
     )
     app.include_router(
         admin_router,

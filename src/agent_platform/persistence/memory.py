@@ -376,3 +376,55 @@ class InMemoryCodingJobRepository:
         if status is not None:
             items = [j for j in items if j.get("state") == status]
         return items[-limit:]
+
+
+class InMemoryToolAuditRepository:
+    """工具调用审计的内存存储实现。"""
+
+    def __init__(self) -> None:
+        self._events: list[dict[str, Any]] = []
+
+    async def record(
+        self,
+        *,
+        tool_name: str,
+        status: str,
+        latency_ms: int,
+        error: str | None = None,
+        payload: dict[str, Any] | None = None,
+        output: dict[str, Any] | None = None,
+        run_id: str | None = None,
+        agent_id: str | None = None,
+    ) -> None:
+        self._events.append({
+            "id": uuid.uuid4().hex,
+            "tool_name": tool_name,
+            "status": status,
+            "latency_ms": latency_ms,
+            "error": error,
+            "payload": payload,
+            "output": output,
+            "run_id": run_id,
+            "agent_id": agent_id,
+            "created_at": datetime.now(UTC).isoformat(),
+        })
+
+    async def list_events(
+        self,
+        *,
+        tool_name: str | None = None,
+        agent_id: str | None = None,
+        run_id: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        items = self._events
+        if tool_name is not None:
+            items = [e for e in items if e["tool_name"] == tool_name]
+        if agent_id is not None:
+            items = [e for e in items if e.get("agent_id") == agent_id]
+        if run_id is not None:
+            items = [e for e in items if e.get("run_id") == run_id]
+        if status is not None:
+            items = [e for e in items if e["status"] == status]
+        return items[-limit:]

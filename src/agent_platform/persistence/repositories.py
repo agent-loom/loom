@@ -236,6 +236,38 @@ class EvalRunRepository(Protocol):
 
 
 @runtime_checkable
+class ToolAuditRepository(Protocol):
+    """工具调用审计记录的存储协议。"""
+
+    async def record(
+        self,
+        *,
+        tool_name: str,
+        status: str,
+        latency_ms: int,
+        error: str | None = None,
+        payload: dict[str, Any] | None = None,
+        output: dict[str, Any] | None = None,
+        run_id: str | None = None,
+        agent_id: str | None = None,
+    ) -> None:
+        """记录一次工具调用审计事件。"""
+        ...
+
+    async def list_events(
+        self,
+        *,
+        tool_name: str | None = None,
+        agent_id: str | None = None,
+        run_id: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """列出工具审计记录，可按条件过滤。"""
+        ...
+
+
+@runtime_checkable
 class CodingJobRepository(Protocol):
     """DevFlow coding job persistence."""
 

@@ -1,10 +1,15 @@
 import hashlib
+import logging
 from dataclasses import dataclass
 
 from agent_platform.config import Settings
 from agent_platform.domain.models import AgentRequest, AgentSpec
+from agent_platform.observability.tracing import get_tracer
 from agent_platform.registry.registry import AgentRegistry
 from agent_platform.router_semantic import SemanticRouter
+
+logger = logging.getLogger(__name__)
+tracer = get_tracer("agent_platform.router")
 
 
 @dataclass(frozen=True)
@@ -37,10 +42,28 @@ class AgentRouter:
 
     async def route(self, request: AgentRequest) -> RouteResult:
         """执行请求路由。
-        
+
         依次检查 Agent ID、App ID、租户 ID、渠道 ID，以及语义匹配，
         最后降级为默认 Agent。
         """
+        with tracer.start_as_current_span("agent_route") as span:
+            result = await self._route_inner(request)
+            span.set_attribute("route.agent_id", result.agent_spec.agent_id)
+            span.set_attribute("route.reason", result.reason)
+            if result.deployment_id:
+                span.set_attribute("route.deployment_id", result.deployment_id)
+            if result.traffic_bucket is not None:
+                span.set_attribute("route.traffic_bucket", result.traffic_bucket)
+            logger.info(
+                "route decision: agent=%s reason=%s deployment=%s bucket=%s",
+                result.agent_spec.agent_id,
+                result.reason,
+                result.deployment_id,
+                result.traffic_bucket,
+            )
+            return result
+
+    async def _route_inner(self, request: AgentRequest) -> RouteResult:
         # 1. 显式指定了 Agent ID
         if request.agent_id:
             return await self._route_agent(request.agent_id, request, "agent_id")

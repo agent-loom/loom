@@ -764,6 +764,90 @@ class SqlEvalRunRepository:
 
 
 # ------------------------------------------------------------------
+# ToolAudit
+# ------------------------------------------------------------------
+
+
+class SqlToolAuditRepository:
+    """工具调用审计的 SQL 存储实现。"""
+
+    def __init__(
+        self, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        self._sf = session_factory
+
+    async def record(
+        self,
+        *,
+        tool_name: str,
+        status: str,
+        latency_ms: int,
+        error: str | None = None,
+        payload: dict[str, Any] | None = None,
+        output: dict[str, Any] | None = None,
+        run_id: str | None = None,
+        agent_id: str | None = None,
+    ) -> None:
+        from agent_platform.persistence.tables import ToolAuditRow
+        row = ToolAuditRow(
+            tool_name=tool_name,
+            status=status,
+            latency_ms=latency_ms,
+            error=error,
+            payload_json=payload,
+            output_json=output,
+            run_id=run_id,
+            agent_id=agent_id,
+        )
+        _fill_audit(row)
+        async with self._sf() as session:
+            session.add(row)
+            await session.commit()
+
+    async def list_events(
+        self,
+        *,
+        tool_name: str | None = None,
+        agent_id: str | None = None,
+        run_id: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        from agent_platform.persistence.tables import ToolAuditRow
+        stmt = select(ToolAuditRow)
+        if tool_name is not None:
+            stmt = stmt.where(ToolAuditRow.tool_name == tool_name)
+        if agent_id is not None:
+            stmt = stmt.where(ToolAuditRow.agent_id == agent_id)
+        if run_id is not None:
+            stmt = stmt.where(ToolAuditRow.run_id == run_id)
+        if status is not None:
+            stmt = stmt.where(ToolAuditRow.status == status)
+        stmt = stmt.order_by(ToolAuditRow.created_at.desc()).limit(limit)
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+            return [self._to_dict(r) for r in rows]
+
+    @staticmethod
+    def _to_dict(row: Any) -> dict[str, Any]:
+        return {
+            "id": row.id,
+            "tool_name": row.tool_name,
+            "status": row.status,
+            "latency_ms": row.latency_ms,
+            "error": row.error,
+            "payload": row.payload_json,
+            "output": row.output_json,
+            "run_id": row.run_id,
+            "agent_id": row.agent_id,
+            "created_at": (
+                row.created_at.isoformat() if row.created_at else None
+            ),
+        }
+
+
+# ------------------------------------------------------------------
 # ApiKeyStore (SQL)
 # ------------------------------------------------------------------
 

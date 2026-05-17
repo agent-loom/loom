@@ -328,3 +328,30 @@ async def list_audit_events(
         agent_id=agent_id, channel=channel, limit=limit,
     )
     return [e.model_dump(mode="json") for e in events]
+
+
+# ---------------------------------------------------------------------------
+# Tool Audit
+# ---------------------------------------------------------------------------
+
+
+@router.get("/tool-audit")
+async def list_tool_audit_events(
+    request: Request,
+    tool_name: str | None = None,
+    agent_id: str | None = None,
+    run_id: str | None = None,
+    status: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """List tool call audit events."""
+    deps = _deps(request)
+    if deps.tool_audit_repo is None:
+        raise HTTPException(status_code=501, detail="tool audit repo not configured")
+    return await deps.tool_audit_repo.list_events(
+        tool_name=tool_name,
+        agent_id=agent_id,
+        run_id=run_id,
+        status=status,
+        limit=limit,
+    )

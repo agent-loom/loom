@@ -38,6 +38,7 @@ class ToolExecutor:
         hook_registry: Any | None = None,
         metrics_collector: Any | None = None,
         approval_gate: ApprovalGate | None = None,
+        audit_repo: Any | None = None,
     ):
         """初始化执行器，注入注册中心、策略引擎及可选的 Hook 与指标收集器。"""
         self.registry = registry
@@ -45,6 +46,7 @@ class ToolExecutor:
         self.hook_registry = hook_registry
         self.metrics_collector = metrics_collector
         self.approval_gate = approval_gate
+        self.audit_repo = audit_repo
 
     async def execute(
         self,
@@ -58,6 +60,29 @@ class ToolExecutor:
         run_id: str | None = None,
     ) -> ToolExecutionResult:
         """异步执行指定工具，返回执行结果与追踪信息。"""
+        result = await self._execute_inner(
+            tool_name, payload,
+            allowed_tools=allowed_tools,
+            timeout_ms=timeout_ms,
+            agent_spec=agent_spec,
+            agent_id=agent_id,
+            run_id=run_id,
+        )
+        await self._record_audit(result, payload, agent_id, run_id)
+        return result
+
+    async def _execute_inner(
+        self,
+        tool_name: str,
+        payload: dict[str, Any],
+        *,
+        allowed_tools: list[str],
+        timeout_ms: int = 3000,
+        agent_spec: Any | None = None,
+        agent_id: str | None = None,
+        run_id: str | None = None,
+    ) -> ToolExecutionResult:
+        """内部执行逻辑。"""
         started = perf_counter()
 
         with tracer.start_as_current_span("tool_call") as span:
@@ -329,6 +354,29 @@ class ToolExecutor:
     @staticmethod
     def _latency_ms(started: float) -> int:
         return max(0, round((perf_counter() - started) * 1000))
+
+    async def _record_audit(
+        self,
+        result: ToolExecutionResult,
+        payload: dict[str, Any],
+        agent_id: str | None,
+        run_id: str | None,
+    ) -> None:
+        if self.audit_repo is None:
+            return
+        try:
+            await self.audit_repo.record(
+                tool_name=result.tool_name,
+                status=result.trace.status,
+                latency_ms=int(result.trace.latency_ms),
+                error=result.trace.error,
+                payload=payload,
+                output=result.output,
+                run_id=run_id,
+                agent_id=agent_id,
+            )
+        except Exception:
+            logger.exception("failed to persist tool audit for %s", result.tool_name)
 
 
 def _check_type(value: Any, expected: str) -> bool:

@@ -248,6 +248,36 @@ class EvalRunRow(AuditMixin, Base):
     )
 
 
+class ToolAuditRow(AuditMixin, Base):
+    """工具调用审计表行模型。"""
+    __tablename__ = "tool_audit_events"
+
+    run_id: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, index=True
+    )
+    agent_id: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, index=True
+    )
+    tool_name: Mapped[str] = mapped_column(
+        String(128), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False
+    )
+    latency_ms: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    error: Mapped[str | None] = mapped_column(
+        String(256), nullable=True
+    )
+    payload_json: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True
+    )
+    output_json: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True
+    )
+
+
 class ApiKeyRow(AuditMixin, Base):
     """API 密钥持久化表行模型。"""
     __tablename__ = "api_keys"

@@ -2,26 +2,21 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import AsyncGenerator
-from typing import Any
 
+from agent_platform.api.stream_events import (
+    cards_event,
+    commands_event,
+    error_event,
+    message_completed,
+    message_delta,
+    run_completed,
+    run_started,
+    tool_completed,
+    tool_started,
+)
 from agent_platform.domain.models import RuntimeRequest
 from agent_platform.runtime.manager import RuntimeManager
-
-
-class SSEEvent:
-    """表示一个 SSE 事件，包含事件类型和数据负载。"""
-
-    def __init__(self, event: str, data: dict[str, Any]) -> None:
-        """初始化 SSE 事件。"""
-        self.event = event
-        self.data = data
-
-    def encode(self) -> str:
-        """将事件编码为 SSE 文本格式。"""
-        payload = json.dumps(self.data, ensure_ascii=False)
-        return f"event: {self.event}\ndata: {payload}\n\n"
 
 
 async def stream_agent_response(
@@ -30,11 +25,9 @@ async def stream_agent_response(
 ) -> AsyncGenerator[str, None]:
     """以 SSE 流的方式输出 Agent 运行结果。"""
     agent = runtime_request.agent_spec
-    yield SSEEvent("run.started", {
-        "agent_id": agent.agent_id,
-        "agent_version": agent.version,
-        "run_id": runtime_request.request.request_id,
-    }).encode()
+    yield run_started(
+        agent.agent_id, agent.version, runtime_request.request.request_id,
+    ).to_sse()
 
     try:
         response = await runtime_manager.run(runtime_request)
@@ -42,48 +35,38 @@ async def stream_agent_response(
 
         if agent_response.trace and agent_response.trace.tool_calls:
             for tc in agent_response.trace.tool_calls:
-                yield SSEEvent("tool.started", {
-                    "tool_name": tc.tool_name,
-                }).encode()
-                yield SSEEvent("tool.completed", {
-                    "tool_name": tc.tool_name,
-                    "status": tc.status,
-                    "latency_ms": tc.latency_ms,
-                }).encode()
+                yield tool_started(tc.tool_name).to_sse()
+                yield tool_completed(
+                    tc.tool_name, tc.status, tc.latency_ms,
+                ).to_sse()
 
         display = agent_response.output.text.display
         chunks = _chunk_text(display, chunk_size=80)
         for chunk in chunks:
-            yield SSEEvent("message.delta", {
-                "content": chunk,
-                "type": "text",
-            }).encode()
+            yield message_delta(chunk).to_sse()
 
-        yield SSEEvent("message.completed", {
-            "text": agent_response.output.text.model_dump(),
-            "status": agent_response.output.status.value,
-        }).encode()
+        yield message_completed(
+            agent_response.output.text.model_dump(),
+            agent_response.output.status.value,
+        ).to_sse()
 
         if agent_response.output.cards:
-            yield SSEEvent("cards", {
-                "cards": [c.model_dump() for c in agent_response.output.cards],
-            }).encode()
+            yield cards_event(
+                [c.model_dump() for c in agent_response.output.cards],
+            ).to_sse()
 
         if agent_response.output.commands:
-            yield SSEEvent("commands", {
-                "commands": [c.model_dump() for c in agent_response.output.commands],
-            }).encode()
+            yield commands_event(
+                [c.model_dump() for c in agent_response.output.commands],
+            ).to_sse()
 
-        yield SSEEvent("run.completed", {
-            "agent_id": agent.agent_id,
-            "trace": agent_response.trace.model_dump() if agent_response.trace else None,
-        }).encode()
+        yield run_completed(
+            agent.agent_id,
+            agent_response.trace.model_dump() if agent_response.trace else None,
+        ).to_sse()
 
     except Exception as exc:
-        yield SSEEvent("error", {
-            "code": "STREAM_ERROR",
-            "message": str(exc),
-        }).encode()
+        yield error_event("STREAM_ERROR", str(exc)).to_sse()
 
 
 def _chunk_text(text: str, chunk_size: int = 80) -> list[str]:
