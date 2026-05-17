@@ -468,6 +468,7 @@ def create_app() -> FastAPI:
             SqlAgentDeploymentRepository,
             SqlAgentRunRepository,
             SqlAgentSessionRepository,
+            SqlCodingJobRepository,
             SqlDeploymentAuditRepository,
             SqlEvalRunRepository,
             SqlRoutingDecisionRepository,
@@ -484,6 +485,7 @@ def create_app() -> FastAPI:
         deployment_repo = SqlAgentDeploymentRepository(db_session_factory)
         tool_audit_repo = SqlToolAuditRepository(db_session_factory)
         routing_decision_repo = SqlRoutingDecisionRepository(db_session_factory)
+        coding_job_repo = SqlCodingJobRepository(db_session_factory)
     else:
         run_repo = InMemoryAgentRunRepository()
         session_repo = InMemoryAgentSessionRepository()
@@ -494,8 +496,8 @@ def create_app() -> FastAPI:
         deployment_repo = None
         tool_audit_repo = InMemoryToolAuditRepository()
         routing_decision_repo = InMemoryRoutingDecisionRepository()
+        coding_job_repo = InMemoryCodingJobRepository()
 
-    coding_job_repo = InMemoryCodingJobRepository()
     tool_executor.audit_repo = tool_audit_repo
 
     registry = AgentRegistry(

@@ -81,8 +81,23 @@ def upgrade() -> None:
         sa.Column("context_json", sa.JSON, nullable=True),
     )
 
+    # -- 5. 新增 coding_jobs 表 --
+    op.create_table(
+        "coding_jobs",
+        sa.Column("id", sa.String(64), primary_key=True),
+        sa.Column("tenant_id", sa.String(128), nullable=True, index=True),
+        sa.Column("created_by", sa.String(128), nullable=False, server_default="system"),
+        sa.Column("request_id", sa.String(128), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("job_id", sa.String(128), nullable=False, unique=True, index=True),
+        sa.Column("state", sa.String(32), nullable=False, server_default="pending"),
+        sa.Column("data_json", sa.JSON, nullable=True),
+    )
+
 
 def downgrade() -> None:
+    op.drop_table("coding_jobs")
     op.drop_table("routing_decisions")
     op.drop_table("api_keys")
     op.drop_table("tool_audit_events")

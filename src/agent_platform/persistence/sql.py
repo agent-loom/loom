@@ -29,6 +29,7 @@ from agent_platform.persistence.tables import (
     ApiKeyRow,
     DeploymentAuditEventRow,
     EvalRunRow,
+    CodingJobRow,
     RoutingDecisionRow,
     WebhookDeliveryRow,
 )
@@ -1092,3 +1093,60 @@ class SqlRoutingDecisionRepository:
             "tenant_id": row.tenant_id,
             "created_at": row.created_at.isoformat() if row.created_at else None,
         }
+
+
+# ------------------------------------------------------------------
+# CodingJob
+# ------------------------------------------------------------------
+
+
+class SqlCodingJobRepository:
+    """DevFlow coding job 的 SQL 存储实现。"""
+
+    def __init__(
+        self, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        self._sf = session_factory
+
+    async def save(self, job_data: dict[str, Any]) -> None:
+        job_id = job_data.get("job_id", "")
+        async with self._sf() as session:
+            stmt = select(CodingJobRow).where(CodingJobRow.job_id == job_id)
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row is None:
+                row = CodingJobRow(
+                    job_id=job_id,
+                    state=job_data.get("state", "pending"),
+                    data_json=job_data,
+                )
+                _fill_audit(row)
+                session.add(row)
+            else:
+                row.state = job_data.get("state", row.state)
+                row.data_json = job_data
+            await session.commit()
+
+    async def get(self, job_id: str) -> dict[str, Any] | None:
+        async with self._sf() as session:
+            stmt = select(CodingJobRow).where(CodingJobRow.job_id == job_id)
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row is None:
+                return None
+            return row.data_json or {}
+
+    async def list_jobs(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        stmt = select(CodingJobRow)
+        if status is not None:
+            stmt = stmt.where(CodingJobRow.state == status)
+        stmt = stmt.order_by(CodingJobRow.created_at.desc()).limit(limit)
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+            return [r.data_json or {} for r in rows]

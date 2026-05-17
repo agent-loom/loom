@@ -333,3 +333,18 @@ class RoutingDecisionRow(AuditMixin, Base):
     context_json: Mapped[dict | None] = mapped_column(
         JSON, nullable=True
     )
+
+
+class CodingJobRow(AuditMixin, Base):
+    """DevFlow coding job 表行模型。"""
+    __tablename__ = "coding_jobs"
+
+    job_id: Mapped[str] = mapped_column(
+        String(128), nullable=False, unique=True, index=True
+    )
+    state: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending"
+    )
+    data_json: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True
+    )
