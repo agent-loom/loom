@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from agent_platform.observability.metrics import MetricsCollector
     from agent_platform.persistence.repositories import (
         EvalRunRepository,
+        RoutingDecisionRepository,
         ToolAuditRepository,
     )
     from agent_platform.persistence.sql import SqlApiKeyStore
@@ -40,3 +41,4 @@ class AdminDeps:
     slo_gate: SLOGate | None = None
     webhook_retry_service: WebhookRetryService | None = None
     state_sync: DevFlowStateSync | None = None
+    routing_decision_repo: RoutingDecisionRepository | None = None

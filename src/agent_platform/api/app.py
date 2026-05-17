@@ -69,6 +69,7 @@ from agent_platform.persistence.memory import (
     InMemoryCodingJobRepository,
     InMemoryDeploymentAuditRepository,
     InMemoryEvalRunRepository,
+    InMemoryRoutingDecisionRepository,
     InMemoryToolAuditRepository,
     InMemoryWebhookDeliveryRepository,
 )
@@ -469,6 +470,7 @@ def create_app() -> FastAPI:
             SqlAgentSessionRepository,
             SqlDeploymentAuditRepository,
             SqlEvalRunRepository,
+            SqlRoutingDecisionRepository,
             SqlToolAuditRepository,
             SqlWebhookDeliveryRepository,
         )
@@ -481,6 +483,7 @@ def create_app() -> FastAPI:
         definition_repo = SqlAgentDefinitionRepository(db_session_factory)
         deployment_repo = SqlAgentDeploymentRepository(db_session_factory)
         tool_audit_repo = SqlToolAuditRepository(db_session_factory)
+        routing_decision_repo = SqlRoutingDecisionRepository(db_session_factory)
     else:
         run_repo = InMemoryAgentRunRepository()
         session_repo = InMemoryAgentSessionRepository()
@@ -490,6 +493,7 @@ def create_app() -> FastAPI:
         definition_repo = None
         deployment_repo = None
         tool_audit_repo = InMemoryToolAuditRepository()
+        routing_decision_repo = InMemoryRoutingDecisionRepository()
 
     coding_job_repo = InMemoryCodingJobRepository()
     tool_executor.audit_repo = tool_audit_repo
@@ -607,14 +611,29 @@ def create_app() -> FastAPI:
         eval_runner=eval_runner,
         slo_gate=slo_gate,
         webhook_retry_service=webhook_retry_service,
+        routing_decision_repo=routing_decision_repo,
     )
     app.include_router(
         admin_router,
         dependencies=[_ROLE_ADMIN],
     )
 
+    # ── MCP SSE 传输层 ──
+    from agent_platform.mcp.server import AgentPlatformMCPServer
+    from agent_platform.mcp.sse_transport import MCPSSETransport
+    mcp_server = AgentPlatformMCPServer(
+        registry=registry,
+        tool_registry=tool_registry,
+        eval_runner=eval_runner,
+        audit_log=audit_log,
+    )
+    mcp_sse = MCPSSETransport(mcp_server)
+    app.include_router(mcp_sse.router)
+    app.state.mcp_sse = mcp_sse
+
     app.state.key_store = key_store
     app.state.service_auth = service_auth
+    app.state.routing_decision_repo = routing_decision_repo
 
     app.add_middleware(
         AuthMiddleware, api_key=settings.api_key, key_store=key_store,
@@ -1293,6 +1312,22 @@ def create_app() -> FastAPI:
         if header_tenant and not request.context.tenant.tenant_id:
             request.context.tenant.tenant_id = header_tenant
 
+        # 租户配额检查
+        _tenant_id = request.context.tenant.tenant_id or header_tenant
+        if _tenant_id and quota_manager:
+            try:
+                quota_manager.check_request_quota(_tenant_id)
+            except Exception as quota_exc:
+                return JSONResponse(
+                    status_code=429,
+                    content=_error_response(
+                        request,
+                        code="QUOTA_EXCEEDED",
+                        message=str(quota_exc),
+                        status_code=429,
+                    ).model_dump(mode="json"),
+                )
+
         try:
             route = await router.route(request)
         except AgentNotFoundError as exc:
@@ -1305,6 +1340,18 @@ def create_app() -> FastAPI:
                     status_code=404,
                 ).model_dump(mode="json"),
             )
+
+        # 持久化路由决策
+        try:
+            await routing_decision_repo.record(
+                run_id=request.request_id or "",
+                agent_id=route.agent_spec.agent_id,
+                reason=route.reason,
+                deployment_id=route.deployment_id,
+                traffic_bucket=route.traffic_bucket,
+            )
+        except Exception:
+            logger.debug("路由决策记录失败", exc_info=True)
 
         missing_context = _missing_required_context(
             request,

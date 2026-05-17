@@ -799,3 +799,60 @@ async def resolve_dead_letter_entry(
     await deps.webhook_retry_service.dlq.mark_resolved(entry_id)
     return {"status": "resolved", "entry_id": entry_id}
 
+
+# ── 路由决策查询 ──
+
+
+@router.get("/admin/routing-decisions")
+async def list_routing_decisions(
+    request: Request,
+    agent_id: str | None = None,
+    reason: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """列出路由决策记录。"""
+    deps = _deps(request)
+    if deps.routing_decision_repo is None:
+        raise HTTPException(status_code=501, detail="routing decision repo not configured")
+    decisions = await deps.routing_decision_repo.list_decisions(
+        agent_id=agent_id, reason=reason, limit=limit,
+    )
+    return {"decisions": decisions, "count": len(decisions)}
+
+
+@router.get("/admin/routing-decisions/{run_id}")
+async def get_routing_decision(
+    request: Request,
+    run_id: str,
+) -> dict[str, Any]:
+    """按 run_id 获取路由决策详情。"""
+    deps = _deps(request)
+    if deps.routing_decision_repo is None:
+        raise HTTPException(status_code=501, detail="routing decision repo not configured")
+    decision = await deps.routing_decision_repo.get(run_id)
+    if decision is None:
+        raise HTTPException(status_code=404, detail=f"decision not found: {run_id}")
+    return decision
+
+
+# ── 审计链完整性校验 ──
+
+
+@router.post("/admin/audits/verify-chain")
+async def verify_audit_chain(
+    request: Request,
+    agent_id: str | None = None,
+    channel: str | None = None,
+) -> dict[str, Any]:
+    """校验部署审计事件链的完整性。"""
+    deps = _deps(request)
+    valid, count = await deps.audit_log.verify_chain(
+        agent_id=agent_id, channel=channel,
+    )
+    return {
+        "valid": valid,
+        "verified_events": count,
+        "agent_id": agent_id,
+        "channel": channel,
+    }
+
