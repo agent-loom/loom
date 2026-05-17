@@ -122,13 +122,20 @@ class DevFlowOrchestrator:
         # 安全地创建目标分支
         await self._create_branch_safe(branch)
 
+        # 在 MR 描述中嵌入 Plane 元数据，供 GitLab→Plane 反向同步使用
+        mr_description = task_pack.repository.merge_request.description or ""
+        mr_description += (
+            f"\n\n<!-- devflow:plane_project_id={project_id} "
+            f"plane_work_item_id={work_item_id} -->\n"
+        )
+
         # 在 GitLab 上创建对应的合并请求
         mr_result = await self.gitlab.create_merge_request(
             project_id=self.gitlab_project_id,
             source_branch=branch,
             target_branch=task_pack.repository.default_branch,
             title=task_pack.repository.merge_request.title,
-            description=task_pack.repository.merge_request.description,
+            description=mr_description,
             labels=task_pack.repository.merge_request.labels,
         )
 

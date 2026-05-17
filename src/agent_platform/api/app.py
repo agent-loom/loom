@@ -865,6 +865,25 @@ def create_app() -> FastAPI:
             if settings.devflow_workspace_base_dir
             else None
         )
+        # DevFlow 状态同步服务
+        from agent_platform.devflow.state_sync import DevFlowStateSync
+        devflow_state_sync = DevFlowStateSync(plane_adapter=plane_adapter)
+
+        # 执行日志仓库
+        from agent_platform.devflow.runner.execution_log import (
+            FileExecutionLogRepository,
+            InMemoryExecutionLogRepository,
+        )
+        log_base = (
+            Path(settings.devflow_workspace_base_dir) / "_logs"
+            if settings.devflow_workspace_base_dir
+            else None
+        )
+        execution_log_repo = (
+            FileExecutionLogRepository(log_base) if log_base
+            else InMemoryExecutionLogRepository()
+        )
+
         workspace_manager = WorkspaceManager(base_dir=workspace_base)
         adapter = create_adapter(settings.devflow_runner_adapter)
         coding_runner = CodingAgentRunner(
@@ -876,6 +895,7 @@ def create_app() -> FastAPI:
             repo_url=settings.devflow_repo_url,
             testing_state_id=settings.plane_testing_state_id,
             job_repo=coding_job_repo,
+            log_repo=execution_log_repo,
         )
         from agent_platform.devflow.runner.job_queue import AsyncJobQueue
 
@@ -899,11 +919,11 @@ def create_app() -> FastAPI:
             job_queue=job_queue,
             ai_developing_state_id=settings.plane_ai_developing_state_id,
             default_branch=settings.devflow_default_branch,
+            state_sync=devflow_state_sync,
         )
 
-        # DevFlow 状态同步服务
-        from agent_platform.devflow.state_sync import DevFlowStateSync
-        devflow_state_sync = DevFlowStateSync(plane_adapter=plane_adapter)
+        app.state.execution_log_repo = execution_log_repo
+        app.state.coding_runner = coding_runner
 
         logger.info(
             "DevFlow enabled: adapter=%s, project=%s",
@@ -927,6 +947,10 @@ def create_app() -> FastAPI:
     app.state.devflow_enabled = devflow is not None
     if devflow_state_sync is not None:
         app.state.admin_deps.state_sync = devflow_state_sync
+    if devflow is not None:
+        app.state.admin_deps.execution_log_repo = execution_log_repo
+        app.state.admin_deps.coding_job_repo = coding_job_repo
+        app.state.admin_deps.coding_runner = coding_runner
 
     @app.get("/health")
     async def health() -> dict[str, str]:

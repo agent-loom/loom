@@ -858,3 +858,63 @@ async def verify_audit_chain(
         "channel": channel,
     }
 
+
+# ── Runner 执行日志与作业管理 ──
+
+
+@router.get("/admin/jobs")
+async def list_jobs(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+) -> dict[str, Any]:
+    """列出存在执行日志的 Job。"""
+    deps = _deps(request)
+    if deps.execution_log_repo is None:
+        raise HTTPException(status_code=501, detail="execution log repo not configured")
+    job_ids = deps.execution_log_repo.list_jobs_with_logs(limit=limit)
+    return {"jobs": job_ids, "count": len(job_ids)}
+
+
+@router.get("/admin/jobs/{job_id}/logs")
+async def get_job_logs(
+    request: Request,
+    job_id: str,
+    stream: str | None = None,
+) -> dict[str, Any]:
+    """获取指定 Job 的执行日志。"""
+    deps = _deps(request)
+    if deps.execution_log_repo is None:
+        raise HTTPException(status_code=501, detail="execution log repo not configured")
+    from agent_platform.devflow.runner.execution_log import LogStream
+    log_stream = None
+    if stream is not None:
+        try:
+            log_stream = LogStream(stream)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"无效的 stream 类型: {stream}，可选: stdout, stderr",
+            ) from None
+    entries = deps.execution_log_repo.get_logs(job_id, stream=log_stream)
+    return {
+        "job_id": job_id,
+        "entries": [e.model_dump(mode="json") for e in entries],
+        "count": len(entries),
+    }
+
+
+@router.post("/admin/jobs/{job_id}/cancel")
+async def cancel_job(
+    request: Request,
+    job_id: str,
+) -> dict[str, Any]:
+    """取消正在运行的编码作业。"""
+    deps = _deps(request)
+    if deps.coding_runner is None:
+        raise HTTPException(status_code=501, detail="coding runner not configured")
+    adapter = deps.coding_runner.adapter
+    if hasattr(adapter, "cancel"):
+        await adapter.cancel()
+        return {"status": "cancel_requested", "job_id": job_id}
+    raise HTTPException(status_code=501, detail="adapter 不支持取消")
+

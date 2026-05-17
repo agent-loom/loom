@@ -5,6 +5,11 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+from agent_platform.devflow.runner.execution_log import (
+    ExecutionLogEntry,
+    ExecutionLogRepository,
+    LogStream,
+)
 from agent_platform.devflow.runner.models import (
     CodingJob,
     JobState,
@@ -40,6 +45,7 @@ class CodingAgentRunner:
         repo_url: str | None = None,
         testing_state_id: str | None = None,
         job_repo: CodingJobRepository | None = None,
+        log_repo: ExecutionLogRepository | None = None,
     ):
         self.adapter = adapter
         self.workspace_manager = workspace_manager
@@ -49,6 +55,7 @@ class CodingAgentRunner:
         self._repo_url_override = repo_url
         self._testing_state_id = testing_state_id
         self._job_repo = job_repo
+        self._log_repo = log_repo
 
     async def run(
         self,
@@ -216,6 +223,8 @@ class CodingAgentRunner:
             job.invocations.append(invocation)
             last_result = adapter_result
 
+            self._record_adapter_output(job.job_id, invocation, adapter_result)
+
             if adapter_result.success:
                 return adapter_result
 
@@ -352,3 +361,30 @@ class CodingAgentRunner:
             parts.append(f"<p>验证: {passed}/{total} 通过</p>")
 
         return "\n".join(parts)
+
+    def _record_adapter_output(
+        self,
+        job_id: str,
+        invocation: RunnerInvocation,
+        result: RunnerAdapterResult,
+    ) -> None:
+        """将 adapter 执行输出写入日志仓库。"""
+        if self._log_repo is None:
+            return
+        try:
+            if result.stdout:
+                self._log_repo.record(ExecutionLogEntry(
+                    job_id=job_id,
+                    stream=LogStream.STDOUT,
+                    content=result.stdout,
+                    adapter_name=invocation.adapter_type,
+                ))
+            if result.stderr:
+                self._log_repo.record(ExecutionLogEntry(
+                    job_id=job_id,
+                    stream=LogStream.STDERR,
+                    content=result.stderr,
+                    adapter_name=invocation.adapter_type,
+                ))
+        except Exception:
+            logger.warning("日志记录失败: job=%s", job_id)
