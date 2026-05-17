@@ -254,25 +254,25 @@ class ToolCallTrace(BaseModel):
 
 
 class TraceEventType(StrEnum):
-    """结构化 trace 事件类型。"""
+    """结构化 trace 事件类型，用于在运行管线各阶段记录可观测事件。"""
 
-    ROUTE_DECISION = "route_decision"
-    CONTEXT_BUILD = "context_build"
-    POLICY_CHECK = "policy_check"
-    MODEL_CALL = "model_call"
-    TOOL_CALL = "tool_call"
-    RESPONSE_BUILD = "response_build"
-    ERROR = "error"
-    CUSTOM = "custom"
+    ROUTE_DECISION = "route_decision"  # 路由决策（选择后端）
+    CONTEXT_BUILD = "context_build"  # 上下文构建（会话 + 知识注入）
+    POLICY_CHECK = "policy_check"  # 策略检查（输入/输出合规）
+    MODEL_CALL = "model_call"  # 模型调用（LLM 推理）
+    TOOL_CALL = "tool_call"  # 工具调用
+    RESPONSE_BUILD = "response_build"  # 响应组装
+    ERROR = "error"  # 运行时错误
+    CUSTOM = "custom"  # 自定义扩展事件
 
 
 class TraceEvent(BaseModel):
-    """运行管线中的结构化追踪事件。"""
+    """运行管线中的结构化追踪事件，记录各阶段的耗时和上下文数据。"""
 
     type: TraceEventType
     timestamp: datetime = Field(default_factory=_utc_now)
-    duration_ms: int | None = None
-    data: dict[str, Any] = Field(default_factory=dict)
+    duration_ms: int | None = None  # 该阶段累计耗时（毫秒），None 表示尚未结束
+    data: dict[str, Any] = Field(default_factory=dict)  # 阶段相关的附加数据
 
 
 class ResponseTrace(BaseModel):

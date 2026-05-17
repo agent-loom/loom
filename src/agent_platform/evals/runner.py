@@ -21,23 +21,23 @@ logger = logging.getLogger(__name__)
 
 
 class ScoreDimension(BaseModel):
-    """单个评分维度的结果。"""
+    """单个评分维度的结果，支持加权计算。"""
 
-    name: str
-    score: float
-    max_score: float = 1.0
-    weight: float = 1.0
-    details: str = ""
+    name: str  # 维度名称，如 accuracy、latency
+    score: float  # 当前得分
+    max_score: float = 1.0  # 该维度满分
+    weight: float = 1.0  # 汇总时的权重
+    details: str = ""  # 可选的评分说明
 
 
 class EvalCaseScores(BaseModel):
-    """单个用例的多维评分结果。"""
+    """单个用例的多维评分结果，聚合准确率、延迟、成本和工具准确率。"""
 
-    accuracy: float = 0.0
-    latency_ms: int | None = None
-    cost_usd: float | None = None
-    tool_accuracy: float | None = None
-    dimensions: list[ScoreDimension] = Field(default_factory=list)
+    accuracy: float = 0.0  # 用例准确率（1.0=通过，0.0=失败）
+    latency_ms: int | None = None  # 运行耗时（毫秒）
+    cost_usd: float | None = None  # 预估成本（美元）
+    tool_accuracy: float | None = None  # 工具调用准确率
+    dimensions: list[ScoreDimension] = Field(default_factory=list)  # 扩展评分维度
 
 
 # ---------------------------------------------------------------------------
@@ -71,17 +71,17 @@ class EvalCaseResult(BaseModel):
 
 
 class EvalSummaryStats(BaseModel):
-    """评测报告的汇总统计。"""
+    """评测报告的汇总统计，包含准确率、延迟分位数、成本汇总和按标签分组统计。"""
 
     avg_accuracy: float = 0.0
     avg_latency_ms: float | None = None
     avg_cost_usd: float | None = None
-    p50_latency_ms: float | None = None
-    p95_latency_ms: float | None = None
-    p99_latency_ms: float | None = None
-    total_cost_usd: float | None = None
+    p50_latency_ms: float | None = None  # 延迟 P50 分位数
+    p95_latency_ms: float | None = None  # 延迟 P95 分位数
+    p99_latency_ms: float | None = None  # 延迟 P99 分位数
+    total_cost_usd: float | None = None  # 全部用例的累计成本
     avg_tool_accuracy: float | None = None
-    by_tag: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    by_tag: dict[str, dict[str, Any]] = Field(default_factory=dict)  # 按标签聚合的子报告
 
 
 class EvalReport(BaseModel):

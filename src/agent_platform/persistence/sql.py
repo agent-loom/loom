@@ -523,7 +523,7 @@ class SqlAgentSessionRepository:
             for m in session.history
         ]
         async with self._sf() as db:
-            # 先查询是否已存在同 session_id 的记录
+            # 使用 select + 条件更新/插入实现 upsert，避免依赖数据库方言特定的 ON CONFLICT 语法
             stmt = select(AgentSessionRow).where(
                 AgentSessionRow.session_id
                 == session.session_id
@@ -531,7 +531,7 @@ class SqlAgentSessionRepository:
             result = await db.execute(stmt)
             existing = result.scalar_one_or_none()
             if existing is not None:
-                # 更新已有行
+                # 已存在：仅更新可变字段，保留原始创建时间和审计信息
                 existing.agent_id = session.agent_id
                 existing.location_id = session.location_id
                 existing.user_id = session.user_id
@@ -544,7 +544,7 @@ class SqlAgentSessionRepository:
                 if session.tenant_id is not None:
                     existing.tenant_id = session.tenant_id
             else:
-                # 插入新行
+                # 首次创建：插入新行并填充审计字段
                 row = AgentSessionRow(
                     session_id=session.session_id,
                     agent_id=session.agent_id,

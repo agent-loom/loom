@@ -35,9 +35,10 @@ class HermesStreamMapper:
     def __init__(self, agent_id: str, agent_version: str = ""):
         self._agent_id = agent_id
         self._agent_version = agent_version
-        self._seq = 0
+        self._seq = 0  # 事件序列号，保证流内事件有序
 
     def _next_seq(self) -> int:
+        """递增并返回下一个事件序列号。"""
         self._seq += 1
         return self._seq
 
@@ -125,19 +126,23 @@ class HermesStreamMapper:
             ev.seq = self._next_seq()
         return ev
 
-    # ── 各事件类型映射函数 ──────────────────────────────────
+    # ── 各事件类型映射函数（Hermes SDK 事件 -> 平台统一事件） ──
 
     def _map_conversation_start(self, data: dict[str, Any]) -> AgentStreamEvent:
+        """映射会话开始事件。"""
         run_id = data.get("run_id", "unknown")
         return run_started(self._agent_id, self._agent_version, run_id)
 
     def _map_conversation_end(self, data: dict[str, Any]) -> AgentStreamEvent:
+        """映射会话结束事件。"""
         return run_completed(self._agent_id, trace=data.get("trace"))
 
     def _map_tool_call_start(self, data: dict[str, Any]) -> AgentStreamEvent:
+        """映射工具调用开始事件。"""
         return tool_started(data.get("tool_name", data.get("name", "unknown")))
 
     def _map_tool_call_end(self, data: dict[str, Any]) -> AgentStreamEvent:
+        """映射工具调用结束事件。"""
         return tool_completed(
             data.get("tool_name", data.get("name", "unknown")),
             data.get("status", "success"),
@@ -145,6 +150,7 @@ class HermesStreamMapper:
         )
 
     def _map_llm_response(self, data: dict[str, Any]) -> AgentStreamEvent:
+        """映射 LLM 模型调用响应事件，包含 token 用量和成本。"""
         return model_call_event(
             provider=data.get("provider", "unknown"),
             model=data.get("model", "unknown"),
@@ -155,9 +161,11 @@ class HermesStreamMapper:
         )
 
     def _map_text_chunk(self, data: dict[str, Any]) -> AgentStreamEvent:
+        """映射文本增量片段事件。"""
         return message_delta(data.get("content", data.get("text", "")))
 
     def _map_error(self, data: dict[str, Any]) -> AgentStreamEvent:
+        """映射 Hermes 运行时错误事件。"""
         return error_event(
             code=data.get("code", "HERMES_ERROR"),
             message=data.get("message", str(data)),
@@ -190,6 +198,7 @@ class HermesStreamMapper:
         yield ev_done
 
 
+# Hermes SDK 事件类型到映射函数的注册表，支持多种事件别名
 _EVENT_MAPPERS: dict[str, Any] = {
     "conversation_start": HermesStreamMapper._map_conversation_start,
     "conversation_end": HermesStreamMapper._map_conversation_end,

@@ -95,7 +95,7 @@ class RuntimeManager:
         started = perf_counter()
         backend_name = request.agent_spec.manifest.runtime.backend
         agent_id = request.agent_spec.agent_id
-        trace_events: list[TraceEvent] = []
+        trace_events: list[TraceEvent] = []  # 收集本次运行各阶段的结构化追踪事件
 
         lf_trace = None
         if self.langfuse_tracer:
@@ -121,6 +121,7 @@ class RuntimeManager:
                 span.set_status("ERROR", str(exc))
                 raise ValueError(f"runtime backend not registered: {backend_name}") from exc
 
+            # 追踪事件：记录路由决策阶段
             trace_events.append(TraceEvent(
                 type=TraceEventType.ROUTE_DECISION,
                 duration_ms=self._latency_ms(started),
@@ -180,6 +181,7 @@ class RuntimeManager:
             # Store on the request so backends can access it
             request.runtime_context = runtime_context
 
+            # 追踪事件：记录上下文构建阶段（会话 + 知识注入）
             trace_events.append(TraceEvent(
                 type=TraceEventType.CONTEXT_BUILD,
                 duration_ms=self._latency_ms(started),
@@ -263,6 +265,7 @@ class RuntimeManager:
             trace.latency_ms = latency_ms
             response.response.trace = trace
 
+            # 追踪事件：记录模型调用阶段的 token 用量和成本
             trace_events.append(TraceEvent(
                 type=TraceEventType.MODEL_CALL,
                 duration_ms=latency_ms,
@@ -430,7 +433,7 @@ class RuntimeManager:
         status: AgentRunStatus,
         latency_ms: int,
         response: AgentResponse,
-        trace_events: list[TraceEvent] | None = None,
+        trace_events: list[TraceEvent] | None = None,  # 本次运行收集的结构化追踪事件列表
     ) -> None:
         """将当前 Agent 运行的结果和状态持久化记录到数据库或内存中。"""
         trace = response.trace or ResponseTrace()

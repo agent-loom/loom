@@ -240,6 +240,7 @@ class MetricsCollector:
                     count = len(sorted_obs)
                     total = sum(sorted_obs)
                     labels_str = _format_labels(label_key)
+                    # 基于排序后的观测值计算近似分位数（p50/p90/p99）
                     for quantile in (0.5, 0.9, 0.99):
                         idx = min(
                             int(quantile * count),
@@ -272,12 +273,14 @@ class MetricsCollector:
 
 
 def _labels_key(labels: dict[str, str] | None) -> tuple[tuple[str, str], ...]:
+    """将标签字典转为排序后的元组，用作字典键以保证唯一性。"""
     if not labels:
         return ()
     return tuple(sorted(labels.items()))
 
 
 def _format_labels(key: tuple[tuple[str, str], ...]) -> str:
+    """将标签元组格式化为 Prometheus 标签字符串，如 {k1="v1",k2="v2"}。"""
     if not key:
         return ""
     inner = ",".join(f'{k}="{v}"' for k, v in key)
@@ -289,12 +292,14 @@ def _format_labels_with_extra(
     extra_name: str,
     extra_value: str,
 ) -> str:
+    """在已有标签基础上追加额外标签（如 quantile），用于 summary 分位数行。"""
     parts = list(key) + [(extra_name, extra_value)]
     inner = ",".join(f'{k}="{v}"' for k, v in parts)
     return "{" + inner + "}"
 
 
 def _format_value(val: float) -> str:
+    """格式化数值：整数去小数点，浮点数保留 6 位有效数字。"""
     if val == int(val):
         return str(int(val))
     return f"{val:.6g}"

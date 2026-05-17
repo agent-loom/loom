@@ -21,7 +21,7 @@ router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
 
 def _deps(request: Request) -> AdminDeps:
-    """Retrieve AdminDeps from app state."""
+    """从 app.state 中获取 Admin 依赖容器。"""
     return request.app.state.admin_deps
 
 
@@ -144,7 +144,10 @@ async def system_status(request: Request) -> dict[str, Any]:
 async def prometheus_metrics(
     request: Request,
 ) -> PlainTextResponse:
-    """返回 Prometheus text exposition 格式的指标数据。"""
+    """返回 Prometheus text exposition 格式的指标数据。
+
+    使用 text/plain; version=0.0.4 媒体类型以兼容 Prometheus 抓取协议。
+    """
     deps = _deps(request)
     body = deps.metrics.to_prometheus()
     return PlainTextResponse(
@@ -352,7 +355,7 @@ async def compare_eval_runs(
             detail="eval repo not configured",
         )
 
-    # 从全部运行记录中按 id 查找
+    # 从全部运行记录中按 id 查找，因为 eval_repo 未提供 get_by_id 方法
     all_runs = await deps.eval_repo.list_runs(limit=10000)
     run_a: dict[str, Any] | None = None
     run_b: dict[str, Any] | None = None
