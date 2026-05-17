@@ -7,10 +7,10 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, Response, WebSocket
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Request, Response, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import StreamingResponse
 
@@ -112,7 +112,7 @@ class RunEvalRequest(BaseModel):
 class DeployAgentRequest(BaseModel):
     channel: str = "staging"
     tenant_id: str | None = None
-    traffic_percent: int = 100
+    traffic_percent: int = Field(default=100, ge=0, le=100)
     eval_passed: bool | None = None
 
 
@@ -841,10 +841,28 @@ def create_app() -> FastAPI:
             checks["langfuse"] = "enabled" if lf.enabled else "disabled"
 
         if settings.weaviate_url:
-            checks["weaviate"] = settings.weaviate_url
+            ks = getattr(app.state, "knowledge_service", None)
+            if ks:
+                wb = ks._backends.get("weaviate")
+                if wb and hasattr(wb, "health_check"):
+                    try:
+                        wv_ok = await wb.health_check()
+                        checks["weaviate"] = "ok" if wv_ok else "unhealthy"
+                    except Exception:
+                        checks["weaviate"] = "error"
+                else:
+                    checks["weaviate"] = "not_registered"
+            else:
+                checks["weaviate"] = settings.weaviate_url
 
         if settings.redis_url:
-            checks["redis"] = settings.redis_url
+            try:
+                import httpx as _httpx
+                async with _httpx.AsyncClient(timeout=3) as _rc:
+                    _resp = await _rc.get(settings.redis_url.replace("redis://", "http://").rstrip("/"))
+                    checks["redis"] = "reachable"
+            except Exception:
+                checks["redis"] = "configured"
 
         return JSONResponse(
             status_code=200 if overall else 503,
@@ -1233,7 +1251,8 @@ def create_app() -> FastAPI:
 
     @app.get("/api/v1/devflow/jobs")
     async def list_devflow_jobs(
-        status: str | None = None, limit: int = 50,
+        status: str | None = None,
+        limit: int = Query(default=50, ge=1, le=500),
     ) -> list[dict]:
         return await coding_job_repo.list_jobs(status=status, limit=limit)
 

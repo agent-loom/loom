@@ -166,6 +166,8 @@ async def list_runs(
     request: Request,
     agent_id: str | None = None,
     status: str | None = None,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ) -> list[dict[str, Any]]:
     """List recent runs with optional agent_id and status filters."""
     deps = _deps(request)
@@ -173,7 +175,7 @@ async def list_runs(
     results = [r.model_dump(mode="json") for r in runs]
     if status is not None:
         results = [r for r in results if r.get("status") == status]
-    return results
+    return results[offset:offset + limit]
 
 
 @router.get("/runs/{run_id}")
@@ -195,11 +197,13 @@ async def get_run(run_id: str, request: Request) -> dict[str, Any]:
 async def list_sessions(
     request: Request,
     agent_id: str | None = None,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ) -> list[dict[str, Any]]:
     """List sessions with optional agent_id filter."""
     deps = _deps(request)
     sessions = await deps.runtime_manager.list_sessions(agent_id=agent_id)
-    return [s.model_dump(mode="json") for s in sessions]
+    return [s.model_dump(mode="json") for s in sessions[offset:offset + limit]]
 
 
 @router.delete("/sessions/{session_id}")
@@ -808,7 +812,8 @@ async def list_routing_decisions(
     request: Request,
     agent_id: str | None = None,
     reason: str | None = None,
-    limit: int = 50,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ) -> dict[str, Any]:
     """列出路由决策记录。"""
     deps = _deps(request)
