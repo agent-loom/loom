@@ -398,8 +398,46 @@ async def _app_lifespan(app: FastAPI):
 
     app.state.started_at = time.time()
     logger.info("Agent Platform started (env=%s)", settings.env if settings else "unknown")
-    yield
+
+    # DLQ 后台重试任务
     import asyncio as _asyncio
+
+    _dlq_task: _asyncio.Task | None = None
+    retry_svc = getattr(app.state, "webhook_retry_service", None) if hasattr(app.state, "webhook_retry_service") else None
+    if not retry_svc:
+        for _admin_deps_attr in ("admin_deps",):
+            _ad = getattr(app.state, _admin_deps_attr, None)
+            if _ad and hasattr(_ad, "webhook_retry_service"):
+                retry_svc = _ad.webhook_retry_service
+                break
+
+    if retry_svc:
+        async def _dlq_retry_loop():
+            while True:
+                try:
+                    async def _noop_handler(source, event_type, payload):
+                        logger.debug("DLQ 重试（当前为空操作）: %s/%s", source, event_type)
+                    processed = await retry_svc.process_retries(_noop_handler)
+                    if processed:
+                        logger.info("DLQ 处理了 %d 条重试", processed)
+                except _asyncio.CancelledError:
+                    break
+                except Exception:
+                    logger.debug("DLQ 重试循环异常", exc_info=True)
+                await _asyncio.sleep(60)
+
+        _dlq_task = _asyncio.create_task(_dlq_retry_loop())
+        logger.info("DLQ 后台重试任务已启动（60s 间隔）")
+
+    yield
+
+    if _dlq_task:
+        _dlq_task.cancel()
+        try:
+            await _dlq_task
+        except _asyncio.CancelledError:
+            pass
+
     for name, resource in getattr(app.state, "_closeables", []):
         try:
             if hasattr(resource, "close"):
@@ -673,6 +711,7 @@ def create_app() -> FastAPI:
     app.state.artifact_store = artifact_store
     app.state.artifact_signer = artifact_signer
     app.state.dlq = dlq
+    app.state.webhook_retry_service = webhook_retry_service
 
     app.add_middleware(
         AuthMiddleware, api_key=settings.api_key, key_store=key_store,

@@ -8,7 +8,33 @@ from pydantic import BaseModel, Field
 
 
 class Settings(BaseModel):
-    """平台配置项，包含注册中心、数据库及第三方集成设置。"""
+    """平台配置项，通过对应环境变量初始化。
+
+    环境变量 → 配置项映射:
+      AGENT_PLATFORM_ENV          → env（运行环境: dev/staging/production）
+      AGENT_PLATFORM_REGISTRY_ROOT → registry_root（agent 清单根目录）
+      AGENT_PLATFORM_DEFAULT_AGENT_ID → default_agent_id
+      AGENT_PLATFORM_API_KEY      → api_key（全局 API 认证密钥）
+      DATABASE_URL                → database_url（异步数据库连接串）
+      PLANE_BASE_URL / PLANE_WORKSPACE_SLUG / PLANE_API_KEY → Plane 集成
+      PLANE_WEBHOOK_SECRET        → Plane Webhook 签名密钥
+      PLANE_AI_DEVELOPING_STATE_ID / PLANE_TESTING_STATE_ID / ... → Plane 状态机 ID
+      GITLAB_BASE_URL / GITLAB_TOKEN / GITLAB_PROJECT_ID → GitLab 集成
+      GITLAB_WEBHOOK_SECRET       → GitLab Webhook 签名密钥
+      CORS_ALLOWED_ORIGINS        → CORS 允许的源（逗号分隔，生产环境必须显式设置）
+      DEVFLOW_RUNNER_ADAPTER      → DevFlow 编码适配器（mock/claude_code/codex）
+      DEVFLOW_REPO_URL / DEVFLOW_DEFAULT_BRANCH / DEVFLOW_WORKSPACE_BASE_DIR → DevFlow 仓库
+      DEVFLOW_JOB_QUEUE_BACKEND   → 任务队列后端（memory/redis）
+      REDIS_URL                   → Redis 连接串
+      LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST → Langfuse 可观测性
+      WEAVIATE_URL / WEAVIATE_API_KEY → Weaviate 向量检索
+      SERVICE_JWT_SECRET          → 服务间 JWT 签名密钥
+      SERVICE_SHARED_SECRETS      → 服务间共享密钥（逗号分隔）
+      MAX_REQUEST_BODY_BYTES      → 请求体大小上限（默认 10MB）
+      OPENAI_API_KEY / OPENAI_API_BASE → OpenAI 提供商（ModelGateway 自动注册）
+      ANTHROPIC_API_KEY           → Anthropic 提供商（ModelGateway 自动注册）
+      HITL_ENABLED                → 启用 Human-in-the-loop 审批门（true/false）
+    """
 
     env: str = "dev"
     registry_root: Path = Field(default=Path("agents"))
