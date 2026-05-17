@@ -517,26 +517,51 @@ class SqlAgentSessionRepository:
     async def save(
         self, session: AgentSession
     ) -> None:
-        """将会话持久化到数据库。"""
-        row = AgentSessionRow(
-            session_id=session.session_id,
-            agent_id=session.agent_id,
-            location_id=session.location_id,
-            user_id=session.user_id,
-            channel_id=session.channel_id,
-            history_json=[
-                m.model_dump(mode="json")
-                for m in session.history
-            ],
-            state_snapshot_json=session.state_snapshot,
-            created_at=session.created_at,
-            updated_at=session.updated_at,
-        )
-        if session.tenant_id is not None:
-            row.tenant_id = session.tenant_id
-        _fill_audit(row)
+        """将会话持久化到数据库（支持 upsert 语义）。"""
+        history = [
+            m.model_dump(mode="json")
+            for m in session.history
+        ]
         async with self._sf() as db:
-            db.add(row)
+            # 先查询是否已存在同 session_id 的记录
+            stmt = select(AgentSessionRow).where(
+                AgentSessionRow.session_id
+                == session.session_id
+            )
+            result = await db.execute(stmt)
+            existing = result.scalar_one_or_none()
+            if existing is not None:
+                # 更新已有行
+                existing.agent_id = session.agent_id
+                existing.location_id = session.location_id
+                existing.user_id = session.user_id
+                existing.channel_id = session.channel_id
+                existing.history_json = history
+                existing.state_snapshot_json = (
+                    session.state_snapshot
+                )
+                existing.updated_at = session.updated_at
+                if session.tenant_id is not None:
+                    existing.tenant_id = session.tenant_id
+            else:
+                # 插入新行
+                row = AgentSessionRow(
+                    session_id=session.session_id,
+                    agent_id=session.agent_id,
+                    location_id=session.location_id,
+                    user_id=session.user_id,
+                    channel_id=session.channel_id,
+                    history_json=history,
+                    state_snapshot_json=(
+                        session.state_snapshot
+                    ),
+                    created_at=session.created_at,
+                    updated_at=session.updated_at,
+                )
+                if session.tenant_id is not None:
+                    row.tenant_id = session.tenant_id
+                _fill_audit(row)
+                db.add(row)
             await db.commit()
 
     async def load(

@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -304,6 +305,8 @@ async def _app_lifespan(app: FastAPI):
     settings = getattr(app.state, "_settings", None)
     if settings:
         _validate_startup_config(settings)
+    # 记录启动时间，供 /status 端点计算 uptime
+    app.state.started_at = time.time()
     logger.info("Agent Platform started (env=%s)", settings.env if settings else "unknown")
     yield
     for name, resource in getattr(app.state, "_closeables", []):
@@ -512,6 +515,7 @@ def create_app() -> FastAPI:
         eval_repo=eval_repo,
         tool_audit_repo=tool_audit_repo,
         quota_manager=quota_manager,
+        eval_runner=eval_runner,
     )
     app.include_router(
         admin_router,

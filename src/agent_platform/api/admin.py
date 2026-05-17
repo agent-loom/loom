@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from agent_platform.api.admin_deps import AdminDeps
@@ -92,7 +94,7 @@ async def delete_agent(agent_id: str, request: Request) -> dict[str, str]:
 
 @router.get("/status")
 async def system_status(request: Request) -> dict[str, Any]:
-    """System overview: counts of agents, deployments, active sessions, total runs."""
+    """系统概览：agent 数量、部署、会话、运行数以及平台元信息。"""
     deps = _deps(request)
 
     agents = await deps.registry.list_agents()
@@ -100,12 +102,55 @@ async def system_status(request: Request) -> dict[str, Any]:
     sessions = await deps.runtime_manager.list_sessions()
     runs = await deps.runtime_manager.list_runs()
 
+    # 平台版本
+    platform_version: str = getattr(
+        request.app, "version", "unknown"
+    )
+
+    # 运行时间（秒）
+    started_at: float | None = getattr(
+        request.app.state, "started_at", None
+    )
+    uptime_seconds: float | None = (
+        round(time.time() - started_at, 1)
+        if started_at is not None
+        else None
+    )
+
+    # 中间件数量
+    middleware_count = len(request.app.user_middleware)
+
+    # 配额管理器是否已配置
+    quota_configured = deps.quota_manager is not None
+
     return {
         "agents": len(agents),
         "deployments": len(deployments),
         "active_sessions": len(sessions),
         "total_runs": len(runs),
+        "platform_version": platform_version,
+        "uptime_seconds": uptime_seconds,
+        "middleware_count": middleware_count,
+        "quota_configured": quota_configured,
     }
+
+
+# ---------------------------------------------------------------------------
+# Prometheus Metrics
+# ---------------------------------------------------------------------------
+
+
+@router.get("/metrics")
+async def prometheus_metrics(
+    request: Request,
+) -> PlainTextResponse:
+    """返回 Prometheus text exposition 格式的指标数据。"""
+    deps = _deps(request)
+    body = deps.metrics.to_prometheus()
+    return PlainTextResponse(
+        content=body,
+        media_type="text/plain; version=0.0.4",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -310,6 +355,106 @@ async def get_latest_eval(
     return result
 
 
+@router.post("/evals/{agent_id}/run")
+async def trigger_eval_run(
+    agent_id: str,
+    request: Request,
+) -> dict[str, Any]:
+    """按需触发指定 agent 的评测运行并返回报告。"""
+    deps = _deps(request)
+
+    # 检查 eval_runner 是否可用
+    if deps.eval_runner is None:
+        raise HTTPException(
+            status_code=501,
+            detail="eval runner not configured",
+        )
+
+    # 从注册中心获取 agent spec
+    try:
+        spec = await deps.registry.get(agent_id)
+    except AgentNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail=str(exc),
+        ) from exc
+
+    # 运行评测
+    report = await deps.eval_runner.run_agent(spec)
+    return report.model_dump(mode="json")
+
+
+@router.get("/evals/compare")
+async def compare_eval_runs(
+    request: Request,
+    run_id_a: str = Query(..., description="第一次运行的 ID"),
+    run_id_b: str = Query(..., description="第二次运行的 ID"),
+) -> dict[str, Any]:
+    """对比两次评测运行的结果差异。"""
+    deps = _deps(request)
+    if deps.eval_repo is None:
+        raise HTTPException(
+            status_code=501,
+            detail="eval repo not configured",
+        )
+
+    # 从全部运行记录中按 id 查找
+    all_runs = await deps.eval_repo.list_runs(limit=10000)
+    run_a: dict[str, Any] | None = None
+    run_b: dict[str, Any] | None = None
+    for r in all_runs:
+        if r.get("id") == run_id_a:
+            run_a = r
+        if r.get("id") == run_id_b:
+            run_b = r
+
+    if run_a is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"eval run not found: {run_id_a}",
+        )
+    if run_b is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"eval run not found: {run_id_b}",
+        )
+
+    # 计算 pass_rate 变化
+    rate_a = run_a.get("pass_rate", 0.0)
+    rate_b = run_b.get("pass_rate", 0.0)
+    delta = round(rate_b - rate_a, 4)
+
+    # 对比各用例的通过/失败状态
+    results_a = {
+        c["id"]: c["passed"]
+        for c in run_a.get("results", [])
+    }
+    results_b = {
+        c["id"]: c["passed"]
+        for c in run_b.get("results", [])
+    }
+
+    # 新增失败：在 A 中通过但在 B 中失败的用例
+    new_failures = [
+        cid for cid, passed in results_b.items()
+        if not passed and results_a.get(cid, True)
+    ]
+    # 修复：在 A 中失败但在 B 中通过的用例
+    fixed = [
+        cid for cid, passed in results_b.items()
+        if passed and not results_a.get(cid, False)
+    ]
+
+    return {
+        "run_id_a": run_id_a,
+        "run_id_b": run_id_b,
+        "pass_rate_a": rate_a,
+        "pass_rate_b": rate_b,
+        "pass_rate_delta": delta,
+        "new_failures": new_failures,
+        "fixed": fixed,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Deployment Audit
 # ---------------------------------------------------------------------------
@@ -436,7 +581,7 @@ async def list_artifacts(
     agent_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """列出所有制品，可按 agent_id 过滤。"""
-    deps = _deps(request)
+    _deps(request)  # 确认依赖可用
     artifact_store = getattr(request.app.state, "artifact_store", None)
     if artifact_store is None:
         raise HTTPException(status_code=501, detail="artifact store not configured")

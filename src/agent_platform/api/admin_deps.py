@@ -7,8 +7,12 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agent_platform.api.tenant_quota import TenantQuotaManager
+    from agent_platform.evals.runner import EvalRunner
     from agent_platform.observability.metrics import MetricsCollector
-    from agent_platform.persistence.repositories import EvalRunRepository, ToolAuditRepository
+    from agent_platform.persistence.repositories import (
+        EvalRunRepository,
+        ToolAuditRepository,
+    )
     from agent_platform.persistence.sql import SqlApiKeyStore
     from agent_platform.registry.deployment import DeploymentAuditLog
     from agent_platform.registry.registry import AgentRegistry
@@ -29,3 +33,4 @@ class AdminDeps:
     eval_repo: EvalRunRepository | None = None
     tool_audit_repo: ToolAuditRepository | None = None
     quota_manager: TenantQuotaManager | None = None
+    eval_runner: EvalRunner | None = None

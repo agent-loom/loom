@@ -13,11 +13,9 @@ from agent_platform.runtime.model_gateway import (
     ModelMessage,
     ModelResponse,
     OpenAICompatibleProvider,
-    RoutingStrategy,
     StubModelProvider,
     estimate_cost,
 )
-
 
 # ── Cost estimation ───────────────────────────────────────────────
 

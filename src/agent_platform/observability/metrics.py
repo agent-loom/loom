@@ -84,15 +84,42 @@ class MetricsCollector:
 
     def record_request(self, agent_id: str, status: str) -> None:
         """记录一次 Agent 请求（按 agent_id 和状态分类）。"""
-        self.inc_counter("agent_requests_total", {"agent_id": agent_id, "status": status})
+        self.inc_counter(
+            "agent_requests_total",
+            {"agent_id": agent_id, "status": status},
+        )
+
+    def record_error(self, agent_id: str) -> None:
+        """记录一次 Agent 请求错误。"""
+        self.inc_counter(
+            "agent_request_errors_total",
+            {"agent_id": agent_id},
+        )
 
     def record_duration(self, agent_id: str, duration: float) -> None:
         """记录一次 Agent 请求耗时（秒）。"""
-        self.observe("agent_request_duration_seconds", duration, {"agent_id": agent_id})
+        self.observe(
+            "agent_request_duration_seconds",
+            duration,
+            {"agent_id": agent_id},
+        )
 
     def record_tool_call(self, tool_name: str, status: str) -> None:
         """记录一次工具调用（按工具名和状态分类）。"""
-        self.inc_counter("tool_calls_total", {"tool_name": tool_name, "status": status})
+        self.inc_counter(
+            "tool_calls_total",
+            {"tool_name": tool_name, "status": status},
+        )
+
+    def record_tool_duration(
+        self, tool_name: str, duration: float,
+    ) -> None:
+        """记录一次工具调用耗时（秒）。"""
+        self.observe(
+            "tool_call_duration_seconds",
+            duration,
+            {"tool_name": tool_name},
+        )
 
     def set_active_sessions(self, count: int) -> None:
         """设置当前活跃会话数。"""
@@ -126,33 +153,87 @@ class MetricsCollector:
     # Prometheus text exposition
     # ------------------------------------------------------------------
 
+    # 预定义指标的 HELP 描述映射
+    _HELP_DESCRIPTIONS: dict[str, str] = {
+        "agent_requests_total": (
+            "Total number of agent requests."
+        ),
+        "agent_request_errors_total": (
+            "Total number of agent request errors."
+        ),
+        "tool_calls_total": (
+            "Total number of tool calls."
+        ),
+        "agent_request_duration_seconds": (
+            "Duration of agent requests in seconds."
+        ),
+        "tool_call_duration_seconds": (
+            "Duration of tool calls in seconds."
+        ),
+        "active_sessions": (
+            "Number of currently active sessions."
+        ),
+    }
+
     def format_prometheus(self) -> str:
         """Return all metrics in Prometheus text exposition format."""
+        return self._render_prometheus()
+
+    def to_prometheus(self) -> str:
+        """返回 Prometheus text exposition 格式的全部指标。
+
+        与 format_prometheus() 功能一致，提供语义更明确的别名。
+        """
+        return self._render_prometheus()
+
+    def _render_prometheus(self) -> str:
+        """内部方法：将收集到的指标渲染为 Prometheus 文本格式。"""
         lines: list[str] = []
 
         with self._lock:
-            # Counters
+            # 计数器
             for name in sorted(self._counters):
-                lines.append(f"# HELP {name} Counter")
+                help_text = self._HELP_DESCRIPTIONS.get(
+                    name, "Counter",
+                )
+                lines.append(f"# HELP {name} {help_text}")
                 lines.append(f"# TYPE {name} counter")
                 for label_key in sorted(self._counters[name]):
                     val = self._counters[name][label_key]
-                    lines.append(f"{name}{_format_labels(label_key)} {_format_value(val)}")
+                    lines.append(
+                        f"{name}"
+                        f"{_format_labels(label_key)} "
+                        f"{_format_value(val)}"
+                    )
 
-            # Gauges
+            # 仪表盘
             for name in sorted(self._gauges):
-                lines.append(f"# HELP {name} Gauge")
+                help_text = self._HELP_DESCRIPTIONS.get(
+                    name, "Gauge",
+                )
+                lines.append(f"# HELP {name} {help_text}")
                 lines.append(f"# TYPE {name} gauge")
                 for label_key in sorted(self._gauges[name]):
                     val = self._gauges[name][label_key]
-                    lines.append(f"{name}{_format_labels(label_key)} {_format_value(val)}")
+                    lines.append(
+                        f"{name}"
+                        f"{_format_labels(label_key)} "
+                        f"{_format_value(val)}"
+                    )
 
-            # Summaries
+            # 摘要（summary）
             for name in sorted(self._observations):
-                lines.append(f"# HELP {name} Summary")
+                help_text = self._HELP_DESCRIPTIONS.get(
+                    name, "Summary",
+                )
+                lines.append(f"# HELP {name} {help_text}")
                 lines.append(f"# TYPE {name} summary")
-                for label_key in sorted(self._observations[name]):
-                    observations = self._observations[name][label_key]
+                for label_key in sorted(
+                    self._observations[name],
+                ):
+                    observations = (
+                        self._observations[name][label_key]
+                    )
                     if not observations:
                         continue
                     sorted_obs = sorted(observations)
@@ -160,15 +241,28 @@ class MetricsCollector:
                     total = sum(sorted_obs)
                     labels_str = _format_labels(label_key)
                     for quantile in (0.5, 0.9, 0.99):
-                        idx = min(int(quantile * count), count - 1)
-                        q_labels = _format_labels_with_extra(
-                            label_key, "quantile", str(quantile),
+                        idx = min(
+                            int(quantile * count),
+                            count - 1,
                         )
-                        lines.append(f"{name}{q_labels} {_format_value(sorted_obs[idx])}")
-                    lines.append(f"{name}_count{labels_str} {count}")
-                    lines.append(f"{name}_sum{labels_str} {_format_value(total)}")
+                        q_labels = _format_labels_with_extra(
+                            label_key,
+                            "quantile",
+                            str(quantile),
+                        )
+                        lines.append(
+                            f"{name}{q_labels} "
+                            f"{_format_value(sorted_obs[idx])}"
+                        )
+                    lines.append(
+                        f"{name}_count{labels_str} {count}"
+                    )
+                    lines.append(
+                        f"{name}_sum{labels_str} "
+                        f"{_format_value(total)}"
+                    )
 
-        lines.append("")  # trailing newline
+        lines.append("")  # 尾部换行
         return "\n".join(lines)
 
 
