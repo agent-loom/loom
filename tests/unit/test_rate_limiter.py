@@ -168,7 +168,8 @@ def test_auth_key_id_used_as_client_key():
 def test_api_key_header_used_when_no_auth():
     req = _mock_request(auth=None, headers={"x-api-key": "test-key-123"})
     key = RateLimiterMiddleware._get_client_key(req)
-    assert key == "key:test-key-123"
+    assert key.startswith("key:")
+    assert key != "key:test-key-123"
 
 
 def test_ip_used_when_no_auth_no_api_key():

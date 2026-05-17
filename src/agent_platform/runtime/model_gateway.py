@@ -118,8 +118,9 @@ COST_PER_MILLION: dict[str, tuple[float, float]] = {
 
 
 def estimate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float | None:
-    for prefix, (input_price, output_price) in COST_PER_MILLION.items():
-        if prefix in model:
+    for prefix in sorted(COST_PER_MILLION, key=len, reverse=True):
+        if model.startswith(prefix):
+            input_price, output_price = COST_PER_MILLION[prefix]
             return (
                 (prompt_tokens / 1_000_000) * input_price
                 + (completion_tokens / 1_000_000) * output_price
@@ -270,15 +271,23 @@ class OpenAICompatibleProvider:
             resp = await self._client.post("/v1/chat/completions", json=body)
             resp.raise_for_status()
         except httpx.HTTPStatusError as exc:
+            logger.warning(
+                "LLM API 错误: status=%d, provider=%s",
+                exc.response.status_code, self.name,
+            )
             return ModelResponse(
-                content=f"[LLM API error] {exc.response.status_code}: {exc.response.text[:200]}",
+                content=f"[LLM API error] {exc.response.status_code}",
                 finish_reason="error",
                 model=model or self._default_model,
                 provider_name=self.name,
             )
         except httpx.RequestError as exc:
+            logger.warning(
+                "LLM 连接错误: %s, provider=%s",
+                type(exc).__name__, self.name,
+            )
             return ModelResponse(
-                content=f"[LLM connection error] {type(exc).__name__}: {exc}",
+                content=f"[LLM connection error] {type(exc).__name__}",
                 finish_reason="error",
                 model=model or self._default_model,
                 provider_name=self.name,
@@ -397,16 +406,23 @@ class AnthropicProvider:
             resp = await self._client.post("/v1/messages", json=body)
             resp.raise_for_status()
         except httpx.HTTPStatusError as exc:
-            err_text = exc.response.text[:200]
+            logger.warning(
+                "Anthropic API 错误: status=%d, provider=%s",
+                exc.response.status_code, self.name,
+            )
             return ModelResponse(
-                content=f"[Anthropic API error] {exc.response.status_code}: {err_text}",
+                content=f"[Anthropic API error] {exc.response.status_code}",
                 finish_reason="error",
                 model=model or self._default_model,
                 provider_name=self.name,
             )
         except httpx.RequestError as exc:
+            logger.warning(
+                "Anthropic 连接错误: %s, provider=%s",
+                type(exc).__name__, self.name,
+            )
             return ModelResponse(
-                content=f"[Anthropic connection error] {type(exc).__name__}: {exc}",
+                content=f"[Anthropic connection error] {type(exc).__name__}",
                 finish_reason="error",
                 model=model or self._default_model,
                 provider_name=self.name,

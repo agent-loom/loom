@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shlex
 import shutil
 import tempfile
 import time
@@ -121,6 +122,12 @@ class WorkspaceManager:
                 i += 1
         return files
 
+    _ALLOWED_CMD_PREFIXES = (
+        "pytest", "python", "ruff", "mypy", "flake8", "black",
+        "npm", "npx", "node", "cargo", "go", "make",
+        "cat", "ls", "echo", "grep", "diff", "head", "tail",
+    )
+
     async def run_validation(
         self,
         workspace_dir: Path,
@@ -137,10 +144,21 @@ class WorkspaceManager:
         all_passed = True
 
         for cmd in commands:
+            cmd_base = cmd.strip().split()[0] if cmd.strip() else ""
+            if not any(cmd_base.startswith(p) for p in self._ALLOWED_CMD_PREFIXES):
+                logger.warning("拒绝执行不在白名单的命令: %s", cmd_base)
+                results.append(CommandResult(
+                    command=cmd, exit_code=1,
+                    stdout="", stderr=f"命令 '{cmd_base}' 不在白名单中",
+                    duration_seconds=0.0,
+                ))
+                all_passed = False
+                continue
+
             start = time.monotonic()
 
-            proc = await asyncio.create_subprocess_shell(
-                cmd,
+            proc = await asyncio.create_subprocess_exec(
+                *shlex.split(cmd),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(workspace_dir),

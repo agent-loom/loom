@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import logging
 from pathlib import Path
@@ -31,7 +32,7 @@ class ArtifactSigner:
     def verify_manifest(self, manifest: AgentManifest, expected_hash: str) -> bool:
         """验证 manifest 的 SHA-256 哈希值是否与预期一致。"""
         actual = self.sign_manifest(manifest)
-        return actual == expected_hash
+        return hmac.compare_digest(actual, expected_hash)
 
     def sign_package(self, package_path: Path) -> str:
         """计算 package 目录或文件的 SHA-256 哈希值。
@@ -59,4 +60,4 @@ class ArtifactSigner:
     def verify_package(self, package_path: Path, expected_hash: str) -> bool:
         """验证 package 的 SHA-256 哈希值是否与预期一致。"""
         actual = self.sign_package(package_path)
-        return actual == expected_hash
+        return hmac.compare_digest(actual, expected_hash)

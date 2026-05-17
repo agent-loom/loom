@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any
 
@@ -59,7 +60,8 @@ class DevFlowOrchestrator:
         self.default_branch = default_branch
         self.state_sync = state_sync
         self.task_pack_generator = TaskPackGenerator()
-        self._processed_items: set[str] = set()
+        self._max_processed = 10_000
+        self._processed_items: OrderedDict[str, None] = OrderedDict()
 
     async def handle_webhook_event(
         self,
@@ -217,7 +219,9 @@ class DevFlowOrchestrator:
         if key in self._processed_items:
             logger.info("Skipping duplicate event: %s", key)
             return False
-        self._processed_items.add(key)
+        self._processed_items[key] = None
+        if len(self._processed_items) > self._max_processed:
+            self._processed_items.popitem(last=False)
         return True
 
     async def _dispatch_runner(

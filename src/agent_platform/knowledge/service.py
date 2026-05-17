@@ -107,13 +107,18 @@ class WeaviateKnowledgeBackend:
         collection = source.collection or source.id
         merged_filters = {**source.filters, **(filters or {})}
 
+        sanitized_query = query.replace("\\", "\\\\").replace('"', '\\"')
+        sanitized_collection = collection.replace("\\", "\\\\").replace('"', '\\"')
+
         where_clause = ""
         if merged_filters:
             operands = []
             for key, val in merged_filters.items():
+                safe_key = str(key).replace("\\", "\\\\").replace('"', '\\"')
+                safe_val = str(val).replace("\\", "\\\\").replace('"', '\\"')
                 operands.append(
-                    f'{{ path: ["{key}"], operator: Equal, '
-                    f'valueText: "{val}" }}'
+                    f'{{ path: ["{safe_key}"], operator: Equal, '
+                    f'valueText: "{safe_val}" }}'
                 )
             if len(operands) == 1:
                 where_clause = f"where: {operands[0]}"
@@ -126,9 +131,9 @@ class WeaviateKnowledgeBackend:
         graphql_query = {
             "query": "{"
             f"  Get {{"
-            f"    {collection}("
-            f'      nearText: {{ concepts: ["{query}"] }}'
-            f"      limit: {top_k}"
+            f"    {sanitized_collection}("
+            f'      nearText: {{ concepts: ["{sanitized_query}"] }}'
+            f"      limit: {int(top_k)}"
             f"      {where_clause}"
             f"    ) {{"
             f"      _additional {{ id distance }}"

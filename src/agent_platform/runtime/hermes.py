@@ -204,21 +204,19 @@ def register_platform_tools_to_hermes(
             tool_name: str, tool_timeout: int,
         ) -> Callable[[dict[str, Any]], str]:
             def handler(args: dict[str, Any], **_kw: Any) -> str:
+                loop = asyncio.new_event_loop()
                 try:
-                    loop = asyncio.get_running_loop()
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-
-                result = loop.run_until_complete(
-                    tool_executor.execute(
-                        tool_name,
-                        args,
-                        allowed_tools=[tool_name],
-                        timeout_ms=tool_timeout,
+                    result = loop.run_until_complete(
+                        tool_executor.execute(
+                            tool_name,
+                            args,
+                            allowed_tools=[tool_name],
+                            timeout_ms=tool_timeout,
+                        )
                     )
-                )
-                return str(result.output)
+                    return str(result.output)
+                finally:
+                    loop.close()
 
             return handler
 

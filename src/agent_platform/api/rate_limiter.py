@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import time
 from typing import Protocol, runtime_checkable
@@ -160,7 +161,8 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
             return f"key:{auth.key_id}"
         api_key = request.headers.get("x-api-key")
         if api_key:
-            return f"key:{api_key}"
+            hashed = hashlib.sha256(api_key.encode()).hexdigest()[:16]
+            return f"key:{hashed}"
         client_host = request.client.host if request.client else "unknown"
         return f"ip:{client_host}"
 

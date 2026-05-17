@@ -145,6 +145,11 @@ class ConversationEngine:
             temperature=model_config.temperature,
             max_tokens=model_config.max_tokens,
         )
+        cum_prompt_tokens += fallback_response.input_tokens
+        cum_completion_tokens += fallback_response.output_tokens
+        cum_total_tokens += fallback_response.input_tokens + fallback_response.output_tokens
+        if fallback_response.estimated_cost_usd:
+            cum_cost_usd += fallback_response.estimated_cost_usd
         return ConversationResult(
             display=(
                 fallback_response.content
@@ -153,8 +158,8 @@ class ConversationEngine:
             tool_traces=all_traces,
             model_used=fallback_response.model,
             total_iterations=max_iterations,
-            prompt_tokens=fallback_response.input_tokens,
-            completion_tokens=fallback_response.output_tokens,
-            total_tokens=fallback_response.input_tokens + fallback_response.output_tokens,
-            estimated_cost_usd=fallback_response.estimated_cost_usd,
+            prompt_tokens=cum_prompt_tokens,
+            completion_tokens=cum_completion_tokens,
+            total_tokens=cum_total_tokens,
+            estimated_cost_usd=cum_cost_usd,
         )

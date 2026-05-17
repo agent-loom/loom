@@ -1,3 +1,4 @@
+import hmac
 import json
 import logging
 import os
@@ -211,11 +212,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
         api_key: str | None = None,
         key_store=None,
         service_auth: ServiceAuthProvider | None = None,
+        env: str = "dev",
     ):
         super().__init__(app)
         self.api_key = api_key
         self.key_store = key_store
         self.service_auth = service_auth
+        self._env = env
 
     async def dispatch(self, request: Request, call_next):
         if request.url.path in self._SKIP_PATHS:
@@ -264,11 +267,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 )
 
         if not self.api_key and self.key_store is None:
+            anon_role = "readonly" if self._env == "production" else "platform_admin"
+            anon_scopes = ["read"] if self._env == "production" else self._ALL_SCOPES
             self._set_auth_context(request, AuthIdentity(
                 subject="anonymous",
                 tenant_id=request.headers.get("x-tenant-id", "default"),
-                role="platform_admin",
-                scopes=self._ALL_SCOPES,
+                role=anon_role,
+                scopes=anon_scopes,
             ))
             return await call_next(request)
 
@@ -301,7 +306,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             ))
             return await call_next(request)
 
-        if self.api_key and token == self.api_key:
+        if self.api_key and hmac.compare_digest(token, self.api_key):
             self._set_auth_context(request, AuthIdentity(
                 subject="api-key-user",
                 tenant_id=request.headers.get("x-tenant-id", "default"),
@@ -767,7 +772,7 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         AuthMiddleware, api_key=settings.api_key, key_store=key_store,
-        service_auth=service_auth,
+        service_auth=service_auth, env=settings.env,
     )
     _rl_backend = None
     if _redis_client is not None:
@@ -1023,7 +1028,14 @@ def create_app() -> FastAPI:
         payload: RegisterAgentRequest,
         _auth: AuthIdentity = _SCOPE_REGISTER,
     ) -> dict[str, str]:
-        spec = registry.loader.load_file(Path(payload.manifest_path))
+        manifest = Path(payload.manifest_path).resolve()
+        allowed_root = settings.registry_root.resolve()
+        if not manifest.is_relative_to(allowed_root):
+            raise HTTPException(
+                status_code=400,
+                detail="manifest_path 必须位于 registry_root 目录内",
+            )
+        spec = registry.loader.load_file(manifest)
         await registry.register(spec)
         return {"agent_id": spec.agent_id, "version": spec.version, "status": "registered"}
 

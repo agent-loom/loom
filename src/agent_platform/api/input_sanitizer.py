@@ -91,4 +91,30 @@ class InputSanitizationMiddleware(BaseHTTPMiddleware):
                         },
                     )
 
+            if "application/json" in content_type:
+                try:
+                    body = await request.body()
+                    if body:
+                        text = body.decode("utf-8", errors="replace")
+                        threat = check_payload_safety(text)
+                        if threat:
+                            logger.warning(
+                                "请求体安全检查命中 %s: path=%s",
+                                threat, request.url.path,
+                            )
+                            return JSONResponse(
+                                status_code=400,
+                                content={
+                                    "error": {
+                                        "code": "UNSAFE_INPUT",
+                                        "message": (
+                                    "request body contains potentially"
+                                    f" dangerous content ({threat})"
+                                ),
+                                    }
+                                },
+                            )
+                except Exception:
+                    logger.debug("请求体安全检查读取失败，放行", exc_info=True)
+
         return await call_next(request)

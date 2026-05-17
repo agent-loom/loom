@@ -67,6 +67,8 @@ class MetricsCollector:
         with self._lock:
             self._gauges[name][key] += value
 
+    _MAX_OBSERVATIONS = 10_000
+
     def observe(
         self,
         name: str,
@@ -76,7 +78,10 @@ class MetricsCollector:
         """Record an observation for a summary metric."""
         key = _labels_key(labels)
         with self._lock:
-            self._observations[name][key].append(value)
+            obs = self._observations[name][key]
+            obs.append(value)
+            if len(obs) > self._MAX_OBSERVATIONS:
+                self._observations[name][key] = obs[-self._MAX_OBSERVATIONS:]
 
     # ------------------------------------------------------------------
     # Convenience wrappers matching the task specification
