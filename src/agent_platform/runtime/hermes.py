@@ -332,6 +332,7 @@ class ConversationEngine:
         session_config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if self.model_gateway is None:
+            logger.warning("Hermes 后端无 ModelGateway — 使用 stub 响应")
             return self._stub_response(system_prompt, user_query, model_config)
 
         messages: list[ModelMessage] = [

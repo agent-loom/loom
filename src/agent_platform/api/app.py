@@ -349,6 +349,15 @@ def _validate_startup_config(settings) -> None:
                 "CORS is open to all origins in production. "
                 "Set CORS_ALLOWED_ORIGINS to restrict access."
             )
+    if not os.getenv("OPENAI_API_KEY") and not os.getenv("ANTHROPIC_API_KEY"):
+        logger.warning(
+            "未设置 OPENAI_API_KEY 或 ANTHROPIC_API_KEY — "
+            "ModelGateway 将使用 Stub 提供商，chat 请求不会调用真实 LLM"
+        )
+    if settings.env == "production" and not settings.service_jwt_secret:
+        logger.warning(
+            "生产环境未配置 SERVICE_JWT_SECRET — 服务间鉴权不可用"
+        )
     if settings.plane_base_url:
         missing = [
             f for f in (
@@ -373,7 +382,20 @@ async def _app_lifespan(app: FastAPI):
     settings = getattr(app.state, "_settings", None)
     if settings:
         _validate_startup_config(settings)
-    # 记录启动时间，供 /status 端点计算 uptime
+
+    # SQLite 环境自动建表（生产环境应使用 Alembic 迁移）
+    db_engine = None
+    for name, resource in getattr(app.state, "_closeables", []):
+        if name == "SQLAlchemy engine":
+            db_engine = resource
+            break
+    if db_engine and settings and "sqlite" in settings.database_url:
+        from agent_platform.storage.base import Base
+        import agent_platform.persistence.tables  # noqa: F401 — 确保所有表定义已加载
+        async with db_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("SQLite 自动建表完成")
+
     app.state.started_at = time.time()
     logger.info("Agent Platform started (env=%s)", settings.env if settings else "unknown")
     yield
@@ -636,6 +658,9 @@ def create_app() -> FastAPI:
     app.state.key_store = key_store
     app.state.service_auth = service_auth
     app.state.routing_decision_repo = routing_decision_repo
+    app.state.artifact_store = artifact_store
+    app.state.artifact_signer = artifact_signer
+    app.state.dlq = dlq
 
     app.add_middleware(
         AuthMiddleware, api_key=settings.api_key, key_store=key_store,
