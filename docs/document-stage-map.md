@@ -20,6 +20,9 @@
 | S3 | Hermes 真接入 | 从 stub/adapter 原型变成真实 Hermes runtime 能力 | 部分完成；Spike A 已完成，官方 Hermes SDK Spike B 待实施 |
 | S4 | AI 研发闭环 | CodingAgentRunner、workspace、path guard、Plane/GitLab 状态同步 | 大部分完成；runner/workspace/path guard 已生产化，ScmAdapter 协议抽象已完成，HttpClient 连接池+重试已完成，GitLab webhook 反向同步已实现，job 持久化+可观测性端点已接入，分支名清理已实现；真实 runner adapter (Claude Code / Codex) 待接入，端到端联调待做 |
 | S5 | 平台生产化与规模化 | 主链路可靠性校准、semantic routing、model gateway、knowledge/RAG、admin API、MCP、治理 | ✅ 已完成 Phase 0-3（670 tests passed, ruff clean）；入口为 `development-plan-s5.md` |
+| S6 | 生产运营加固 | Admin key CRUD、EvalRunner auto-persist、per-role rate limiting、access log、canary metrics、WebSocket 重连 | ✅ 已完成（988 tests passed） |
+| S7 | 多维评测与运营深化 | 多 provider ModelGateway、ToolAudit、AgentStreamEvent、KnowledgeSyncScheduler、多维 EvalRunner、TenantQuota、HermesStreamMapper | ✅ 已完成（1075 tests passed） |
+| S8 | 生产交付 | Prometheus metrics、Session 持久化、Admin eval 增强、真实 runner E2E、Plane/GitLab E2E、Admin UI、SLO 门禁 | 🔶 进行中（1113 tests passed）；入口为 `development-plan-s7.md` |
 
 ## 2. 文档状态定义
 
@@ -94,6 +97,12 @@
 | `06-scale/knowledge-rag-design.md` | Partially Implemented | KnowledgeService + WeaviateKnowledgeBackend 已实现；真实 vector backend 连接待补 |
 | `99-reference/plane-docs-acquisition.md` | Reference | Plane API/MCP 文档获取方式 |
 | `vendor/plane/*` | Reference | Plane OpenAPI 原始快照 |
+
+### S7/S8. 多维评测与生产交付
+
+| 文档 | 状态 | 用途 |
+| --- | --- | --- |
+| `development-plan-s7.md` | In Progress | S7（已完成）和 S8（进行中）执行入口；覆盖多维评测、运营深化、生产交付全部 Phase |
 
 ## 4. 当前阶段阅读路径
 

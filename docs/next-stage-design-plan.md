@@ -1,11 +1,11 @@
 # 下一阶段技术设计计划
 
-> Status: Implemented (S5 完成后校准)
+> Status: Implemented (S7 完成 + S8 进行中校准)
 > Last updated: 2026-05-17
 
 本文档用于承接 `implementation-gap.md` 的结论，把”接下来要补哪些技术设计”拆成可执行的设计文档和决策项。
 
-当前状态：S5 Phase 0-3 全部完成后，P0 设计文档对应的核心能力已全部实现。P1 中 semantic routing、observability、model gateway、knowledge/RAG 也已实现基础版本。剩余设计工作集中在 S6 生产深化。
+当前状态：S5 Phase 0-3 全部完成后，P0 设计文档对应的核心能力已全部实现。P1 中 semantic routing、observability、model gateway、knowledge/RAG 也已实现基础版本。S6 生产运营加固已完成（admin key CRUD、eval auto-persist、per-role rate limiting 等）。S7 多维评测与运营深化已完成（multi-provider ModelGateway、ToolAudit、AgentStreamEvent、TenantQuota、HermesStreamMapper 等）。S8 生产交付进行中（Prometheus metrics、Session 持久化、Admin eval 增强端点已完成；真实 runner E2E、Plane/GitLab E2E、Admin UI 待实施）。详细执行计划见 `development-plan-s7.md`。
 
 ## 1. 当前文档体系评估
 
@@ -297,32 +297,30 @@ Owner: platform
 
 `docs/.DS_Store` 出现在目录里，不应作为文档资产保留。建议确认是否被 Git 跟踪；如果未跟踪，加入全局或项目 `.gitignore` 的 `**/.DS_Store`。
 
-## 5. 推荐设计顺序（S6 剩余工作）
+## 5. 推荐设计顺序（S8 剩余工作）
 
-S5 完成后，P0 全部落地，P1 大部分已实现基础版本。S6 阶段剩余设计按优先级：
+S7 完成后，多维评测引擎、多 provider 路由、工具审计、流式事件映射、租户配额等能力已全部落地。S8 Phase 1（Prometheus metrics + Session 持久化 + Admin eval 增强）已完成。剩余设计按优先级：
 
-1. `observability-eval-feedback-design.md` — 结构化 trace event schema 和 eval report artifact 标准化
-2. `knowledge-rag-design.md` — 真实 vector backend 连接、同步 pipeline、tenant 过滤
-3. `devflow-state-sync-design.md` — 强状态机、DLQ、失败恢复
-4. Admin Web UI 前端设计
-5. 多租户计费/配额
-6. 蓝绿/灰度真实流量控制
-7. 分布式 Job Queue（CodingAgentRunner 异步化）
-8. Hermes memory 持久化（映射到平台 session store）
+1. **真实 coding runner 端到端联调** — Claude Code CLI / Codex CLI 在真实 workspace 执行，验证 prompt→code→commit 管线
+2. **Plane + GitLab 端到端联调** — 使用真实实例验证完整 DevFlow 管线，补齐强状态机和 DLQ
+3. **Hermes 深度集成** — memory 持久化 + 错误/重试映射 + HITL 事件映射
+4. **Admin UI** — Web-based 管理界面（agent/eval/devflow/metrics）
+5. **生产加固** — SLO 门禁、产物签名、服务间鉴权、S3 ArtifactStore、压力测试
 
 理由：
 
-1. 观测和 eval 的结构化数据模型是后续所有质量闭环的前置条件。
-2. Knowledge/RAG 真实连接是 agent 能力差异化的关键。
-3. DevFlow 状态同步强化使 AI 研发闭环可靠。
-4. 其余项属于规模化扩展，可在以上基础稳定后推进。
+1. 真实 runner 联调是 DevFlow 闭环的最后一环，直接决定平台是否具备端到端交付能力。
+2. Plane/GitLab 联调验证完整管线，是 AI 研发平台的核心价值。
+3. Hermes 深度集成使 runtime 能力从"可用"提升到"可信赖"。
+4. Admin UI 是运维必需品，阻塞生产团队采用。
+5. 生产加固是上线前的最后屏障。
 
 ## 6. 下一步建议
 
-S5 Phase 0-3 全部完成后，平台已具备：持久化可靠、Runtime 可执行、工具可审批、MCP 可集成、观测可追踪。
+S7 全部完成、S8 Phase 1 已完成后，平台已具备：持久化可靠、Runtime 可执行（含 Hermes 流式映射）、工具可审批+可审计、MCP 可集成、观测可追踪（Prometheus + Langfuse + OTel）、多维评测可量化、多租户配额可管控。1113 个测试通过，ruff clean。
 
-S6 建议聚焦三条线：
+S8 剩余建议聚焦三条线：
 
-1. **观测深化**：结构化 trace event + eval report 标准化 + 线上样本回流。
-2. **Knowledge 生产化**：接入真实 vector store + 文档同步 pipeline。
-3. **DevFlow 强化**：强状态机 + DLQ + job 持久化和失败恢复。
+1. **DevFlow 端到端**：真实 coding runner + Plane/GitLab 联调，打通 AI 研发闭环最后一公里。
+2. **Runtime 深化**：Hermes memory 持久化 + 错误映射，使多轮对话跨 run 连续。
+3. **交付准备**：Admin UI + SLO 门禁 + 产物签名 + 压力测试，达到生产交付标准。
