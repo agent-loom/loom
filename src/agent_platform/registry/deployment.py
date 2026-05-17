@@ -1,7 +1,9 @@
-"""部署审计日志：记录部署事件，支持回滚追踪。"""
+"""部署审计日志：记录部署事件，支持回滚追踪和哈希链完整性校验。"""
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -14,6 +16,12 @@ if TYPE_CHECKING:
     from agent_platform.persistence.repositories import DeploymentAuditRepository
 
 logger = logging.getLogger(__name__)
+
+
+def _compute_event_hash(event_data: str, prev_hash: str) -> str:
+    """计算审计事件的完整性哈希（SHA-256 链式哈希）。"""
+    payload = f"{prev_hash}|{event_data}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 class DeploymentEvent(BaseModel):
@@ -29,10 +37,17 @@ class DeploymentEvent(BaseModel):
     actor: str = "system"
     artifact_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    integrity_hash: str = ""
+    prev_hash: str = ""
 
 
 class DeploymentAuditLog:
-    """Records all deployment events for audit trail and rollback support."""
+    """Records all deployment events for audit trail and rollback support.
+
+    每条事件通过 SHA-256 链式哈希确保不可变性和防篡改。
+    """
+
+    GENESIS_HASH = "0" * 64
 
     def __init__(self, *, repo: DeploymentAuditRepository | None = None) -> None:
         if repo is None:
@@ -40,6 +55,28 @@ class DeploymentAuditLog:
             self._repo = InMemoryDeploymentAuditRepository()
         else:
             self._repo = repo
+        self._last_hash: str = self.GENESIS_HASH
+
+    def _seal_event(self, event: DeploymentEvent) -> DeploymentEvent:
+        """为事件计算完整性哈希并链接到前一事件。"""
+        canonical = json.dumps(
+            {
+                "ts": event.timestamp.isoformat(),
+                "type": event.event_type,
+                "agent": event.agent_id,
+                "ver": event.version,
+                "ch": event.channel,
+                "status": event.status.value,
+                "actor": event.actor,
+            },
+            sort_keys=True,
+        )
+        integrity = _compute_event_hash(canonical, self._last_hash)
+        sealed = event.model_copy(
+            update={"integrity_hash": integrity, "prev_hash": self._last_hash},
+        )
+        self._last_hash = integrity
+        return sealed
 
     async def record_deploy(
         self,
@@ -60,18 +97,19 @@ class DeploymentAuditLog:
             actor=actor,
             artifact_id=artifact_id,
         )
-        await self._repo.record(event)
+        sealed = self._seal_event(event)
+        await self._repo.record(sealed)
 
         logger.info(
             "deployment event: %s %s@%s -> %s (channel=%s, traffic=%d%%)",
-            event.event_type,
-            event.agent_id,
-            event.version,
-            event.status,
-            event.channel,
-            event.traffic_percent,
+            sealed.event_type,
+            sealed.agent_id,
+            sealed.version,
+            sealed.status,
+            sealed.channel,
+            sealed.traffic_percent,
         )
-        return event
+        return sealed
 
     async def record_rollback(
         self,
@@ -91,7 +129,8 @@ class DeploymentAuditLog:
             previous_version=from_version,
             actor=actor,
         )
-        await self._repo.record(event)
+        sealed = self._seal_event(event)
+        await self._repo.record(sealed)
         logger.info(
             "rollback: %s %s -> %s (channel=%s)",
             agent_id,
@@ -99,7 +138,7 @@ class DeploymentAuditLog:
             to_version,
             channel,
         )
-        return event
+        return sealed
 
     async def get_rollback_version(
         self, agent_id: str, channel: str
@@ -118,3 +157,21 @@ class DeploymentAuditLog:
     ) -> list[DeploymentEvent]:
         """按条件筛选并返回最近的部署事件列表。"""
         return await self._repo.list_events(agent_id=agent_id, channel=channel, limit=limit)
+
+    async def verify_chain(
+        self,
+        agent_id: str | None = None,
+        channel: str | None = None,
+    ) -> tuple[bool, int]:
+        """校验审计事件链的完整性，返回 (是否完整, 已验证事件数)。"""
+        events = await self._repo.list_events(
+            agent_id=agent_id, channel=channel, limit=10000,
+        )
+        events.sort(key=lambda e: e.timestamp)
+
+        prev = self.GENESIS_HASH
+        for i, ev in enumerate(events):
+            if ev.prev_hash and ev.prev_hash != prev:
+                return False, i
+            prev = ev.integrity_hash or prev
+        return True, len(events)

@@ -287,3 +287,37 @@ class CodingJobRepository(Protocol):
     ) -> list[dict[str, Any]]:
         """List coding jobs with optional status filter."""
         ...
+
+
+@runtime_checkable
+class RoutingDecisionRepository(Protocol):
+    """路由决策记录的存储协议。"""
+
+    async def record(
+        self,
+        *,
+        run_id: str,
+        agent_id: str,
+        reason: str,
+        deployment_id: str | None = None,
+        traffic_bucket: int | None = None,
+        latency_ms: int = 0,
+        context: dict[str, Any] | None = None,
+    ) -> None:
+        """记录一条路由决策。"""
+        ...
+
+    async def get(self, run_id: str) -> dict[str, Any] | None:
+        """按 run_id 获取路由决策。"""
+        ...
+
+    async def list_decisions(
+        self,
+        *,
+        agent_id: str | None = None,
+        reason: str | None = None,
+        tenant_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """列出路由决策记录，可按条件过滤。"""
+        ...

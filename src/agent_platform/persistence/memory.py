@@ -432,3 +432,53 @@ class InMemoryToolAuditRepository:
         if status is not None:
             items = [e for e in items if e["status"] == status]
         return items[-limit:]
+
+
+class InMemoryRoutingDecisionRepository:
+    """路由决策的内存存储实现。"""
+
+    def __init__(self) -> None:
+        self._decisions: dict[str, dict[str, Any]] = {}
+        self._ordered: list[dict[str, Any]] = []
+
+    async def record(
+        self,
+        *,
+        run_id: str,
+        agent_id: str,
+        reason: str,
+        deployment_id: str | None = None,
+        traffic_bucket: int | None = None,
+        latency_ms: int = 0,
+        context: dict[str, Any] | None = None,
+    ) -> None:
+        entry = {
+            "run_id": run_id,
+            "agent_id": agent_id,
+            "reason": reason,
+            "deployment_id": deployment_id,
+            "traffic_bucket": traffic_bucket,
+            "latency_ms": latency_ms,
+            "context": context or {},
+            "created_at": datetime.now(UTC).isoformat(),
+        }
+        self._decisions[run_id] = entry
+        self._ordered.append(entry)
+
+    async def get(self, run_id: str) -> dict[str, Any] | None:
+        return self._decisions.get(run_id)
+
+    async def list_decisions(
+        self,
+        *,
+        agent_id: str | None = None,
+        reason: str | None = None,
+        tenant_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        items = self._ordered
+        if agent_id is not None:
+            items = [d for d in items if d["agent_id"] == agent_id]
+        if reason is not None:
+            items = [d for d in items if d["reason"] == reason]
+        return items[-limit:]

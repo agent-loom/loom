@@ -120,6 +120,12 @@ class DeploymentAuditEventRow(AuditMixin, Base):
     metadata_json: Mapped[dict | None] = mapped_column(
         JSON, nullable=True
     )
+    integrity_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, default=""
+    )
+    prev_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, default=""
+    )
 
 
 class AgentRunRow(AuditMixin, Base):
@@ -299,4 +305,31 @@ class ApiKeyRow(AuditMixin, Base):
     )
     active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True
+    )
+
+
+class RoutingDecisionRow(AuditMixin, Base):
+    """路由决策记录表行模型。"""
+    __tablename__ = "routing_decisions"
+
+    run_id: Mapped[str] = mapped_column(
+        String(128), nullable=False, index=True
+    )
+    agent_id: Mapped[str] = mapped_column(
+        String(128), nullable=False, index=True
+    )
+    reason: Mapped[str] = mapped_column(
+        String(256), nullable=False
+    )
+    deployment_id: Mapped[str | None] = mapped_column(
+        String(128), nullable=True
+    )
+    traffic_bucket: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    latency_ms: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    context_json: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True
     )

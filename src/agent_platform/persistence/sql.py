@@ -29,6 +29,7 @@ from agent_platform.persistence.tables import (
     ApiKeyRow,
     DeploymentAuditEventRow,
     EvalRunRow,
+    RoutingDecisionRow,
     WebhookDeliveryRow,
 )
 from agent_platform.registry.deployment import DeploymentEvent
@@ -321,6 +322,8 @@ class SqlDeploymentAuditRepository:
             actor=event.actor,
             artifact_id=event.artifact_id,
             metadata_json=event.metadata,
+            integrity_hash=event.integrity_hash,
+            prev_hash=event.prev_hash,
             created_at=event.timestamp,
         )
         _fill_audit(row)
@@ -399,6 +402,8 @@ class SqlDeploymentAuditRepository:
             actor=row.actor,
             artifact_id=row.artifact_id,
             metadata=row.metadata_json or {},
+            integrity_hash=row.integrity_hash or "",
+            prev_hash=row.prev_hash or "",
         )
 
 
@@ -1000,3 +1005,90 @@ class SqlApiKeyStore:
             row.active = False
             await session.commit()
             return True
+
+
+# ------------------------------------------------------------------
+# RoutingDecision
+# ------------------------------------------------------------------
+
+
+class SqlRoutingDecisionRepository:
+    """路由决策记录的 SQL 存储实现。"""
+
+    def __init__(
+        self, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        self._sf = session_factory
+
+    async def record(
+        self,
+        *,
+        run_id: str,
+        agent_id: str,
+        reason: str,
+        deployment_id: str | None = None,
+        traffic_bucket: int | None = None,
+        latency_ms: int = 0,
+        context: dict[str, Any] | None = None,
+    ) -> None:
+        row = RoutingDecisionRow(
+            run_id=run_id,
+            agent_id=agent_id,
+            reason=reason,
+            deployment_id=deployment_id,
+            traffic_bucket=traffic_bucket,
+            latency_ms=latency_ms,
+            context_json=context,
+        )
+        _fill_audit(row)
+        async with self._sf() as session:
+            session.add(row)
+            await session.commit()
+
+    async def get(self, run_id: str) -> dict[str, Any] | None:
+        async with self._sf() as session:
+            stmt = select(RoutingDecisionRow).where(
+                RoutingDecisionRow.run_id == run_id
+            )
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row is None:
+                return None
+            return self._to_dict(row)
+
+    async def list_decisions(
+        self,
+        *,
+        agent_id: str | None = None,
+        reason: str | None = None,
+        tenant_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        stmt = select(RoutingDecisionRow)
+        if agent_id is not None:
+            stmt = stmt.where(RoutingDecisionRow.agent_id == agent_id)
+        if reason is not None:
+            stmt = stmt.where(RoutingDecisionRow.reason == reason)
+        if tenant_id is not None:
+            stmt = stmt.where(RoutingDecisionRow.tenant_id == tenant_id)
+        stmt = stmt.order_by(
+            RoutingDecisionRow.created_at.desc()
+        ).limit(limit)
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+            return [self._to_dict(r) for r in rows]
+
+    @staticmethod
+    def _to_dict(row: RoutingDecisionRow) -> dict[str, Any]:
+        return {
+            "run_id": row.run_id,
+            "agent_id": row.agent_id,
+            "reason": row.reason,
+            "deployment_id": row.deployment_id,
+            "traffic_bucket": row.traffic_bucket,
+            "latency_ms": row.latency_ms,
+            "context": row.context_json or {},
+            "tenant_id": row.tenant_id,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
