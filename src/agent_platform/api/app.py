@@ -399,13 +399,16 @@ async def _app_lifespan(app: FastAPI):
     app.state.started_at = time.time()
     logger.info("Agent Platform started (env=%s)", settings.env if settings else "unknown")
     yield
+    import asyncio as _asyncio
     for name, resource in getattr(app.state, "_closeables", []):
         try:
             if hasattr(resource, "close"):
-                await resource.close()
+                await _asyncio.wait_for(resource.close(), timeout=10)
             elif hasattr(resource, "dispose"):
-                await resource.dispose()
+                await _asyncio.wait_for(resource.dispose(), timeout=10)
             logger.info("Closed %s", name)
+        except TimeoutError:
+            logger.warning("关闭 %s 超时（10s），跳过", name)
         except Exception:
             logger.warning("Failed to close %s", name, exc_info=True)
     logger.info("Agent Platform shutdown complete")
@@ -478,7 +481,16 @@ def create_app() -> FastAPI:
         try:
             from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-            db_engine = create_async_engine(settings.database_url, echo=False)
+            db_engine = create_async_engine(
+                settings.database_url,
+                echo=False,
+                pool_pre_ping=True,
+                pool_recycle=1800,
+                **({} if "sqlite" in settings.database_url else {
+                    "pool_size": 10,
+                    "max_overflow": 20,
+                }),
+            )
             db_session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
             logger.info("SQL persistence enabled for %s", settings.database_url)
         except Exception:
@@ -702,6 +714,23 @@ def create_app() -> FastAPI:
                 "error": {
                     "code": "INTERNAL_ERROR",
                     "message": detail,
+                    "request_id": request_id,
+                }
+            },
+        )
+
+    from fastapi.exceptions import RequestValidationError
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_exception_handler(request: Request, exc: RequestValidationError):
+        request_id = getattr(request.state, "request_id", "unknown")
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": "请求参数校验失败",
+                    "details": exc.errors(),
                     "request_id": request_id,
                 }
             },
