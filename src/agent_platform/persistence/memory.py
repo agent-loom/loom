@@ -207,7 +207,7 @@ class InMemoryAgentRunRepository:
         tenant_id: str | None = None,
         limit: int = 100,
     ) -> list[AgentRun]:
-        """列出运行记录，可按条件过滤。"""
+        """列出运行记录，可按条件过滤。按时间倒序返回。"""
         items = list(self._store.values())
         if agent_id is not None:
             items = [
@@ -222,7 +222,7 @@ class InMemoryAgentRunRepository:
             items = [
                 r for r in items if r.tenant_id == tenant_id
             ]
-        return items[-limit:]
+        return list(reversed(items[-limit:]))
 
 
 class InMemoryAgentSessionRepository:

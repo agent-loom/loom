@@ -972,14 +972,14 @@ def create_app() -> FastAPI:
                 async with db_session_factory() as session:
                     await session.execute(sa_text("SELECT 1"))
                 checks["database"] = "ok"
-            except Exception as exc:
-                checks["database"] = f"error: {exc}"
+            except Exception:
+                checks["database"] = "error"
                 overall = False
         else:
             checks["database"] = "in_memory"
 
         checks["devflow"] = "enabled" if devflow is not None else "disabled"
-        checks["runner_adapter"] = settings.devflow_runner_adapter
+        checks["runner_adapter"] = "configured"
         checks["auth"] = "enabled" if settings.api_key else "open"
 
         runner_adapter = getattr(app.state, "runner_adapter", None)
@@ -1014,7 +1014,7 @@ def create_app() -> FastAPI:
                 else:
                     checks["weaviate"] = "not_registered"
             else:
-                checks["weaviate"] = settings.weaviate_url
+                checks["weaviate"] = "configured"
 
         if settings.redis_url:
             _redis_client = getattr(app.state, "_redis_client", None)

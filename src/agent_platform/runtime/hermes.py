@@ -540,7 +540,7 @@ class HermesRuntimeBackend:
             session.state_snapshot = snapshot
             await self.session_store.save(session)
         except Exception:
-            logger.debug("state_snapshot 持久化失败", exc_info=True)
+            logger.warning("state_snapshot 持久化失败", exc_info=True)
 
     # Spike A path --------------------------------------------------------------
 

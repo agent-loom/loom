@@ -6,6 +6,7 @@ import asyncio
 import hmac
 import json
 import logging
+import re
 from collections import deque
 from typing import Any
 
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 MAX_PENDING_MESSAGES = 32
 MAX_MESSAGE_SIZE = 65536
 REPLAY_BUFFER_SIZE = 50
+_SESSION_ID_RE = re.compile(r"^[a-zA-Z0-9_\-]{1,128}$")
 
 
 class AgentWebSocketManager:
@@ -46,6 +48,10 @@ class AgentWebSocketManager:
         self._last_seq: dict[str, int] = {}
 
     async def handle(self, websocket: WebSocket, session_id: str | None = None) -> None:
+        if session_id and not _SESSION_ID_RE.match(session_id):
+            await websocket.close(code=4003, reason="invalid session_id format")
+            return
+
         if len(self._connections) >= self._max_connections:
             await websocket.close(code=1013, reason="server at capacity")
             return
@@ -126,6 +132,8 @@ class AgentWebSocketManager:
         finally:
             self._connections.pop(ws_id, None)
             self._pending.pop(ws_id, None)
+            self._replay_buffers.pop(ws_id, None)
+            self._last_seq.pop(ws_id, None)
 
     async def _authenticate(self, websocket: WebSocket) -> dict[str, Any] | None:
         if not self._api_key and self._key_store is None:

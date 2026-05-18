@@ -31,6 +31,7 @@ from agent_platform.persistence.repositories import (
     AgentRunRepository,
     AgentSessionRepository,
 )
+from agent_platform.runtime.context_builder import ContextBuilder
 from agent_platform.runtime.hermes import HermesRuntimeBackend
 from agent_platform.runtime.langgraph import LangGraphRuntimeBackend
 from agent_platform.runtime.model_gateway import ModelGateway
@@ -177,7 +178,6 @@ class RuntimeManager:
                 session.add_message("user", request.request.input.query)
 
             # Build runtime context using ContextBuilder
-            from agent_platform.runtime.context_builder import ContextBuilder
             builder = ContextBuilder()
             runtime_context = builder.build(
                 spec=request.agent_spec,
