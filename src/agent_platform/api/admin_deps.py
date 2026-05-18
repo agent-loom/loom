@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from agent_platform.governance.slo import SLOGate
     from agent_platform.observability.metrics import MetricsCollector
     from agent_platform.persistence.repositories import (
+        AgentDefinitionRepository,
         CodingJobRepository,
         EvalRunRepository,
         RoutingDecisionRepository,
@@ -48,3 +49,4 @@ class AdminDeps:
     execution_log_repo: ExecutionLogRepository | None = None
     coding_job_repo: CodingJobRepository | None = None
     coding_runner: CodingAgentRunner | None = None
+    definition_repo: AgentDefinitionRepository | None = None

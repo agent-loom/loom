@@ -142,6 +142,7 @@ class RequestContext(BaseModel):
     user: UserContext = Field(default_factory=UserContext)
     locale: str = "en"
     timezone: str = "UTC"
+    extra: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod
@@ -359,6 +360,8 @@ class ManifestModelConfig(BaseModel):
     model: str
     temperature: float = 0.2
     max_tokens: int = 1024
+    api_key_ref: str | None = None
+    base_url_ref: str | None = None
 
 
 class ManifestTools(BaseModel):

@@ -744,6 +744,7 @@ def create_app() -> FastAPI:
         slo_gate=slo_gate,
         webhook_retry_service=webhook_retry_service,
         routing_decision_repo=routing_decision_repo,
+        definition_repo=definition_repo,
     )
     app.include_router(
         admin_router,

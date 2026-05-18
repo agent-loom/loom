@@ -10,6 +10,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     Float,
+    Index,
     Integer,
     String,
     Text,
@@ -69,6 +70,9 @@ class AgentDefinitionRow(AuditMixin, Base):
 class AgentDeploymentRow(AuditMixin, Base):
     """Agent 部署表行模型。"""
     __tablename__ = "agent_deployments"
+    __table_args__ = (
+        Index("ix_deployment_agent_channel", "agent_id", "channel"),
+    )
 
     deployment_id: Mapped[str] = mapped_column(
         String(128), nullable=False, unique=True, index=True
@@ -93,6 +97,9 @@ class AgentDeploymentRow(AuditMixin, Base):
 class DeploymentAuditEventRow(AuditMixin, Base):
     """部署审计事件表行模型。"""
     __tablename__ = "deployment_audit_events"
+    __table_args__ = (
+        Index("ix_audit_agent_channel", "agent_id", "channel"),
+    )
 
     event_type: Mapped[str] = mapped_column(
         String(64), nullable=False, index=True
@@ -135,6 +142,10 @@ class DeploymentAuditEventRow(AuditMixin, Base):
 class AgentRunRow(AuditMixin, Base):
     """Agent 运行记录表行模型。"""
     __tablename__ = "agent_runs"
+    __table_args__ = (
+        Index("ix_run_agent_status", "agent_id", "status"),
+        Index("ix_run_session", "session_id", "agent_id"),
+    )
 
     run_id: Mapped[str] = mapped_column(
         String(128), nullable=False, unique=True, index=True
@@ -180,6 +191,9 @@ class AgentRunRow(AuditMixin, Base):
 class AgentSessionRow(AuditMixin, Base):
     """Agent 会话表行模型。"""
     __tablename__ = "agent_sessions"
+    __table_args__ = (
+        Index("ix_session_agent_user", "agent_id", "user_id"),
+    )
 
     session_id: Mapped[str] = mapped_column(
         String(128), nullable=False, unique=True, index=True

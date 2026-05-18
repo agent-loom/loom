@@ -87,6 +87,37 @@ async def delete_agent(agent_id: str, request: Request) -> dict[str, str]:
     return {"status": "deleted", "agent_id": agent_id}
 
 
+class UpdateAgentStatusRequest(BaseModel):
+    """更新 Agent 状态的请求体。"""
+    status: str
+    version: str | None = None
+
+
+@router.put("/agents/{agent_id}/status")
+async def update_agent_status(
+    agent_id: str,
+    body: UpdateAgentStatusRequest,
+    request: Request,
+) -> dict[str, Any]:
+    """更新 Agent 定义的生命周期状态（activate / deprecate / archive）。"""
+    deps = _deps(request)
+    allowed = {"active", "deprecated", "archived", "draft"}
+    if body.status not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"invalid status: {body.status}, allowed: {sorted(allowed)}",
+        )
+    try:
+        spec = await deps.registry.get(agent_id)
+    except AgentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    version = body.version or spec.version
+    if deps.definition_repo is not None:
+        await deps.definition_repo.update_status(agent_id, version, body.status)
+    return {"agent_id": agent_id, "version": version, "status": body.status}
+
+
 # ---------------------------------------------------------------------------
 # System Status
 # ---------------------------------------------------------------------------
@@ -804,7 +835,7 @@ async def resolve_dead_letter_entry(
 # ── 路由决策查询 ──
 
 
-@router.get("/admin/routing-decisions")
+@router.get("/routing-decisions")
 async def list_routing_decisions(
     request: Request,
     agent_id: str | None = None,
@@ -822,7 +853,7 @@ async def list_routing_decisions(
     return {"decisions": decisions, "count": len(decisions)}
 
 
-@router.get("/admin/routing-decisions/{run_id}")
+@router.get("/routing-decisions/{run_id}")
 async def get_routing_decision(
     request: Request,
     run_id: str,
@@ -840,7 +871,7 @@ async def get_routing_decision(
 # ── 审计链完整性校验 ──
 
 
-@router.post("/admin/audits/verify-chain")
+@router.post("/audits/verify-chain")
 async def verify_audit_chain(
     request: Request,
     agent_id: str | None = None,
@@ -862,7 +893,7 @@ async def verify_audit_chain(
 # ── Runner 执行日志与作业管理 ──
 
 
-@router.get("/admin/jobs")
+@router.get("/jobs")
 async def list_jobs(
     request: Request,
     limit: int = Query(default=50, ge=1, le=200),
@@ -875,7 +906,7 @@ async def list_jobs(
     return {"jobs": job_ids, "count": len(job_ids)}
 
 
-@router.get("/admin/jobs/{job_id}/logs")
+@router.get("/jobs/{job_id}/logs")
 async def get_job_logs(
     request: Request,
     job_id: str,
@@ -903,7 +934,7 @@ async def get_job_logs(
     }
 
 
-@router.post("/admin/jobs/{job_id}/cancel")
+@router.post("/jobs/{job_id}/cancel")
 async def cancel_job(
     request: Request,
     job_id: str,

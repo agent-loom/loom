@@ -72,7 +72,14 @@ class ManifestMapper:
     def _get_model_config(manifest: AgentManifest) -> dict[str, Any]:
         default = manifest.models.get("default")
         if default:
-            return default.model_dump()
+            cfg = default.model_dump()
+            if default.api_key_ref:
+                import os
+                cfg["api_key"] = os.environ.get(default.api_key_ref, "")
+            if default.base_url_ref:
+                import os
+                cfg["base_url"] = os.environ.get(default.base_url_ref, "")
+            return cfg
         return {"provider": "demo", "model": "native-demo"}
 
 
@@ -176,6 +183,9 @@ class PolicyEnforcer:
 def register_platform_tools_to_hermes(
     tool_executor: Any,
     agent_id: str,
+    *,
+    allowed_tools: list[str] | None = None,
+    denied_tools: list[str] | None = None,
 ) -> Callable[[], None]:
     """Register every tool from *tool_executor* into the Hermes SDK global
     registry, prefixed by *agent_id* to avoid name collisions.
@@ -195,8 +205,14 @@ def register_platform_tools_to_hermes(
         return lambda: None
 
     registered_names: list[str] = []
+    deny_set = set(denied_tools or [])
+    allow_set = set(allowed_tools) if allowed_tools else None
 
     for defn in tool_executor.registry.list_tools():
+        if defn.name in deny_set:
+            continue
+        if allow_set is not None and defn.name not in allow_set:
+            continue
         hermes_name = f"{agent_id}__{defn.name}"
 
         def _make_handler(
@@ -573,20 +589,28 @@ class HermesRuntimeBackend:
 
         deregister = lambda: None  # noqa: E731
         if self.tool_executor:
+            manifest = request.agent_spec.manifest
             deregister = register_platform_tools_to_hermes(
                 self.tool_executor,
                 hermes_config.get("agent_id", "unknown"),
+                allowed_tools=manifest.tools.allow or None,
+                denied_tools=manifest.tools.deny or None,
             )
 
         model_cfg = hermes_config.get("model", {})
         agent_id = hermes_config.get("agent_id", "unknown")
         toolset_name = f"platform_{agent_id}"
 
-        agent = _HermesAIAgent(
-            provider=model_cfg.get("provider", "openai"),
-            model=model_cfg.get("model", "native-demo"),
-            enabled_toolsets=[toolset_name] if self.tool_executor else [],
-        )
+        agent_kwargs: dict[str, Any] = {
+            "provider": model_cfg.get("provider", "openai"),
+            "model": model_cfg.get("model", "native-demo"),
+            "enabled_toolsets": [toolset_name] if self.tool_executor else [],
+        }
+        if model_cfg.get("base_url"):
+            agent_kwargs["base_url"] = model_cfg["base_url"]
+        if model_cfg.get("api_key"):
+            agent_kwargs["api_key"] = model_cfg["api_key"]
+        agent = _HermesAIAgent(**agent_kwargs)
 
         system_prompt = hermes_config.get("system_prompt", "")
         if request.runtime_context and getattr(request.runtime_context, "knowledge_snippets", None):
