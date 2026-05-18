@@ -22,7 +22,8 @@
 | S5 | 平台生产化与规模化 | 主链路可靠性校准、semantic routing、model gateway、knowledge/RAG、admin API、MCP、治理 | ✅ 已完成 Phase 0-3（670 tests passed, ruff clean）；入口为 `development-plan-s5.md` |
 | S6 | 生产运营加固 | Admin key CRUD、EvalRunner auto-persist、per-role rate limiting、access log、canary metrics、WebSocket 重连 | ✅ 已完成（988 tests passed） |
 | S7 | 多维评测与运营深化 | 多 provider ModelGateway、ToolAudit、AgentStreamEvent、KnowledgeSyncScheduler、多维 EvalRunner、TenantQuota、HermesStreamMapper | ✅ 已完成（1075 tests passed） |
-| S8 | 生产交付 | Prometheus metrics、Session 持久化、Admin eval 增强、真实 runner E2E、Plane/GitLab E2E、Admin UI、SLO 门禁 | 🔶 进行中（当前已跟踪测试 1314 passed, 1 skipped）；入口为 `development-plan-s7.md` |
+| S8 | 生产交付 | Prometheus metrics、Session 持久化、Admin eval 增强、真实 runner E2E、Plane/GitLab E2E | ✅ 已完成（1609 passed）；DevFlow Codex 真实 E2E 跑通、GitLab 反向 webhook、Hermes SDK 修复、Alembic 完善 |
+| S9 | 运维与扩展 | Admin UI、PathGuard `**` 递归修复、CI/CD SLO 门禁、多 Agent 协作、生产部署 | 🔶 规划中 |
 
 ## 2. 文档状态定义
 
