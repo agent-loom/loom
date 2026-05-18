@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from agent_platform.domain.models import (
@@ -202,21 +201,15 @@ def register_platform_tools_to_hermes(
 
         def _make_handler(
             tool_name: str, tool_timeout: int,
-        ) -> Callable[[dict[str, Any]], str]:
-            def handler(args: dict[str, Any], **_kw: Any) -> str:
-                loop = asyncio.new_event_loop()
-                try:
-                    result = loop.run_until_complete(
-                        tool_executor.execute(
-                            tool_name,
-                            args,
-                            allowed_tools=[tool_name],
-                            timeout_ms=tool_timeout,
-                        )
-                    )
-                    return str(result.output)
-                finally:
-                    loop.close()
+        ) -> Callable[..., Awaitable[str]]:
+            async def handler(args: dict[str, Any], **_kw: Any) -> str:
+                result = await tool_executor.execute(
+                    tool_name,
+                    args,
+                    allowed_tools=[tool_name],
+                    timeout_ms=tool_timeout,
+                )
+                return str(result.output)
 
             return handler
 
@@ -229,7 +222,7 @@ def register_platform_tools_to_hermes(
                 "parameters": defn.input_schema,
             },
             handler=_make_handler(defn.name, defn.timeout_ms),
-            is_async=False,
+            is_async=True,
             description=defn.description,
             emoji="",
         )

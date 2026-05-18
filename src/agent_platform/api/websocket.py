@@ -137,18 +137,22 @@ class AgentWebSocketManager:
 
     async def _authenticate(self, websocket: WebSocket) -> dict[str, Any] | None:
         if not self._api_key and self._key_store is None:
-            return {"subject": "anonymous", "role": "platform_admin"}
+            return {"subject": "anonymous", "role": "readonly"}
 
-        query_params = websocket.query_params
-        token = query_params.get("token")
+        headers = dict(websocket.headers)
+        auth_header = headers.get("authorization", "")
+        token: str | None = None
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+        if not token:
+            token = headers.get("x-api-key")
 
         if not token:
-            headers = dict(websocket.headers)
-            auth_header = headers.get("authorization", "")
-            if auth_header.startswith("Bearer "):
-                token = auth_header[7:]
-            if not token:
-                token = headers.get("x-api-key")
+            token = websocket.query_params.get("token")
+            if token:
+                logger.warning(
+                    "WebSocket 使用 query param 传递 token，建议改用 Authorization header"
+                )
 
         if not token:
             await websocket.close(code=4001, reason="authentication required")

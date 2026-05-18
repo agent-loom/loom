@@ -1043,7 +1043,9 @@ def create_app() -> FastAPI:
         )
 
     @app.get("/api/v1/agents")
-    async def list_agents() -> list[dict[str, str]]:
+    async def list_agents(
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> list[dict[str, str]]:
         return [
             {
                 "agent_id": spec.agent_id,
@@ -1071,7 +1073,10 @@ def create_app() -> FastAPI:
         return {"agent_id": spec.agent_id, "version": spec.version, "status": "registered"}
 
     @app.get("/api/v1/agents/{agent_id}/health")
-    async def agent_health(agent_id: str) -> dict:
+    async def agent_health(
+        agent_id: str,
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> dict:
         """Per-agent health check: backend, recent runs, sessions."""
         try:
             spec = await registry.get(agent_id)
@@ -1128,7 +1133,10 @@ def create_app() -> FastAPI:
         return [deployment.model_dump(mode="json") for deployment in deployments]
 
     @app.get("/api/v1/agent-deployments/{deployment_id}/metrics")
-    async def deployment_metrics(deployment_id: str) -> dict:
+    async def deployment_metrics(
+        deployment_id: str,
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> dict:
         """Canary deployment metrics: error rate, latency, run count."""
         deployment = await registry.get_deployment(deployment_id)
         if deployment is None:
@@ -1181,10 +1189,15 @@ def create_app() -> FastAPI:
         return [s.model_dump(mode="json") for s in sessions]
 
     @app.get("/api/v1/sessions/{session_id}")
-    async def get_session(session_id: str) -> dict:
+    async def get_session(
+        session_id: str,
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> dict:
         session = await runtime_manager.load_session(session_id)
         if session is None:
             raise HTTPException(status_code=404, detail=f"session not found: {session_id}")
+        if _auth.role != "platform_admin" and session.tenant_id != _auth.tenant_id:
+            raise HTTPException(status_code=403, detail="access denied")
         return session.model_dump(mode="json")
 
     @app.get("/api/v1/agent-packages/{agent_id}/versions/{version}/validate")
@@ -1452,18 +1465,24 @@ def create_app() -> FastAPI:
     async def list_devflow_jobs(
         status: str | None = None,
         limit: int = Query(default=50, ge=1, le=500),
+        _auth: AuthIdentity = _SCOPE_READ,
     ) -> list[dict]:
         return await coding_job_repo.list_jobs(status=status, limit=limit)
 
     @app.get("/api/v1/devflow/jobs/{job_id}")
-    async def get_devflow_job(job_id: str) -> dict:
+    async def get_devflow_job(
+        job_id: str,
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> dict:
         job = await coding_job_repo.get(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail=f"job not found: {job_id}")
         return job
 
     @app.get("/api/v1/devflow/status")
-    async def devflow_status() -> dict[str, Any]:
+    async def devflow_status(
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> dict[str, Any]:
         jobs = await coding_job_repo.list_jobs(limit=1000)
         by_state: dict[str, int] = {}
         for j in jobs:
@@ -1523,23 +1542,33 @@ def create_app() -> FastAPI:
         agent_id: str | None = None,
         channel: str | None = None,
         limit: int = 50,
+        _auth: AuthIdentity = _SCOPE_READ,
     ):
         events = await audit_log.list_events(agent_id, channel, limit)
         return [e.model_dump(mode="json") for e in events]
 
     @app.get("/api/v1/artifacts")
-    async def list_artifacts(agent_id: str | None = None) -> list[dict]:
+    async def list_artifacts(
+        agent_id: str | None = None,
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> list[dict]:
         return [a.model_dump(mode="json") for a in artifact_store.list_artifacts(agent_id)]
 
     @app.get("/api/v1/artifacts/{artifact_id}")
-    async def get_artifact(artifact_id: str) -> dict:
+    async def get_artifact(
+        artifact_id: str,
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> dict:
         meta = artifact_store.get_metadata(artifact_id)
         if not meta:
             raise HTTPException(status_code=404, detail=f"artifact not found: {artifact_id}")
         return meta.model_dump(mode="json")
 
     @app.get("/api/v1/artifacts/{artifact_id}/download")
-    async def download_artifact(artifact_id: str) -> Response:
+    async def download_artifact(
+        artifact_id: str,
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> Response:
         data = artifact_store.get_data(artifact_id)
         if not data:
             raise HTTPException(status_code=404, detail=f"artifact not found: {artifact_id}")
@@ -1751,7 +1780,9 @@ def create_app() -> FastAPI:
     # --- Approval gate API endpoints ---
 
     @app.get("/api/v1/approvals/pending")
-    async def list_pending_approvals() -> list[dict]:
+    async def list_pending_approvals(
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ) -> list[dict]:
         pending = await approval_gate.list_pending()
         return [req.model_dump(mode="json") for req in pending]
 

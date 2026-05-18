@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -23,7 +24,7 @@ class GitLabWebhookVerifier:
         self.secret = secret
 
     def verify(self, token: str | None) -> None:
-        if not token or token != self.secret:
+        if not token or not hmac.compare_digest(token, self.secret):
             raise GitLabWebhookError("Invalid or missing X-Gitlab-Token")
 
 

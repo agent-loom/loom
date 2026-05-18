@@ -35,13 +35,27 @@ class RateLimiterBackend(Protocol):
 class InMemoryRateLimiterBackend:
     """基于进程内字典的令牌桶后端，适用于单实例部署。"""
 
+    _MAX_BUCKETS = 10_000
+    _EVICT_IDLE_SECONDS = 600.0
+
     def __init__(self) -> None:
         self._buckets: dict[str, _TokenBucket] = {}
 
     async def try_consume(self, key: str, rate: float, burst: int) -> bool:
+        if len(self._buckets) > self._MAX_BUCKETS:
+            self._evict_idle()
         if key not in self._buckets:
             self._buckets[key] = _TokenBucket(rate, burst)
         return self._buckets[key].consume()
+
+    def _evict_idle(self) -> None:
+        now = time.monotonic()
+        stale = [
+            k for k, b in self._buckets.items()
+            if now - b.last_refill > self._EVICT_IDLE_SECONDS
+        ]
+        for k in stale:
+            del self._buckets[k]
 
 
 class RedisRateLimiterBackend:

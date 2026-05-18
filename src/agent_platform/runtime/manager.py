@@ -372,6 +372,7 @@ class RuntimeManager:
                 user_id=request.request.context.user.user_id,
                 channel_id=request.request.context.channel.channel_id,
             )
+            await self.session_store.save(session)
         return session
 
     async def _enrich_knowledge(self, request: RuntimeRequest) -> None:

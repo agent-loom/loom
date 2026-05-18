@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -47,6 +48,9 @@ class AuditMixin:
 class AgentDefinitionRow(AuditMixin, Base):
     """Agent 定义表行模型。"""
     __tablename__ = "agent_definitions"
+    __table_args__ = (
+        UniqueConstraint("agent_id", "version", name="uq_agent_definition_id_version"),
+    )
 
     agent_id: Mapped[str] = mapped_column(
         String(128), nullable=False, index=True

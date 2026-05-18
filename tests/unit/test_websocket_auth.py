@@ -62,7 +62,7 @@ class TestAuthentication:
         result = await m._authenticate(ws)
         assert result is not None
         assert result["subject"] == "anonymous"
-        assert result["role"] == "platform_admin"
+        assert result["role"] == "readonly"
 
     @pytest.mark.asyncio
     async def test_api_key_from_query_param(self):

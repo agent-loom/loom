@@ -43,15 +43,22 @@ class PathGuard:
         return violations
 
     def _check_single(self, file_path: str) -> PathViolation | None:
+        normalized = PurePosixPath(file_path).as_posix()
+        if ".." in normalized.split("/"):
+            return PathViolation(
+                path=file_path,
+                reason="path traversal detected",
+            )
+
         for pattern in self.write_denied:
-            if _glob_match(file_path, pattern):
+            if _glob_match(normalized, pattern):
                 return PathViolation(
                     path=file_path,
                     reason=f"matches write_denied pattern: {pattern}",
                 )
 
         for pattern in self.write_allowed:
-            if _glob_match(file_path, pattern):
+            if _glob_match(normalized, pattern):
                 return None
 
         return PathViolation(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -154,14 +155,20 @@ class CircuitBreaker:
         self._state = CircuitState.CLOSED
         self._opened_at: float = 0.0
         self._half_open_calls = 0
+        self._lock = asyncio.Lock()
 
     @property
     def state(self) -> CircuitState:
-        if self._state == CircuitState.OPEN:
-            if time.monotonic() - self._opened_at >= self.recovery_timeout:
-                self._state = CircuitState.HALF_OPEN
-                self._half_open_calls = 0
+        self._maybe_transition_to_half_open()
         return self._state
+
+    def _maybe_transition_to_half_open(self) -> None:
+        if (
+            self._state == CircuitState.OPEN
+            and time.monotonic() - self._opened_at >= self.recovery_timeout
+        ):
+            self._state = CircuitState.HALF_OPEN
+            self._half_open_calls = 0
 
     def allow_request(self) -> bool:
         st = self.state
