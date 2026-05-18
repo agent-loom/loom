@@ -13,6 +13,7 @@ from agent_platform.devflow.runner.models import (
 )
 from agent_platform.devflow.runner.protocol import RunnerAdapterResult
 from agent_platform.devflow.runner.runner import CodingAgentRunner
+from agent_platform.devflow.runner.workspace import WorkspaceManager
 from agent_platform.devflow.task_pack import (
     DevelopmentTask,
     RepositoryTarget,
@@ -36,6 +37,12 @@ def _make_task() -> DevelopmentTask:
     )
 
 
+def _make_task_with_required_output() -> DevelopmentTask:
+    task = _make_task()
+    task.implementation["required_outputs"] = ["src/main.py"]
+    return task
+
+
 def _make_runner(
     *,
     adapter_result: RunnerAdapterResult | None = None,
@@ -52,7 +59,7 @@ def _make_runner(
     workspace_mgr = MagicMock()
     workspace_mgr.create = AsyncMock(return_value=Path("/tmp/ws"))
     workspace_mgr.get_changed_files = AsyncMock(
-        return_value=changed_files or ["src/main.py"]
+        return_value=["src/main.py"] if changed_files is None else changed_files
     )
     workspace_mgr.run_validation = AsyncMock(
         return_value=ValidationResult(all_passed=validation_passed)
@@ -145,6 +152,15 @@ class TestRunnerLifecycle:
         assert job.result.commit_sha is None
 
     @pytest.mark.asyncio
+    async def test_no_changes_with_required_outputs_fails(self):
+        runner = _make_runner(changed_files=[])
+        job = await runner.run(_make_task_with_required_output())
+
+        assert job.state == JobState.FAILED
+        assert job.result.status == ResultStatus.NO_CHANGES
+        assert "without file changes" in job.result.error_message
+
+    @pytest.mark.asyncio
     async def test_path_violation(self):
         runner = _make_runner(changed_files=[".env"])
         task = _make_task()
@@ -201,6 +217,19 @@ class TestRunnerLifecycle:
 
         assert job.state == JobState.FAILED
         assert job.result.status == ResultStatus.RUNNER_ERROR
+
+
+class TestWorkspaceValidationCommandResolution:
+    def test_resolves_pytest_to_current_interpreter(self):
+        resolved = WorkspaceManager._resolve_validation_command("pytest tests/unit -q")
+
+        assert resolved[1:3] == ["-m", "pytest"]
+        assert resolved[3:] == ["tests/unit", "-q"]
+
+    def test_resolves_python_to_current_interpreter(self):
+        resolved = WorkspaceManager._resolve_validation_command("python scripts/check.py")
+
+        assert resolved[1:] == ["scripts/check.py"]
 
 
 class TestRepoUrl:

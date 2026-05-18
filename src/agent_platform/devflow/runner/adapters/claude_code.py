@@ -46,6 +46,8 @@ class ClaudeCodeAdapter:
             self.cli_path,
             "--print",
             "--output-format", "json",
+            "--permission-mode", "bypassPermissions",
+            "--no-session-persistence",
             "--max-turns", str(self.max_turns),
         ]
         if self.model:
@@ -72,6 +74,7 @@ class ClaudeCodeAdapter:
                 exit_code=exit_code,
                 stdout=stdout,
                 stderr=stderr,
+                error_message=stderr.strip()[-1000:] if exit_code != 0 else None,
             )
 
         except TimeoutError:
@@ -79,6 +82,27 @@ class ClaudeCodeAdapter:
             return RunnerAdapterResult(
                 exit_code=-1,
                 error_message=f"Claude Code timed out after {timeout_seconds}s",
+            )
+        except FileNotFoundError as exc:
+            return RunnerAdapterResult(
+                exit_code=127,
+                error_message=f"Claude Code CLI not found: {exc}",
+            )
+        except PermissionError as exc:
+            return RunnerAdapterResult(
+                exit_code=126,
+                error_message=f"Claude Code CLI permission error: {exc}",
+            )
+        except OSError as exc:
+            return RunnerAdapterResult(
+                exit_code=126,
+                error_message=f"Claude Code CLI failed to start: {exc}",
+            )
+        except Exception as exc:
+            logger.exception("Claude Code adapter failed")
+            return RunnerAdapterResult(
+                exit_code=1,
+                error_message=f"Claude Code adapter failed: {exc}",
             )
 
     async def cancel(self) -> None:

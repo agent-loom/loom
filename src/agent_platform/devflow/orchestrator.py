@@ -15,7 +15,7 @@ from agent_platform.persistence.repositories import WebhookDeliveryRepository
 
 logger = logging.getLogger(__name__)
 
-READY_FOR_AI_DEV_STATES = {"Ready for AI Dev", "ready_for_ai_dev"}
+READY_FOR_AI_DEV_STATES = {"Ready for AI Dev", "ready_for_ai_dev", "In Progress", "in_progress"}
 AI_DEVELOPING_STATE = "AI Developing"
 
 
@@ -98,8 +98,18 @@ class DevFlowOrchestrator:
 
         # 获取工作项详细信息
         work_item_detail = await self._fetch_work_item_detail(project_id, work_item_id)
-        agent_id = self._extract_agent_id(work_item_detail)
-        task_type = self._extract_task_type(work_item_detail)
+        agent_id = self._extract_agent_id(work_item_detail) or self._extract_agent_id(work_item)
+        task_type = (
+            self._extract_task_type(work_item_detail, fallback=None)
+            or self._extract_task_type(work_item)
+        )
+        background = (
+            work_item_detail.get("description_stripped")
+            or work_item_detail.get("description")
+            or work_item.get("description_stripped")
+            or work_item.get("description")
+            or title
+        )
 
         # 状态同步：需求解析完成 → READY_FOR_AI_DEV
         await self._sync_state(
@@ -113,10 +123,11 @@ class DevFlowOrchestrator:
             title=title,
             task_type=task_type,
             project_id=self.gitlab_project_id,
-            background=work_item_detail.get("description_stripped") or title,
+            background=background,
             agent_id=agent_id,
             source={"system": "plane", "issue_id": str(work_item_id)},
         )
+        task_pack.repository.default_branch = self.default_branch
 
         branch = task_pack.repository.work_branch
         # 安全地创建目标分支
@@ -142,11 +153,14 @@ class DevFlowOrchestrator:
         mr_url = mr_result.url
         mr_iid = mr_result.mr_id
 
-        await self.plane.add_comment(
-            project_id,
-            work_item_id,
-            f"<p>DevFlow: MR created — <a href='{mr_url}'>{branch}</a></p>",
-        )
+        try:
+            await self.plane.add_comment(
+                project_id,
+                work_item_id,
+                f"<p>DevFlow: MR created — <a href='{mr_url}'>{branch}</a></p>",
+            )
+        except Exception:
+            logger.warning("Failed to add MR comment to Plane work item %s", work_item_id)
 
         if self.ai_developing_state_id:
             try:
@@ -309,12 +323,16 @@ class DevFlowOrchestrator:
         return props.get("agent_id")
 
     @staticmethod
-    def _extract_task_type(work_item: dict[str, Any]) -> str:
+    def _extract_task_type(
+        work_item: dict[str, Any],
+        *,
+        fallback: str | None = "platform:change",
+    ) -> str | None:
         """
         从工作项属性中提取任务类型，默认值为 'platform:change'。
         """
         props = work_item.get("properties") or work_item.get("custom_properties") or {}
-        return props.get("task_type", "platform:change")
+        return props.get("task_type") or fallback
 
     async def _sync_state(
         self,

@@ -49,6 +49,22 @@ class TestPathGuardCheck:
         guard = PathGuard(write_allowed=["src/**"], write_denied=[])
         assert guard.check([]) == []
 
+    def test_task_pack_globs_match_nested_agent_platform_paths(self):
+        guard = PathGuard(
+            write_allowed=["src/agent_platform/**", "agents/**", "tests/**", "docs/**"],
+            write_denied=[],
+        )
+
+        violations = guard.check([
+            "agents/echo/evals/golden.yaml",
+            "agents/echo/prompts/orchestrator.md",
+            "src/agent_platform/tools/schema_validator.py",
+            "tests/unit/test_echo_agent.py",
+            "docs/04-devflow/devflow-runner-workspace-design.md",
+        ])
+
+        assert violations == []
+
 
 class TestPathGuardIsAllowed:
     def test_allowed(self):

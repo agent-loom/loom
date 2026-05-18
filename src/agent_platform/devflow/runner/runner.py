@@ -103,6 +103,19 @@ class CodingAgentRunner:
 
             # 获取所有变更的文件
             changed_files = await self.workspace_manager.get_changed_files(workspace_dir)
+            required_outputs = task.implementation.get("required_outputs", [])
+            if not changed_files and required_outputs:
+                job.result = RunnerResult(
+                    status=ResultStatus.NO_CHANGES,
+                    changed_files=[],
+                    error_message=(
+                        "Runner completed without file changes, but task requires "
+                        f"outputs: {required_outputs}"
+                    ),
+                )
+                job.state = JobState.FAILED
+                await self._report_failure(job)
+                return job
             
             # 使用 PathGuard 检查代理是否修改了越界或被保护的文件
             violations = path_guard.check(changed_files)

@@ -23,3 +23,6 @@ def test_task_pack_generator():
         task.repository.merge_request.description
     )
     assert task.validation["required_reports"] == ["eval-report.json"]
+    assert "pyproject.toml" in task.scope["write_allowed"]
+    assert "uv.lock" in task.scope["write_allowed"]
+    assert "eval-report.json" in task.scope["write_allowed"]

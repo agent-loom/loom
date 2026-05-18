@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from fnmatch import fnmatchcase
 from pathlib import PurePosixPath
 
 from agent_platform.devflow.task_pack import DevelopmentTask
 
 
 def _glob_match(path: str, pattern: str) -> bool:
-    """PurePosixPath.match handles ``**`` correctly; fnmatch does not."""
-    return PurePosixPath(path).match(pattern)
+    """Match task-pack path globs.
+
+    DevFlow scopes use repository-relative patterns such as ``agents/**`` and
+    ``src/agent_platform/**``. ``PurePosixPath.match`` treats these patterns
+    more like suffix matches and does not match arbitrary-depth descendants in
+    the way task authors expect, so use shell-style matching on normalized
+    POSIX paths.
+    """
+    return fnmatchcase(path, pattern)
 
 
 @dataclass(frozen=True)

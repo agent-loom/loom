@@ -90,6 +90,8 @@ class TestSafeEnv:
         test_env = {
             "PATH": "/usr/bin",
             "HOME": "/home/user",
+            "CODEX_HOME": "/home/user/.codex",
+            "XDG_CONFIG_HOME": "/home/user/.config",
             "PLANE_API_KEY": "secret-plane",
             "GITLAB_TOKEN": "secret-gitlab",
             "MY_SECRET_VAR": "secret-val",
@@ -101,6 +103,8 @@ class TestSafeEnv:
             safe = build_safe_env()
             assert "PATH" in safe
             assert "HOME" in safe
+            assert "CODEX_HOME" in safe
+            assert "XDG_CONFIG_HOME" in safe
             assert "LANG" in safe
             assert "PLANE_API_KEY" not in safe
             assert "GITLAB_TOKEN" not in safe
@@ -255,6 +259,7 @@ class TestClaudeCodeExecution:
 
         assert result.exit_code == 1
         assert "something went wrong" in result.stderr
+        assert "something went wrong" in result.error_message
 
     @pytest.mark.asyncio
     async def test_model_flag_passed(self):
@@ -268,6 +273,21 @@ class TestClaudeCodeExecution:
             call_args = mock_exec.call_args[0]
             assert "--model" in call_args
             assert "claude-sonnet-4-6" in call_args
+            assert "--permission-mode" in call_args
+            assert "bypassPermissions" in call_args
+            assert "--no-session-persistence" in call_args
+
+    @pytest.mark.asyncio
+    async def test_start_failure_returns_structured_error(self):
+        adapter = ClaudeCodeAdapter(cli_path="/missing/claude")
+        with patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=FileNotFoundError("missing claude"),
+        ):
+            result = await adapter.execute(workspace_dir="/tmp/ws", task=_make_task())
+
+        assert result.exit_code == 127
+        assert "not found" in result.error_message.lower()
 
     @pytest.mark.asyncio
     async def test_health_check_succeeds(self):
@@ -312,6 +332,23 @@ class TestCodexExecution:
         assert result.stdout == "output"
 
     @pytest.mark.asyncio
+    async def test_nonzero_exit_promotes_stderr_to_error_message(self):
+        adapter = CodexAdapter()
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"", b"app-server failed"))
+        mock_proc.returncode = 1
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            result = await adapter.execute(
+                workspace_dir="/tmp/ws",
+                task=_make_task(),
+            )
+
+        assert result.exit_code == 1
+        assert "app-server failed" in result.stderr
+        assert "app-server failed" in result.error_message
+
+    @pytest.mark.asyncio
     async def test_codex_passes_full_auto_flag(self):
         adapter = CodexAdapter()
         mock_proc = AsyncMock()
@@ -321,8 +358,10 @@ class TestCodexExecution:
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
             await adapter.execute(workspace_dir="/tmp/ws", task=_make_task())
             call_args = mock_exec.call_args[0]
-            assert "--approval-mode" in call_args
-            assert "full-auto" in call_args
+            assert "exec" in call_args
+            assert "--dangerously-bypass-approvals-and-sandbox" in call_args
+            assert "--skip-git-repo-check" in call_args
+            assert "--ephemeral" in call_args
 
     @pytest.mark.asyncio
     async def test_timeout_returns_error(self):
@@ -361,6 +400,18 @@ class TestCodexExecution:
             side_effect=FileNotFoundError,
         ):
             assert await adapter.health_check() is False
+
+    @pytest.mark.asyncio
+    async def test_start_failure_returns_structured_error(self):
+        adapter = CodexAdapter(cli_path="/missing/codex")
+        with patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=PermissionError("operation not permitted"),
+        ):
+            result = await adapter.execute(workspace_dir="/tmp/ws", task=_make_task())
+
+        assert result.exit_code == 126
+        assert "permission" in result.error_message.lower()
 
     @pytest.mark.asyncio
     async def test_cancel_terminates_process(self):

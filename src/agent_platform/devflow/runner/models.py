@@ -31,6 +31,7 @@ class ResultStatus(enum.StrEnum):
     VALIDATION_FAILED = "validation_failed"
     RUNNER_ERROR = "runner_error"
     PATH_VIOLATION = "path_violation"
+    NO_CHANGES = "no_changes"
     TIMEOUT = "timeout"
     CANCELLED = "cancelled"
 

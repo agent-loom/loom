@@ -4,11 +4,13 @@ import asyncio
 import logging
 import shlex
 import shutil
+import sys
 import tempfile
 import time
 import uuid
 from pathlib import Path
 
+from agent_platform.devflow.runner.adapters.utils import build_safe_env
 from agent_platform.devflow.runner.models import CommandResult, ValidationResult
 
 logger = logging.getLogger(__name__)
@@ -156,12 +158,14 @@ class WorkspaceManager:
                 continue
 
             start = time.monotonic()
+            command_args = self._resolve_validation_command(cmd)
 
             proc = await asyncio.create_subprocess_exec(
-                *shlex.split(cmd),
+                *command_args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(workspace_dir),
+                env=build_safe_env(),
             )
             try:
                 stdout_bytes, stderr_bytes = await asyncio.wait_for(
@@ -197,6 +201,25 @@ class WorkspaceManager:
             all_passed=all_passed,
             report_paths=report_paths,
         )
+
+    @staticmethod
+    def _resolve_validation_command(command: str) -> list[str]:
+        """Resolve Python tool commands against the current interpreter.
+
+        Runner workspaces are intentionally executed with a sanitized
+        environment, so relying on PATH to find ``pytest`` or the intended
+        virtualenv ``python`` is brittle. Use the interpreter that launched the
+        platform process for Python validation commands.
+        """
+        parts = shlex.split(command)
+        if not parts:
+            return []
+        executable, *args = parts
+        if executable == "pytest":
+            return [sys.executable, "-m", "pytest", *args]
+        if executable == "python":
+            return [sys.executable, *args]
+        return parts
 
     async def commit_and_push(
         self,

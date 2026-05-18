@@ -192,7 +192,15 @@ class TaskPackGenerator:
             else {},
             # 限定允许修改的代码范围
             scope={
-                "write_allowed": ["src/agent_platform/**", "agents/**", "tests/**", "docs/**"],
+                "write_allowed": [
+                    "src/agent_platform/**",
+                    "agents/**",
+                    "tests/**",
+                    "docs/**",
+                    "pyproject.toml",
+                    "uv.lock",
+                    "eval-report.json",
+                ],
                 "write_denied": [".env", "secrets/**", "deploy/prod/**", "infra/prod/**"],
             },
             implementation={

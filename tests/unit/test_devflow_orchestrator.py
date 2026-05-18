@@ -57,7 +57,8 @@ async def test_devflow_creates_branch_and_mr_on_ready_for_ai_dev():
     )
 
     orchestrator = DevFlowOrchestrator(
-        plane=plane, gitlab=gitlab, gitlab_project_id="proj-1"
+        plane=plane, gitlab=gitlab, gitlab_project_id="proj-1",
+        default_branch="master",
     )
 
     payload = {
@@ -85,6 +86,61 @@ async def test_devflow_creates_branch_and_mr_on_ready_for_ai_dev():
     assert len(mr_requests) == 1
     mr_body = json.loads(mr_requests[0].content)
     assert "agent:new" in mr_body.get("labels", "")
+    assert mr_body["target_branch"] == "master"
+    assert result.task_pack.repository.default_branch == "master"
+
+
+@pytest.mark.asyncio
+async def test_devflow_uses_payload_properties_when_detail_lacks_custom_fields():
+    def gitlab_handler(request: httpx.Request) -> httpx.Response:
+        if "merge_requests" in request.url.path and request.method == "POST":
+            return httpx.Response(200, json={
+                "iid": 43,
+                "web_url": "https://gitlab.example.com/mr/43",
+            })
+        if "branches" in request.url.path:
+            return httpx.Response(200, json={"name": "feat/wi-003"})
+        return httpx.Response(200, json={})
+
+    plane_transport = _mock_transport({
+        "/work-items/wi-003/": {
+            "id": "wi-003",
+            "name": "修改 Echo Agent",
+            "description_stripped": "Plane 详情里没有 custom properties",
+        },
+        "/comments/": {"id": "comment-1"},
+    })
+
+    plane = PlaneAdapter(
+        base_url="https://plane.test",
+        api_key="test-key",
+        workspace_slug="ws",
+        transport=plane_transport,
+    )
+    gitlab = GitLabAdapter(
+        base_url="https://gitlab.test",
+        token="test-token",
+        transport=httpx.MockTransport(gitlab_handler),
+    )
+    orchestrator = DevFlowOrchestrator(
+        plane=plane, gitlab=gitlab, gitlab_project_id="proj-1",
+    )
+
+    payload = {
+        "data": {
+            "id": "wi-003",
+            "project": "proj-plane-1",
+            "name": "修改 Echo Agent",
+            "state_detail": {"name": "Ready for AI Dev"},
+            "properties": {"agent_id": "echo", "task_type": "agent:change"},
+        }
+    }
+
+    result = await orchestrator.handle_webhook_event("work_item.updated", payload)
+
+    assert result is not None
+    assert result.task_pack.agent["agent_id"] == "echo"
+    assert result.task_pack.metadata.type == "agent:change"
 
 
 @pytest.mark.asyncio
