@@ -461,6 +461,8 @@ class HermesExtension(BaseModel):
     disabled_toolsets: list[str] = Field(default_factory=list)
     max_iterations: int = 8
     memory_provider: str = "session"
+    require_sdk: bool = False
+    fallback_on_error: bool = True
 
 
 class AgentManifest(BaseModel):

@@ -52,6 +52,8 @@ class ManifestMapper:
             "max_iterations": hermes_ext.max_iterations,
             "memory_provider": hermes_ext.memory_provider,
             "model": ManifestMapper._get_model_config(manifest),
+            "require_sdk": hermes_ext.require_sdk,
+            "fallback_on_error": hermes_ext.fallback_on_error,
         }
 
     @staticmethod
@@ -104,11 +106,33 @@ class ToolBridge:
 
 class SessionBridge:
     @staticmethod
-    def map_session(session_id: str | None, hermes_config: dict) -> dict[str, Any]:
+    def map_session(
+        session_id: str | None,
+        hermes_config: dict,
+        *,
+        tenant_id: str | None = None,
+        agent_id: str | None = None,
+    ) -> dict[str, Any]:
+        qualified_id = SessionBridge.qualify_session_id(
+            session_id, tenant_id=tenant_id, agent_id=agent_id,
+        )
         return {
-            "session_id": session_id,
+            "session_id": qualified_id,
             "memory_provider": hermes_config.get("memory_provider", "session"),
         }
+
+    @staticmethod
+    def qualify_session_id(
+        session_id: str | None,
+        *,
+        tenant_id: str | None = None,
+        agent_id: str | None = None,
+    ) -> str | None:
+        """构建三段式 session_id：{tenant_id}:{agent_id}:{session_id}。"""
+        if not session_id:
+            return session_id
+        parts = [p for p in (tenant_id, agent_id, session_id) if p]
+        return ":".join(parts)
 
 
 class ResponseMapper:
@@ -467,15 +491,18 @@ class HermesRuntimeBackend:
     # P1-5: fallback dispatch --------------------------------------------------
 
     def _build_memory_bridge(
-        self, agent_id: str, session_id: str,
+        self, agent_id: str, session_id: str, *, tenant_id: str | None = None,
     ) -> HermesMemoryBridge | None:
         """构建记忆桥接器（如果 session_store 已配置）。"""
         if self.session_store is None or not session_id:
             return None
+        qualified_session_id = SessionBridge.qualify_session_id(
+            session_id, tenant_id=tenant_id, agent_id=agent_id,
+        )
         provider = PlatformMemoryProvider(
             session_store=self.session_store,
             agent_id=agent_id,
-            session_id=session_id,
+            session_id=qualified_session_id or session_id,
         )
         return HermesMemoryBridge(provider=provider)
 
@@ -488,39 +515,57 @@ class HermesRuntimeBackend:
 
         # 记忆桥接：加载历史
         agent_id = request.agent_spec.agent_id
-        session_id = request.request.session_id or ""
-        memory_bridge = self._build_memory_bridge(agent_id, session_id)
+        raw_session_id = request.request.session_id or ""
+        tenant_id = getattr(request.request, "tenant_id", None)
+
+        memory_bridge = self._build_memory_bridge(
+            agent_id, raw_session_id, tenant_id=tenant_id,
+        )
 
         prior_messages: list[dict[str, str]] = []
-        if memory_bridge and session_id:
-            prior_messages = await memory_bridge.prepare(session_id)
+        # 使用修饰后的 session_id 用于加载
+        qualified_session_id = SessionBridge.qualify_session_id(
+            raw_session_id, tenant_id=tenant_id, agent_id=agent_id,
+        ) or raw_session_id
+
+        if memory_bridge and qualified_session_id:
+            prior_messages = await memory_bridge.prepare(qualified_session_id)
 
         async def _execute() -> RuntimeResponse:
+            require_sdk = hermes_config.get("require_sdk", False)
+            fallback_on_error = hermes_config.get("fallback_on_error", True)
+
             if HERMES_AVAILABLE:
                 try:
                     return await self._run_with_hermes(
                         request, hermes_config, prior_messages,
                     )
                 except Exception as e:
+                    if not fallback_on_error:
+                        raise
                     logger.error(
                         "Hermes SDK run failed, falling back to engine: %s", e,
                     )
+            elif require_sdk:
+                raise RuntimeError(
+                    "manifest 要求 require_sdk=true，但 Hermes SDK 不可用"
+                )
             return await self._run_with_engine(request, hermes_config)
 
         # 使用错误处理器执行（带重试）
         result = await self.error_handler.handle_with_retry(_execute)
 
         # 记忆桥接：保存新消息
-        if memory_bridge and session_id:
+        if memory_bridge and qualified_session_id:
             user_msg = {"role": "user", "content": request.request.input.query}
             response_text = result.response.output.text.display
             assistant_msg = {"role": "assistant", "content": response_text}
             all_messages = prior_messages + [user_msg, assistant_msg]
-            await memory_bridge.commit(session_id, all_messages)
+            await memory_bridge.commit(qualified_session_id, all_messages)
 
         # state_snapshot 持久化：保存 Hermes 运行轨迹到会话快照
-        if self.session_store and session_id:
-            await self._save_state_snapshot(session_id, agent_id, result)
+        if self.session_store and qualified_session_id:
+            await self._save_state_snapshot(qualified_session_id, agent_id, result)
 
         return result
 
@@ -559,7 +604,9 @@ class HermesRuntimeBackend:
         self, request: RuntimeRequest, hermes_config: dict[str, Any]
     ) -> RuntimeResponse:
         session_config = self.session_bridge.map_session(
-            request.request.session_id, hermes_config
+            request.request.session_id, hermes_config,
+            tenant_id=getattr(request.request, "tenant_id", None),
+            agent_id=request.agent_spec.agent_id,
         )
 
         tools: list[dict[str, Any]] = []
@@ -576,6 +623,26 @@ class HermesRuntimeBackend:
             max_iterations=hermes_config.get("max_iterations", 4),
             session_config=session_config,
         )
+
+        # HITL 事件拦截：conversation_engine 结果中可能包含 HITL 事件
+        if self.hitl_bridge is not None:
+            hitl_events = hermes_result.get("events", []) + hermes_result.get(
+                "pending_actions", []
+            )
+            for event in hitl_events:
+                if isinstance(event, dict):
+                    hitl_response = await self.hitl_bridge.intercept(event)
+                    if hitl_response is not None and not hitl_response.get(
+                        "approved", True
+                    ):
+                        logger.warning(
+                            "HITL 审批被拒绝: %s",
+                            hitl_response.get("rejection_reason"),
+                        )
+                        # 审批被拒绝，构建中止响应
+                        return self._hitl_rejected_response(
+                            request, hitl_response
+                        )
 
         return self.response_mapper.to_platform_response(hermes_result, request)
 
@@ -645,11 +712,74 @@ class HermesRuntimeBackend:
                     conversation_history=conversation_history,
                 )
             )
+
+            # HITL 事件拦截：从原始结果中检查是否包含需要人工审批的事件
+            if self.hitl_bridge is not None:
+                raw_for_hitl = (
+                    hermes_result
+                    if isinstance(hermes_result, dict)
+                    else getattr(hermes_result, "__dict__", {}) or {}
+                )
+                hitl_events = raw_for_hitl.get("events", []) + raw_for_hitl.get(
+                    "pending_actions", []
+                )
+                for event in hitl_events:
+                    if isinstance(event, dict):
+                        hitl_response = await self.hitl_bridge.intercept(event)
+                        if hitl_response is not None and not hitl_response.get(
+                            "approved", True
+                        ):
+                            logger.warning(
+                                "HITL 审批被拒绝: %s",
+                                hitl_response.get("rejection_reason"),
+                            )
+                            # 审批被拒绝，构建中止响应
+                            return self._hitl_rejected_response(
+                                request, hitl_response
+                            )
         finally:
             deregister()
 
         result_dict = normalize_hermes_result(hermes_result)
         return self.response_mapper.to_platform_response(result_dict, request)
+
+    # HITL 审批拒绝响应 ---------------------------------------------------------
+
+    @staticmethod
+    def _hitl_rejected_response(
+        request: RuntimeRequest, hitl_response: dict[str, Any],
+    ) -> RuntimeResponse:
+        """当 HITL 审批被拒绝时，构建中止响应。"""
+        rejection_reason = hitl_response.get(
+            "rejection_reason", "HITL 审批被拒绝"
+        )
+        error = AgentError(
+            code="HITL_REJECTED",
+            message=rejection_reason,
+            retryable=False,
+        )
+        response = AgentResponse(
+            request_id=request.request.request_id,
+            session_id=request.request.session_id,
+            agent=AgentIdentity(
+                agent_id=request.agent_spec.agent_id,
+                agent_version=request.agent_spec.version,
+            ),
+            output=AgentOutput(
+                status=OutputStatus.FAILED,
+                text=ResponseText(
+                    display=rejection_reason,
+                    tts=rejection_reason,
+                ),
+            ),
+            error=error,
+            debug={
+                "runtime_backend": "hermes",
+                "hitl_event_type": hitl_response.get("event_type"),
+                "hitl_status": hitl_response.get("status"),
+            },
+        )
+        return RuntimeResponse(response=response)
 
     # Policy error helper -------------------------------------------------------
 

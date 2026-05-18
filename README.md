@@ -55,6 +55,7 @@ uv run python scripts/devflow_real_e2e.py    # 真实 Plane + GitLab
 | `DEVFLOW_REPO_URL` | 含凭证的 git clone URL |
 | `DEVFLOW_DEFAULT_BRANCH` | 默认分支（如 `master`） |
 | `DEVFLOW_RUNNER_ADAPTER` | `mock` / `codex` / `claude_code` |
+| `DEVFLOW_SANDBOX_MODE` | Codex 沙箱模式：`bypass` (默认) 或 `docker`。**⚠️ 生产环境必须使用 docker 模式，否则有严重的进程逃逸风险** |
 | `PLANE_AI_DEVELOPING_STATE_ID` | Plane "AI Developing" 状态 ID |
 | `PLANE_TESTING_STATE_ID` | Plane "Testing" 状态 ID |
 

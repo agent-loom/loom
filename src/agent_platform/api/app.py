@@ -451,9 +451,20 @@ async def _app_lifespan(app: FastAPI):
         async def _dlq_retry_loop():
             while True:
                 try:
-                    async def _noop_handler(source, event_type, payload):
-                        logger.debug("DLQ 重试（当前为空操作）: %s/%s", source, event_type)
-                    processed = await retry_svc.process_retries(_noop_handler)
+                    async def _dlq_dispatch_handler(source, event_type, payload):
+                        """DLQ 重试分发：根据来源路由到对应的事件处理器。"""
+                        if source == "plane":
+                            orchestrator = getattr(app.state, "devflow_orchestrator", None)
+                            if orchestrator:
+                                await orchestrator.handle_webhook_event(event_type, payload)
+                                return
+                        elif source == "gitlab":
+                            handler = getattr(app.state, "gitlab_event_handler", None)
+                            if handler:
+                                await handler.handle_event(event_type, payload)
+                                return
+                        logger.warning("DLQ 重试：未知来源 %s，跳过", source)
+                    processed = await retry_svc.process_retries(_dlq_dispatch_handler)
                     if processed:
                         logger.info("DLQ 处理了 %d 条重试", processed)
                 except _asyncio.CancelledError:
@@ -893,6 +904,8 @@ def create_app() -> FastAPI:
         adapter = create_adapter(
             settings.devflow_runner_adapter,
             codex_profile=settings.devflow_codex_profile,
+            sandbox_mode=settings.devflow_sandbox_mode,
+            docker_image=settings.devflow_docker_image,
         )
         coding_runner = CodingAgentRunner(
             adapter=adapter,
@@ -954,6 +967,8 @@ def create_app() -> FastAPI:
             ai_developing_state_id=settings.plane_ai_developing_state_id,
         )
 
+    app.state.devflow_orchestrator = devflow
+    app.state.gitlab_event_handler = gitlab_event_handler
     app.state.devflow_enabled = devflow is not None
     if devflow_state_sync is not None:
         app.state.admin_deps.state_sync = devflow_state_sync

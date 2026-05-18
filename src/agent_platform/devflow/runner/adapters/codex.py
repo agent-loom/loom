@@ -13,7 +13,14 @@ logger = logging.getLogger(__name__)
 
 
 class CodexAdapter:
-    """Codex CLI 适配器。"""
+    """Codex CLI 适配器。
+
+    支持两种沙箱模式：
+    - bypass: 使用 --dangerously-bypass-approvals-and-sandbox 跳过沙箱（默认，开发环境）
+    - docker: 通过 docker 容器隔离执行（推荐生产环境使用）
+    """
+
+    _VALID_SANDBOX_MODES = ("bypass", "docker")
 
     def __init__(
         self,
@@ -21,12 +28,30 @@ class CodexAdapter:
         cli_path: str = "codex",
         model: str | None = None,
         profile: str | None = None,
+        sandbox_mode: str = "bypass",
+        docker_image: str = "codex-runner",
     ):
-        """初始化 Codex 适配器。"""
+        """初始化 Codex 适配器。
+
+        Args:
+            cli_path: Codex CLI 可执行文件路径。
+            model: 指定使用的模型名称。
+            profile: Codex 配置文件名。
+            sandbox_mode: 沙箱模式，可选 'bypass' 或 'docker'。
+            docker_image: docker 模式下使用的镜像名。
+        """
+        if sandbox_mode not in self._VALID_SANDBOX_MODES:
+            raise ValueError(
+                f"无效的 sandbox_mode: {sandbox_mode!r}，"
+                f"可选值: {self._VALID_SANDBOX_MODES}"
+            )
         self.cli_path = cli_path
         self.model = model
         self.profile = profile
+        self.sandbox_mode = sandbox_mode
+        self.docker_image = docker_image
         self._process: asyncio.subprocess.Process | None = None
+        self._bypass_warned: bool = False
 
     @property
     def adapter_type(self) -> str:
@@ -41,25 +66,17 @@ class CodexAdapter:
     ) -> RunnerAdapterResult:
         """执行编码任务，超时则取消并返回错误。"""
         prompt = self._build_prompt(task)
-        cmd = [
-            self.cli_path,
-            "exec",
-            "--dangerously-bypass-approvals-and-sandbox",
-            "--skip-git-repo-check",
-            "--ephemeral",
-        ]
-        if self.profile:
-            cmd.extend(["-c", f"profile={self.profile}"])
-        if self.model:
-            cmd.extend(["--model", self.model])
-        cmd.append(prompt)
+        cmd = self._build_cmd(prompt, workspace_dir)
+        # docker 模式下 cwd 无意义（容器内使用 -w /workspace），
+        # bypass 模式下 cwd 传入工作目录
+        exec_cwd = workspace_dir if self.sandbox_mode == "bypass" else None
 
         try:
             self._process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=workspace_dir,
+                cwd=exec_cwd,
                 env=build_safe_env(),
             )
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
@@ -124,6 +141,44 @@ class CodexAdapter:
             return proc.returncode == 0
         except Exception:
             return False
+
+    def _build_cmd(self, prompt: str, workspace_dir: str) -> list[str]:
+        """根据沙箱模式构建执行命令。"""
+        if self.sandbox_mode == "bypass":
+            # bypass 模式：直接调用 CLI，跳过沙箱
+            if not self._bypass_warned:
+                logger.warning(
+                    "Codex 以 bypass 沙箱模式运行，生产环境应使用 docker 模式"
+                )
+                self._bypass_warned = True
+            cmd = [
+                self.cli_path,
+                "exec",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--skip-git-repo-check",
+                "--ephemeral",
+            ]
+        else:
+            # docker 模式：通过 docker 容器隔离执行
+            cmd = [
+                "docker", "run", "--rm",
+                "-v", f"{workspace_dir}:/workspace",
+                "-w", "/workspace",
+                "--network", "none",
+                "--memory", "2g",
+                "--cpus", "2",
+                self.docker_image,
+                self.cli_path, "exec",
+                "--skip-git-repo-check",
+                "--ephemeral",
+            ]
+
+        if self.profile:
+            cmd.extend(["-c", f"profile={self.profile}"])
+        if self.model:
+            cmd.extend(["--model", self.model])
+        cmd.append(prompt)
+        return cmd
 
     def _build_prompt(self, task: DevelopmentTask) -> str:
         scope_allowed = task.scope.get("write_allowed", [])

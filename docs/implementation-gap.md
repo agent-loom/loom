@@ -6,7 +6,9 @@
 >
 > S9 稳定性修复（2026-05-19）：(1) 仅 "Ready for AI Dev" 触发 DevFlow，移除 "In Progress" 误触发；(2) mr_url 通过 orchestrator → runner → CodingJob 完整透传至 Plane 评论；(3) workspace.create() 改为克隆默认分支后 fetch+checkout 目标分支，消除竞态；(4) 清理 task_pack required_outputs 中的非路径描述字符串。
 >
-> 当前测试：**1609 passed, 1 skipped**；ruff clean。
+> S9 P0/P1 修复（2026-05-19）：(1) 修复 `test_hermes_hitl.py` 并在 `_run_with_hermes()` 中真实接入 HITL Bridge 拦截器；(2) Hermes session_id 三段式命名支持 (`tenant_id:agent_id:session_id`)；(3) 增加 Hermes manifest extensions 字段 `require_sdk` 和 `fallback_on_error` 支持；(4) DevFlow DLQ 重试回调接通（动态路由 plane/gitlab）；(5) Codex 沙箱模式配置化（支持 bypass / docker）。
+>
+> 当前测试：**1635 passed, 1 skipped**；ruff clean。
 >
 > 2026-05-17 review hardening 已补齐：持久化 API key 不再允许 `x-tenant-id` 覆盖绑定租户；AuthMiddleware 写入 `AuditContext`；`AgentRun` 显式携带 `tenant_id`；`/api/v1/agent-runs` 强制 read scope 并按租户过滤；Deployment repository 的 general fallback 仅匹配 `tenant_id IS NULL`；SQL Deployment save 改为 upsert。目标测试：`uv run pytest tests/unit/test_auth.py tests/unit/test_repository_contracts.py tests/unit/test_runtime_manager_queries.py tests/unit/test_api.py`，105 passed。
 
@@ -44,7 +46,7 @@
 最近一次验证：
 
 ```text
-uv run pytest --ignore=tests/unit/test_execution_log.py --ignore=tests/unit/test_hermes_hitl.py --ignore=tests/unit/test_mcp_sse_transport.py --ignore=tests/unit/test_s3_artifact.py
+uv run pytest --ignore=tests/unit/test_execution_log.py --ignore=tests/unit/test_mcp_sse_transport.py --ignore=tests/unit/test_s3_artifact.py
 1314 passed, 1 skipped
 
 uv run ruff check src/agent_platform/api/app.py src/agent_platform/domain/models.py src/agent_platform/runtime/manager.py src/agent_platform/persistence/memory.py src/agent_platform/persistence/sql.py tests/unit/test_auth.py tests/unit/test_repository_contracts.py tests/unit/test_runtime_manager_queries.py tests/unit/test_api.py
@@ -74,11 +76,11 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 | Runtime 抽象 | 85% | ✅ Hermes Spike B 已完成；✅ HermesStreamMapper 流式事件映射已完成；Hermes memory 持久化待补 |
 | Tool 执行 | 85% | ✅ 高风险审批已完成；✅ ToolAuditRepository 审计持久化已完成；完整 JSON Schema 校验待补 |
 | Eval | 85% | ✅ EvalRunner auto-persist 已完成；✅ 多维评分（accuracy/latency/cost/tool_accuracy）+ P50/P95/P99 + by-tag + 外部数据集加载已完成；EvalRun 线上反馈回归集待补 |
-| DevFlow | 85% | ✅ ScmAdapter 协议抽象、HttpClient 连接池+重试、GitLab webhook 反向同步、job 持久化+可观测性端点、分支名清理、git 超时保护、✅ AsyncJobQueue 异步执行已完成；真实 runner adapter 端到端联调待补 |
+| DevFlow | 90% | ✅ ScmAdapter 协议抽象、HttpClient 连接池+重试、GitLab webhook 反向同步、job 持久化+可观测性端点、分支名清理、git 超时保护、✅ AsyncJobQueue 异步执行已完成；✅ 真实 runner adapter 端到端联调跑通；✅ DLQ webhook 重试接通；✅ Codex sandbox 配置化 |
 | Persistence | 85% | ✅ Registry/Deployment/Audit 主链路已接入持久化；✅ Deployment SQL upsert 和 strict tenant resolve 已补齐 |
 | Artifact / Release | 70% | ✅ LocalArtifactStore + Protocol 已完成；S3/远程后端、manifest_sha256 待补 |
-| Security / Tenant / Policy | 85% | ✅ HITL 审批 + RBAC endpoint enforcement + SqlApiKeyStore 持久化已完成；✅ API key tenant binding 与 agent-runs tenant filter 已补齐；服务间鉴权待补 |
-| Hermes 真接入 | 75% | ✅ Spike B 完成（SDK 工具桥接 + fallback + result normalization）；memory 持久化待补 |
+| Security / Tenant / Policy | 90% | ✅ HITL 审批 + RBAC endpoint enforcement + SqlApiKeyStore 持久化已完成；✅ API key tenant binding 与 agent-runs tenant filter 已补齐；服务间鉴权待补；✅ Codex 危险沙箱绕过已配置化并默认告警 |
+| Hermes 真接入 | 85% | ✅ Spike B 完成（SDK 工具桥接 + fallback + result normalization）；✅ HITL Bridge 接入 SDK 调用链；✅ memory 桥接三段式 session 命名；memory 持久化待补 |
 | Observability | 85% | ✅ OTel 集成 + NoOp fallback + LangfuseTracer（trace/generation/span/score + no-op fallback + health check）+ ✅ Prometheus /metrics 端点（HELP/TYPE + record_error/record_tool_duration）已完成；dashboard、alerting 待补 |
 | Knowledge / RAG | 85% | ✅ runtime 主链路接入已完成；✅ WeaviateKnowledgeBackend 真实 httpx REST/GraphQL 实现已完成；✅ Docker Compose Weaviate 部署已就绪；✅ KnowledgeSyncScheduler 后台同步调度已完成；数据权限待补 |
 | MCP 集成 | 80% | ✅ 6 tools + stdio transport 已完成；SSE transport、认证传递待补 |

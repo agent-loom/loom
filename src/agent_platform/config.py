@@ -29,6 +29,8 @@ class Settings(BaseModel):
       GITLAB_WEBHOOK_SECRET       → GitLab Webhook 签名密钥
       CORS_ALLOWED_ORIGINS        → CORS 允许的源（逗号分隔，生产环境必须显式设置）
       DEVFLOW_RUNNER_ADAPTER      → DevFlow 编码适配器（mock/claude_code/codex）
+      DEVFLOW_SANDBOX_MODE        → Codex 沙箱模式（bypass/docker）
+      DEVFLOW_DOCKER_IMAGE        → Docker 模式下使用的镜像名
       DEVFLOW_REPO_URL / DEVFLOW_DEFAULT_BRANCH / DEVFLOW_WORKSPACE_BASE_DIR → DevFlow 仓库
       DEVFLOW_JOB_QUEUE_BACKEND   → 任务队列后端（memory/redis）
       REDIS_URL                   → Redis 连接串
@@ -67,6 +69,8 @@ class Settings(BaseModel):
 
     devflow_runner_adapter: str = "mock"
     devflow_codex_profile: str | None = None
+    devflow_sandbox_mode: str = "bypass"
+    devflow_docker_image: str = "codex-runner"
     devflow_repo_url: str | None = None
     devflow_default_branch: str = "main"
     devflow_workspace_base_dir: str | None = None
@@ -113,6 +117,8 @@ def get_settings() -> Settings:
         cors_allowed_origins=os.getenv("CORS_ALLOWED_ORIGINS", "*"),
         devflow_runner_adapter=os.getenv("DEVFLOW_RUNNER_ADAPTER", "mock"),
         devflow_codex_profile=os.getenv("DEVFLOW_CODEX_PROFILE"),
+        devflow_sandbox_mode=os.getenv("DEVFLOW_SANDBOX_MODE", "bypass"),
+        devflow_docker_image=os.getenv("DEVFLOW_DOCKER_IMAGE", "codex-runner"),
         devflow_repo_url=os.getenv("DEVFLOW_REPO_URL"),
         devflow_default_branch=os.getenv("DEVFLOW_DEFAULT_BRANCH", "main"),
         devflow_workspace_base_dir=os.getenv("DEVFLOW_WORKSPACE_BASE_DIR"),

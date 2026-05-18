@@ -12,19 +12,25 @@ def create_adapter(
     adapter_type: str,
     *,
     codex_profile: str | None = None,
+    sandbox_mode: str = "bypass",
+    docker_image: str = "codex-runner",
     **kwargs,
 ) -> RunnerAdapter:
     """根据适配器类型名创建对应的 Runner 适配器实例。"""
-    if adapter_type == "codex" and codex_profile:
-        return CodexAdapter(profile=codex_profile, **kwargs)
+    if adapter_type == "codex":
+        codex_kwargs: dict = {**kwargs}
+        if codex_profile:
+            codex_kwargs["profile"] = codex_profile
+        codex_kwargs["sandbox_mode"] = sandbox_mode
+        codex_kwargs["docker_image"] = docker_image
+        return CodexAdapter(**codex_kwargs)
 
     adapters: dict[str, type] = {
         "claude_code": ClaudeCodeAdapter,
-        "codex": CodexAdapter,
         "mock": MockRunnerAdapter,
     }
     cls = adapters.get(adapter_type)
     if cls is None:
-        available = list(adapters.keys())
+        available = ["claude_code", "codex", "mock"]
         raise ValueError(f"Unknown adapter type: {adapter_type}. Available: {available}")
     return cls(**kwargs)

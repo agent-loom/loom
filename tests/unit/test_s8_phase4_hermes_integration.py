@@ -131,7 +131,7 @@ class TestMemoryBridgeFullCycle:
 
         assert result.response.output.status == "completed"
 
-        session = await session_store.load("sess-mem-test")
+        session = await session_store.load("hermes_test:sess-mem-test")
         assert session is not None
         assert len(session.history) == 2
         assert session.history[0].role == "user"
@@ -152,7 +152,7 @@ class TestMemoryBridgeFullCycle:
         req2 = _make_runtime_request(spec, query="第二个问题", session_id="sess-persist")
         await backend.run(req2)
 
-        session = await session_store.load("sess-persist")
+        session = await session_store.load("hermes_test:sess-persist")
         assert session is not None
         assert len(session.history) == 4
         assert session.history[0].content == "第一个问题"
@@ -192,7 +192,7 @@ class TestStateSnapshotPersistence:
 
         await backend.run(request)
 
-        session = await session_store.load("sess-snapshot")
+        session = await session_store.load("hermes_test:sess-snapshot")
         assert session is not None
         snapshot = session.state_snapshot
         assert snapshot.get("runtime_backend") == "hermes"
@@ -208,13 +208,13 @@ class TestStateSnapshotPersistence:
         req1 = _make_runtime_request(spec, query="问题1", session_id="sess-snap-update")
         await backend.run(req1)
 
-        session1 = await session_store.load("sess-snap-update")
+        session1 = await session_store.load("hermes_test:sess-snap-update")
         assert session1.state_snapshot.get("runtime_backend") == "hermes"
 
         req2 = _make_runtime_request(spec, query="问题2", session_id="sess-snap-update")
         await backend.run(req2)
 
-        session2 = await session_store.load("sess-snap-update")
+        session2 = await session_store.load("hermes_test:sess-snap-update")
 
         # state_snapshot 应该随 run 变化（但 stub 模式下 run_id 为 None，仍验证覆盖性）
         assert session2.state_snapshot.get("runtime_backend") == "hermes"
@@ -424,7 +424,7 @@ class TestFullHermesPipeline:
         req2 = _make_runtime_request(spec, query="还记得我吗", session_id="pipe-test")
         await backend.run(req2)
 
-        session = await session_store.load("pipe-test")
+        session = await session_store.load("hermes_test:pipe-test")
         assert session is not None
         assert len(session.history) == 4
         assert session.history[0].content == "你好"
