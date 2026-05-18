@@ -44,6 +44,8 @@ class CodingAgentRunner:
         gitlab_project_id: str,
         repo_url: str | None = None,
         testing_state_id: str | None = None,
+        ai_developing_state_id: str | None = None,
+        gitlab_base_url: str | None = None,
         job_repo: CodingJobRepository | None = None,
         log_repo: ExecutionLogRepository | None = None,
     ):
@@ -54,6 +56,8 @@ class CodingAgentRunner:
         self.gitlab_project_id = gitlab_project_id
         self._repo_url_override = repo_url
         self._testing_state_id = testing_state_id
+        self._ai_developing_state_id = ai_developing_state_id
+        self._gitlab_base_url = gitlab_base_url
         self._job_repo = job_repo
         self._log_repo = log_repo
 
@@ -299,16 +303,33 @@ class CodingAgentRunner:
                             job.plane_work_item_id,
                             self._testing_state_id,
                         )
+                        logger.info("Plane: work item %s → Testing", job.plane_work_item_id)
                     except Exception:
                         logger.warning(
-                            "Failed to update Plane state for %s",
+                            "Failed to update Plane state to Testing for %s",
+                            job.plane_work_item_id,
+                        )
+            else:
+                # 失败时回退到 AI Developing
+                if self._ai_developing_state_id:
+                    try:
+                        await self.plane.update_work_item_state(
+                            job.plane_project_id,
+                            job.plane_work_item_id,
+                            self._ai_developing_state_id,
+                        )
+                        logger.info(
+                            "Plane: work item %s → AI Developing (failure rollback)",
+                            job.plane_work_item_id,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Failed to rollback Plane state for %s",
                             job.plane_work_item_id,
                         )
 
     async def _report_failure(self, job: CodingJob) -> None:
-        """
-        报告运行失败。目前复用了 _report_result。
-        """
+        """报告运行失败，复用 _report_result（内含失败回退状态逻辑）。"""
         await self._report_result(job)
 
     def _build_mr_comment(self, job: CodingJob) -> str:
@@ -353,12 +374,20 @@ class CodingAgentRunner:
         return "\n".join(lines)
 
     def _build_plane_comment(self, job: CodingJob) -> str:
-        """
-        构建用于项目管理平台（Plane）的汇总评论模板。
-        """
+        """构建用于项目管理平台（Plane）的汇总评论模板。"""
         result = job.result
-        status = result.status.value if result else "unknown"
-        parts = [f"<p><strong>DevFlow Runner</strong>: {status}</p>"]
+        is_success = result and result.status == ResultStatus.SUCCESS
+        icon = "✅" if is_success else "❌"
+        status_label = result.status.value if result else "unknown"
+        parts = [f"<p>{icon} <strong>DevFlow Runner</strong>: {status_label}</p>"]
+
+        # MR 链接
+        if job.mr_iid and self._gitlab_base_url:
+            mr_url = (
+                f"{self._gitlab_base_url.rstrip('/')}/"
+                f"{self.gitlab_project_id}/-/merge_requests/{job.mr_iid}"
+            )
+            parts.append(f"<p>MR: <a href='{mr_url}'>!{job.mr_iid}</a></p>")
 
         if result and result.commit_sha:
             parts.append(f"<p>Commit: <code>{result.commit_sha[:8]}</code></p>")

@@ -902,6 +902,8 @@ def create_app() -> FastAPI:
             gitlab_project_id=settings.gitlab_project_id,
             repo_url=settings.devflow_repo_url,
             testing_state_id=settings.plane_testing_state_id,
+            ai_developing_state_id=settings.plane_ai_developing_state_id,
+            gitlab_base_url=settings.gitlab_base_url,
             job_repo=coding_job_repo,
             log_repo=execution_log_repo,
         )
