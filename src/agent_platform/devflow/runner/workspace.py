@@ -61,10 +61,9 @@ class WorkspaceManager:
         workspace_dir = self.base_dir / workspace_id
         workspace_dir.mkdir(parents=True, exist_ok=True)
 
+        # 克隆默认分支（不指定 --branch），避免新建分支尚未推送远程时克隆失败的竞态问题
         clone_cmd = [
             "git", "clone",
-            "--branch", branch,
-            "--single-branch",
             "--depth", "1",
             repo_url,
             str(workspace_dir),
@@ -89,8 +88,47 @@ class WorkspaceManager:
                 f"git clone failed (exit {proc.returncode}): {stderr.decode(errors='replace')}"
             )
 
+        # 克隆完成后再切换到目标分支（先拉取远程引用，再本地 checkout）
+        await self._fetch_and_checkout(workspace_dir, branch)
+
         logger.info("Workspace created: %s (branch: %s)", workspace_dir, branch)
         return workspace_dir
+
+    async def _fetch_and_checkout(self, workspace_dir: Path, branch: str) -> None:
+        """
+        拉取远程分支引用并在本地创建跟踪分支。
+        若远程分支不存在（刚创建的空分支），则直接在本地新建。
+        """
+        # 拉取所有远程引用（不展开，仅更新 refs）
+        fetch_proc = await asyncio.create_subprocess_exec(
+            "git", "fetch", "origin", branch,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(workspace_dir),
+        )
+        try:
+            _, fetch_stderr = await asyncio.wait_for(
+                fetch_proc.communicate(), timeout=self.GIT_CLONE_TIMEOUT,
+            )
+        except TimeoutError:
+            fetch_proc.kill()
+            await fetch_proc.wait()
+            raise RuntimeError(f"git fetch timed out for branch {branch}") from None
+
+        if fetch_proc.returncode == 0:
+            # 远程分支存在，切到它
+            await self._run_git(
+                workspace_dir,
+                ["git", "checkout", "-b", branch, f"origin/{branch}"],
+            )
+        else:
+            # 远程分支不存在（罕见，防御性处理），本地新建
+            logger.warning(
+                "Remote branch %s not found (%s), creating locally",
+                branch,
+                fetch_stderr.decode(errors="replace").strip(),
+            )
+            await self._run_git(workspace_dir, ["git", "checkout", "-b", branch])
 
     async def get_changed_files(self, workspace_dir: Path) -> list[str]:
         """

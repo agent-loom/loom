@@ -17,7 +17,7 @@ from agent_platform.persistence.repositories import WebhookDeliveryRepository
 
 logger = logging.getLogger(__name__)
 
-READY_FOR_AI_DEV_STATES = {"Ready for AI Dev", "ready_for_ai_dev", "In Progress", "in_progress"}
+READY_FOR_AI_DEV_STATES = {"Ready for AI Dev", "ready_for_ai_dev"}
 AI_DEVELOPING_STATE = "AI Developing"
 
 
@@ -207,7 +207,7 @@ class DevFlowOrchestrator:
                 reason="Runner 开始执行编码任务",
             )
             coding_job, job_submitted = await self._dispatch_runner(
-                task_pack, mr_iid=mr_iid,
+                task_pack, mr_iid=mr_iid, mr_url=mr_url,
                 plane_project_id=project_id,
                 plane_work_item_id=work_item_id,
             )
@@ -264,6 +264,7 @@ class DevFlowOrchestrator:
         task_pack: DevelopmentTask,
         *,
         mr_iid: int,
+        mr_url: str | None,
         plane_project_id: str,
         plane_work_item_id: str,
     ) -> tuple[CodingJob | None, bool]:
@@ -274,6 +275,7 @@ class DevFlowOrchestrator:
         """
         runner_kwargs = dict(
             mr_iid=mr_iid,
+            mr_url=mr_url,
             plane_project_id=plane_project_id,
             plane_work_item_id=plane_work_item_id,
         )

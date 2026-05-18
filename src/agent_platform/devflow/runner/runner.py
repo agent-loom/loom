@@ -66,6 +66,7 @@ class CodingAgentRunner:
         task: DevelopmentTask,
         *,
         mr_iid: int | None = None,
+        mr_url: str | None = None,
         plane_project_id: str | None = None,
         plane_work_item_id: str | None = None,
     ) -> CodingJob:
@@ -73,7 +74,7 @@ class CodingAgentRunner:
         执行编码任务的核心流程。
         """
         job = self._create_job(
-            task, mr_iid=mr_iid,
+            task, mr_iid=mr_iid, mr_url=mr_url,
             plane_project_id=plane_project_id,
             plane_work_item_id=plane_work_item_id,
         )
@@ -200,17 +201,17 @@ class CodingAgentRunner:
         task: DevelopmentTask,
         *,
         mr_iid: int | None = None,
+        mr_url: str | None = None,
         plane_project_id: str | None = None,
         plane_work_item_id: str | None = None,
     ) -> CodingJob:
-        """
-        构造一个新的编码作业记录。
-        """
+        """构造一个新的编码作业记录。"""
         return CodingJob(
             job_id=f"job-{uuid.uuid4().hex[:12]}",
             task_id=task.metadata.task_id,
             branch=task.repository.work_branch,
             mr_iid=mr_iid,
+            mr_url=mr_url,
             plane_project_id=plane_project_id,
             plane_work_item_id=plane_work_item_id,
         )
@@ -381,12 +382,14 @@ class CodingAgentRunner:
         status_label = result.status.value if result else "unknown"
         parts = [f"<p>{icon} <strong>DevFlow Runner</strong>: {status_label}</p>"]
 
-        # MR 链接
-        if job.mr_iid and self._gitlab_base_url:
+        # MR 链接：优先用 job.mr_url（orchestrator 传入的完整 web_url）
+        mr_url = job.mr_url
+        if not mr_url and job.mr_iid and self._gitlab_base_url:
             mr_url = (
                 f"{self._gitlab_base_url.rstrip('/')}/"
                 f"{self.gitlab_project_id}/-/merge_requests/{job.mr_iid}"
             )
+        if mr_url and job.mr_iid:
             parts.append(f"<p>MR: <a href='{mr_url}'>!{job.mr_iid}</a></p>")
 
         if result and result.commit_sha:

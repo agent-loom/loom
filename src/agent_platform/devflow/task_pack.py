@@ -208,8 +208,6 @@ class TaskPackGenerator:
                     f"{agent_package_path}/manifest.yaml",
                     f"{agent_package_path}/prompts/orchestrator.md",
                     f"{agent_package_path}/evals/golden.yaml",
-                    "tests/unit",
-                    "docs update if contract changes",
                 ],
                 "constraints": [
                     "不允许写入密钥",

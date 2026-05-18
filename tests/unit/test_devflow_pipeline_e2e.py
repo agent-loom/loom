@@ -232,7 +232,8 @@ class TestIdempotency:
         assert r2 is None
 
     @pytest.mark.asyncio
-    async def test_same_work_item_can_retrigger_after_state_changes(self):
+    async def test_non_ready_state_does_not_retrigger(self):
+        """'In Progress' 状态不应触发 DevFlow，即使同一 work item 已处理过。"""
         orch = _make_orchestrator()
         payload = _ready_payload("wi-201")
         retry_payload = _ready_payload("wi-201")
@@ -242,7 +243,7 @@ class TestIdempotency:
         r2 = await orch.handle_webhook_event("work_item.updated", retry_payload)
 
         assert r1 is not None
-        assert r2 is not None
+        assert r2 is None  # "In Progress" 不在触发状态集中，应被忽略
 
     @pytest.mark.asyncio
     async def test_duplicate_event_ignored_with_repo(self):
