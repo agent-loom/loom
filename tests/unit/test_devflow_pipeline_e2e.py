@@ -232,6 +232,19 @@ class TestIdempotency:
         assert r2 is None
 
     @pytest.mark.asyncio
+    async def test_same_work_item_can_retrigger_after_state_changes(self):
+        orch = _make_orchestrator()
+        payload = _ready_payload("wi-201")
+        retry_payload = _ready_payload("wi-201")
+        retry_payload["data"]["state_detail"] = {"name": "In Progress"}
+
+        r1 = await orch.handle_webhook_event("work_item.updated", payload)
+        r2 = await orch.handle_webhook_event("work_item.updated", retry_payload)
+
+        assert r1 is not None
+        assert r2 is not None
+
+    @pytest.mark.asyncio
     async def test_duplicate_event_ignored_with_repo(self):
         repo = AsyncMock()
         repo.exists = AsyncMock(side_effect=[False, True])
@@ -285,7 +298,7 @@ class TestStateTransitions:
                 "id": "wi-400",
                 "project": "p-1",
                 "name": "Task",
-                "state_detail": {"name": "In Progress"},
+                "state_detail": {"name": "Done"},
             },
         }
         result = await orch.handle_webhook_event("work_item.updated", payload)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import html
 import logging
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -62,6 +64,7 @@ class DevFlowOrchestrator:
         self.task_pack_generator = TaskPackGenerator()
         self._max_processed = 10_000
         self._processed_items: OrderedDict[str, None] = OrderedDict()
+        self._idempotency_lock = asyncio.Lock()
 
     async def handle_webhook_event(
         self,
@@ -91,10 +94,13 @@ class DevFlowOrchestrator:
         work_item_id = work_item.get("id", "")
         title = work_item.get("name") or work_item.get("title", "Untitled")
 
-        # 使用工作项 ID 和状态构建幂等键，防止重复处理
-        idempotency_key = f"{work_item_id}:{new_state}"
-        if not await self._check_idempotency(idempotency_key, event, payload):
-            return None
+        # 使用 project_id + 工作项 ID + 状态构建幂等键：
+        # 同一状态重复 webhook 会被去重，但人工切回 Ready/In Progress 可重新触发。
+        idempotency_key = f"{project_id}:{work_item_id}:{new_state}"
+        # 原子幂等检查：加锁防止并发 webhook 重复触发
+        async with self._idempotency_lock:
+            if not await self._check_idempotency(idempotency_key, event, payload):
+                return None
 
         # 获取工作项详细信息
         work_item_detail = await self._fetch_work_item_detail(project_id, work_item_id)
@@ -154,13 +160,18 @@ class DevFlowOrchestrator:
         mr_iid = mr_result.mr_id
 
         try:
+            safe_mr_url = html.escape(mr_url or "")
+            safe_branch = html.escape(branch)
             await self.plane.add_comment(
                 project_id,
                 work_item_id,
-                f"<p>DevFlow: MR created — <a href='{mr_url}'>{branch}</a></p>",
+                f"<p>DevFlow: MR created — <a href='{safe_mr_url}'>{safe_branch}</a></p>",
             )
         except Exception:
-            logger.warning("Failed to add MR comment to Plane work item %s", work_item_id)
+            logger.warning(
+                "Failed to add MR comment to Plane work item %s",
+                work_item_id, exc_info=True,
+            )
 
         if self.ai_developing_state_id:
             try:
@@ -169,7 +180,10 @@ class DevFlowOrchestrator:
                 )
                 logger.info("Moved work item %s to AI Developing", work_item_id)
             except Exception:
-                logger.warning("Failed to move work item %s to AI Developing", work_item_id)
+                logger.warning(
+                    "Failed to move work item %s to AI Developing",
+                    work_item_id, exc_info=True,
+                )
 
         try:
             await self.plane.update_custom_properties(
@@ -182,7 +196,7 @@ class DevFlowOrchestrator:
                 },
             )
         except Exception:
-            logger.warning("Failed to update custom properties for %s", work_item_id)
+            logger.warning("Failed to update custom properties for %s", work_item_id, exc_info=True)
 
         coding_job: CodingJob | None = None
         job_submitted = False
@@ -293,7 +307,10 @@ class DevFlowOrchestrator:
         try:
             return await self.plane.get_work_item(project_id, work_item_id)
         except Exception:
-            logger.warning("Failed to fetch work item detail: %s/%s", project_id, work_item_id)
+            logger.warning(
+                "Failed to fetch work item detail: %s/%s",
+                project_id, work_item_id, exc_info=True,
+            )
             return {}
 
     async def _create_branch_safe(self, branch: str) -> None:
@@ -302,7 +319,7 @@ class DevFlowOrchestrator:
                 self.gitlab_project_id, branch, ref=self.default_branch,
             )
         except Exception:
-            logger.info("Branch %s may already exist, proceeding", branch)
+            logger.debug("Branch %s may already exist, proceeding", branch, exc_info=True)
 
     @staticmethod
     def _extract_state_name(work_item: dict[str, Any]) -> str:

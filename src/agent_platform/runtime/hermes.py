@@ -28,12 +28,14 @@ from agent_platform.tools.approval import ApprovalGate
 logger = logging.getLogger(__name__)
 
 try:
-    from hermes_agent import AIAgent as _HermesAIAgent
+    from run_agent import AIAgent as _HermesAIAgent
 
+    AIAgent = _HermesAIAgent  # 公开别名，供外部 mock/patch 使用
     HERMES_AVAILABLE = True
 except ImportError:
     HERMES_AVAILABLE = False
     _HermesAIAgent = None
+    AIAgent = None
 
 
 class ManifestMapper:
@@ -200,7 +202,7 @@ def register_platform_tools_to_hermes(
         return lambda: None
 
     try:
-        from hermes_agent.tools.registry import global_registry
+        from tools.registry import registry as global_registry
     except ImportError:
         return lambda: None
 
@@ -610,7 +612,9 @@ class HermesRuntimeBackend:
             agent_kwargs["base_url"] = model_cfg["base_url"]
         if model_cfg.get("api_key"):
             agent_kwargs["api_key"] = model_cfg["api_key"]
-        agent = _HermesAIAgent(**agent_kwargs)
+        if AIAgent is None:
+            raise RuntimeError("Hermes AIAgent is not available")
+        agent = AIAgent(**agent_kwargs)
 
         system_prompt = hermes_config.get("system_prompt", "")
         if request.runtime_context and getattr(request.runtime_context, "knowledge_snippets", None):

@@ -15,10 +15,17 @@ logger = logging.getLogger(__name__)
 class CodexAdapter:
     """Codex CLI 适配器。"""
 
-    def __init__(self, *, cli_path: str = "codex", model: str | None = None):
+    def __init__(
+        self,
+        *,
+        cli_path: str = "codex",
+        model: str | None = None,
+        profile: str | None = None,
+    ):
         """初始化 Codex 适配器。"""
         self.cli_path = cli_path
         self.model = model
+        self.profile = profile
         self._process: asyncio.subprocess.Process | None = None
 
     @property
@@ -41,6 +48,8 @@ class CodexAdapter:
             "--skip-git-repo-check",
             "--ephemeral",
         ]
+        if self.profile:
+            cmd.extend(["-c", f"profile={self.profile}"])
         if self.model:
             cmd.extend(["--model", self.model])
         cmd.append(prompt)

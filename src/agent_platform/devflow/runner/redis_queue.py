@@ -45,30 +45,35 @@ class RedisJobQueue:
         self._shutdown = False
         self._redis = None
         self._on_complete: Callable[[CodingJob], Any] | None = None
+        self._redis_lock = asyncio.Lock()
 
     async def _ensure_redis(self):
         if self._redis is not None:
             return self._redis
-        try:
-            import redis.asyncio as aioredis
-            self._redis = aioredis.from_url(
-                self._redis_url,
-                decode_responses=True,
-                socket_connect_timeout=5,
-            )
-            await self._redis.ping()
-            logger.info(
-                "RedisJobQueue connected (url=%s, instance=%s)",
-                self._redis_url, self._instance_id,
-            )
-            return self._redis
-        except Exception:
-            logger.warning(
-                "Redis not available at %s, job state will be local only",
-                self._redis_url,
-            )
-            self._redis = None
-            return None
+        async with self._redis_lock:
+            # 双重检查：等待锁后再次确认
+            if self._redis is not None:
+                return self._redis
+            try:
+                import redis.asyncio as aioredis
+                self._redis = aioredis.from_url(
+                    self._redis_url,
+                    decode_responses=True,
+                    socket_connect_timeout=5,
+                )
+                await self._redis.ping()
+                logger.info(
+                    "RedisJobQueue connected (url=%s, instance=%s)",
+                    self._redis_url, self._instance_id,
+                )
+                return self._redis
+            except Exception:
+                logger.warning(
+                    "Redis not available at %s, job state will be local only",
+                    self._redis_url,
+                )
+                self._redis = None
+                return None
 
     @property
     def running_count(self) -> int:

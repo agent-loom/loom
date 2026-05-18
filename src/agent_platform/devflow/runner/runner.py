@@ -87,7 +87,7 @@ class CodingAgentRunner:
 
             job.state = JobState.RUNNING
             await self._persist_job(job)
-            path_guard = PathGuard.from_task(task)
+            path_guard = PathGuard.from_task(task, workspace_root=workspace_dir)
             # 执行 AI 代理编写代码，包含重试机制
             adapter_result = await self._execute_with_retry(job, task)
             
@@ -181,6 +181,7 @@ class CodingAgentRunner:
                 wm = self.workspace_manager
                 keep = (
                     (job.state == JobState.FAILED and not wm.cleanup_on_failure)
+                    or (job.state == JobState.TIMED_OUT and not wm.cleanup_on_failure)
                     or (job.state == JobState.SUCCEEDED and not wm.cleanup_on_success)
                 )
                 await wm.cleanup(

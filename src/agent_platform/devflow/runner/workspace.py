@@ -103,8 +103,18 @@ class WorkspaceManager:
             "git", "status", "--porcelain=v1", "-z", "-uall",
             cwd=str(workspace_dir),
             stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        stdout_bytes, _ = await proc.communicate()
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(
+            proc.communicate(), timeout=self.GIT_COMMAND_TIMEOUT,
+        )
+        if proc.returncode != 0:
+            logger.warning(
+                "git status failed (exit %d): %s",
+                proc.returncode,
+                stderr_bytes.decode(errors="replace"),
+            )
+            return []
         files = []
         parts = stdout_bytes.split(b'\x00')
         i = 0
@@ -124,11 +134,11 @@ class WorkspaceManager:
                 i += 1
         return files
 
-    _ALLOWED_CMD_PREFIXES = (
-        "pytest", "python", "ruff", "mypy", "flake8", "black",
+    _ALLOWED_COMMANDS = frozenset({
+        "pytest", "python", "python3", "ruff", "mypy", "flake8", "black",
         "npm", "npx", "node", "cargo", "go", "make",
         "cat", "ls", "echo", "grep", "diff", "head", "tail",
-    )
+    })
 
     async def run_validation(
         self,
@@ -147,7 +157,7 @@ class WorkspaceManager:
 
         for cmd in commands:
             cmd_base = cmd.strip().split()[0] if cmd.strip() else ""
-            if not any(cmd_base.startswith(p) for p in self._ALLOWED_CMD_PREFIXES):
+            if cmd_base not in self._ALLOWED_COMMANDS:
                 logger.warning("拒绝执行不在白名单的命令: %s", cmd_base)
                 results.append(CommandResult(
                     command=cmd, exit_code=1,
@@ -260,7 +270,16 @@ class WorkspaceManager:
             stderr=asyncio.subprocess.PIPE,
             cwd=str(workspace_dir),
         )
-        stdout, stderr = await proc.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=self.GIT_COMMAND_TIMEOUT,
+            )
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            raise RuntimeError(
+                f"git commit timed out after {self.GIT_COMMAND_TIMEOUT}s"
+            ) from None
         if proc.returncode != 0:
             if b"nothing to commit" in stdout or b"nothing to commit" in stderr:
                 logger.info("Nothing to commit in %s", workspace_dir)

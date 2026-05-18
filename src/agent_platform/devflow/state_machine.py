@@ -123,6 +123,22 @@ class DevFlowStateMachine:
         """判断是否可以从当前状态转换到目标状态。"""
         return to_state in VALID_TRANSITIONS.get(self._current_state, set())
 
+    def rollback(self, to_state: DevFlowState | None = None) -> None:
+        """回滚到上一个状态或指定状态。
+
+        :param to_state: 目标状态，如果为 None 则回滚到上一次转换前的状态。
+        :raises ValueError: 如果没有历史记录且未指定 to_state。
+        """
+        if to_state is not None:
+            if self._history:
+                self._history.pop()
+            self._current_state = to_state
+            return
+        if not self._history:
+            raise ValueError("No history to rollback and no target state specified")
+        last_transition = self._history.pop()
+        self._current_state = last_transition.from_state
+
     def available_transitions(self) -> set[DevFlowState]:
         """返回当前状态允许转换到的所有目标状态。"""
         return set(VALID_TRANSITIONS.get(self._current_state, set()))

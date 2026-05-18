@@ -46,7 +46,7 @@ class TestResultStatusEnum:
     def test_all_statuses_exist(self):
         expected = {
             "success", "validation_failed", "runner_error",
-            "path_violation", "timeout", "cancelled",
+            "path_violation", "timeout", "cancelled", "no_changes",
         }
         assert {s.value for s in ResultStatus} == expected
 

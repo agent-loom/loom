@@ -192,6 +192,37 @@ class TestDevFlowStateMachine:
         assert data["to_state"] == "ready_for_ai_dev"
         assert data["actor"] == "bot"
 
+    def test_rollback_single_transition_returns_to_initial_state(self) -> None:
+        """只有一条历史记录时，rollback() 应回到初始状态。"""
+        sm = DevFlowStateMachine()
+        sm.transition(DevFlowState.READY_FOR_AI_DEV)
+
+        sm.rollback()
+
+        assert sm.current_state == DevFlowState.INTAKE
+        assert sm.history == []
+
+    def test_rollback_multiple_transitions_returns_to_previous_state(self) -> None:
+        """多条历史记录时，rollback() 回到最近一次转换前状态。"""
+        sm = DevFlowStateMachine()
+        sm.transition(DevFlowState.READY_FOR_AI_DEV)
+        sm.transition(DevFlowState.AI_DEVELOPING)
+
+        sm.rollback()
+
+        assert sm.current_state == DevFlowState.READY_FOR_AI_DEV
+        assert len(sm.history) == 1
+
+    def test_rollback_to_explicit_state(self) -> None:
+        """指定目标状态时，rollback(to_state) 回到指定状态。"""
+        sm = DevFlowStateMachine()
+        sm.transition(DevFlowState.READY_FOR_AI_DEV)
+
+        sm.rollback(DevFlowState.REJECTED)
+
+        assert sm.current_state == DevFlowState.REJECTED
+        assert sm.history == []
+
     def test_full_lifecycle_intake_to_done(self) -> None:
         """完整生命周期测试: INTAKE → ... → DONE。"""
         sm = DevFlowStateMachine()

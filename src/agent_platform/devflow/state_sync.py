@@ -155,10 +155,7 @@ class DevFlowStateSync:
                     new_state.value,
                     old_state.value,
                 )
-                sm._current_state = old_state  # noqa: SLF001
-                # 移除最后一条转换记录
-                if sm._history:  # noqa: SLF001
-                    sm._history.pop()  # noqa: SLF001
+                sm.rollback(old_state)
                 raise
 
     async def handle_external_transition(

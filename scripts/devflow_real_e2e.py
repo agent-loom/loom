@@ -63,6 +63,7 @@ async def main() -> None:
     gitlab_project_id = os.environ["GITLAB_PROJECT_ID"]
     default_branch = os.environ.get("GITLAB_DEFAULT_BRANCH", "master")
     runner_adapter = os.environ.get("DEVFLOW_RUNNER_ADAPTER", "mock")
+    codex_profile = os.environ.get("DEVFLOW_CODEX_PROFILE")
     repo_url = os.environ["DEVFLOW_REPO_URL"]
     workspace_base = os.environ.get("DEVFLOW_WORKSPACE_BASE_DIR")
     cleanup_success = os.environ.get("DEVFLOW_CLEANUP_ON_SUCCESS", "false").lower() == "true"
@@ -70,7 +71,7 @@ async def main() -> None:
     print("\n配置:")
     print(f"  Plane:  {plane_base} / {plane_slug} / {plane_project_id}")
     print(f"  GitLab: {gitlab_base} / project {gitlab_project_id} (default: {default_branch})")
-    print(f"  Runner: {runner_adapter}")
+    print(f"  Runner: {runner_adapter} (profile: {codex_profile or 'default'})")
     print(f"  Workspace cleanup on success: {cleanup_success}")
 
     # 构建真实适配器
@@ -146,7 +147,7 @@ async def main() -> None:
     # 步骤 4：触发 DevFlow 流水线（模拟 Plane Webhook）
     print("\n--- 步骤 4：触发 DevFlow 流水线 ---")
     runner = CodingAgentRunner(
-        adapter=create_adapter(runner_adapter),
+        adapter=create_adapter(runner_adapter, codex_profile=codex_profile),
         workspace_manager=WorkspaceManager(
             base_dir=workspace_base,
             cleanup_on_success=cleanup_success,

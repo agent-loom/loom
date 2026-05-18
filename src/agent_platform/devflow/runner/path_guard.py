@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 from pathlib import PurePosixPath
@@ -33,12 +34,14 @@ class PathGuard:
     """基于白名单/黑名单模式的文件路径守卫。"""
     write_allowed: list[str] = field(default_factory=list)
     write_denied: list[str] = field(default_factory=list)
+    workspace_root: str | None = None
 
     @classmethod
-    def from_task(cls, task: DevelopmentTask) -> PathGuard:
+    def from_task(cls, task: DevelopmentTask, *, workspace_root: str | None = None) -> PathGuard:
         return cls(
             write_allowed=task.scope.get("write_allowed", []),
             write_denied=task.scope.get("write_denied", []),
+            workspace_root=workspace_root,
         )
 
     def check(self, changed_files: list[str]) -> list[PathViolation]:
@@ -57,6 +60,16 @@ class PathGuard:
                 path=file_path,
                 reason="path traversal detected",
             )
+
+        # Symlink 防御：如果配置了 workspace_root，验证 realpath 仍在 workspace 内
+        if self.workspace_root:
+            real_root = os.path.realpath(self.workspace_root)
+            full_path = os.path.realpath(os.path.join(self.workspace_root, normalized))
+            if not full_path.startswith(real_root + os.sep) and full_path != real_root:
+                return PathViolation(
+                    path=file_path,
+                    reason="symlink escape: resolves outside workspace root",
+                )
 
         for pattern in self.write_denied:
             if _glob_match(normalized, pattern):

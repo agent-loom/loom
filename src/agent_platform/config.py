@@ -2,6 +2,12 @@
 
 import os
 from functools import lru_cache
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -60,6 +66,7 @@ class Settings(BaseModel):
     cors_allowed_origins: str = "*"
 
     devflow_runner_adapter: str = "mock"
+    devflow_codex_profile: str | None = None
     devflow_repo_url: str | None = None
     devflow_default_branch: str = "main"
     devflow_workspace_base_dir: str | None = None
@@ -105,6 +112,7 @@ def get_settings() -> Settings:
         gitlab_webhook_secret=os.getenv("GITLAB_WEBHOOK_SECRET"),
         cors_allowed_origins=os.getenv("CORS_ALLOWED_ORIGINS", "*"),
         devflow_runner_adapter=os.getenv("DEVFLOW_RUNNER_ADAPTER", "mock"),
+        devflow_codex_profile=os.getenv("DEVFLOW_CODEX_PROFILE"),
         devflow_repo_url=os.getenv("DEVFLOW_REPO_URL"),
         devflow_default_branch=os.getenv("DEVFLOW_DEFAULT_BRANCH", "main"),
         devflow_workspace_base_dir=os.getenv("DEVFLOW_WORKSPACE_BASE_DIR"),

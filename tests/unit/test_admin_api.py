@@ -3,6 +3,11 @@
 from fastapi.testclient import TestClient
 
 from agent_platform.api.app import app
+from agent_platform.devflow.runner.execution_log import (
+    ExecutionLogEntry,
+    InMemoryExecutionLogRepository,
+    LogStream,
+)
 
 client = TestClient(app)
 
@@ -58,6 +63,58 @@ def test_get_agent_returns_full_details():
 def test_get_agent_unknown_returns_404():
     response = client.get("/api/v1/admin/agents/nonexistent_agent_xyz")
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# DevFlow Job Logs
+# ---------------------------------------------------------------------------
+
+
+def test_admin_jobs_lists_execution_log_jobs():
+    repo = InMemoryExecutionLogRepository()
+    repo.record(ExecutionLogEntry(
+        job_id="job-admin-1",
+        stream=LogStream.STDOUT,
+        content="runner output",
+        adapter_name="codex",
+    ))
+    previous = app.state.admin_deps.execution_log_repo
+    app.state.admin_deps.execution_log_repo = repo
+    try:
+        response = client.get("/api/v1/admin/jobs")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["count"] == 1
+        assert data["jobs"] == ["job-admin-1"]
+    finally:
+        app.state.admin_deps.execution_log_repo = previous
+
+
+def test_admin_job_logs_can_filter_by_stream():
+    repo = InMemoryExecutionLogRepository()
+    repo.record(ExecutionLogEntry(
+        job_id="job-admin-2",
+        stream=LogStream.STDOUT,
+        content="stdout output",
+        adapter_name="claude_code",
+    ))
+    repo.record(ExecutionLogEntry(
+        job_id="job-admin-2",
+        stream=LogStream.STDERR,
+        content="stderr output",
+        adapter_name="claude_code",
+    ))
+    previous = app.state.admin_deps.execution_log_repo
+    app.state.admin_deps.execution_log_repo = repo
+    try:
+        response = client.get("/api/v1/admin/jobs/job-admin-2/logs?stream=stderr")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["count"] == 1
+        assert data["entries"][0]["stream"] == "stderr"
+        assert data["entries"][0]["content"] == "stderr output"
+    finally:
+        app.state.admin_deps.execution_log_repo = previous
 
 
 # ---------------------------------------------------------------------------

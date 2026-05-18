@@ -890,7 +890,10 @@ def create_app() -> FastAPI:
         )
 
         workspace_manager = WorkspaceManager(base_dir=workspace_base)
-        adapter = create_adapter(settings.devflow_runner_adapter)
+        adapter = create_adapter(
+            settings.devflow_runner_adapter,
+            codex_profile=settings.devflow_codex_profile,
+        )
         coding_runner = CodingAgentRunner(
             adapter=adapter,
             workspace_manager=workspace_manager,

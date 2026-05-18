@@ -8,8 +8,16 @@ from agent_platform.devflow.runner.adapters.mock import MockRunnerAdapter
 from agent_platform.devflow.runner.protocol import RunnerAdapter
 
 
-def create_adapter(adapter_type: str, **kwargs) -> RunnerAdapter:
+def create_adapter(
+    adapter_type: str,
+    *,
+    codex_profile: str | None = None,
+    **kwargs,
+) -> RunnerAdapter:
     """根据适配器类型名创建对应的 Runner 适配器实例。"""
+    if adapter_type == "codex" and codex_profile:
+        return CodexAdapter(profile=codex_profile, **kwargs)
+
     adapters: dict[str, type] = {
         "claude_code": ClaudeCodeAdapter,
         "codex": CodexAdapter,
