@@ -5,9 +5,7 @@
 
 from __future__ import annotations
 
-import asyncio
-from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -17,9 +15,9 @@ from agent_platform.devflow.runner.execution_log import (
     InMemoryExecutionLogRepository,
     LogStream,
 )
-from agent_platform.devflow.runner.models import CodingJob, JobState, ValidationResult
-from agent_platform.devflow.runner.runner import CodingAgentRunner
+from agent_platform.devflow.runner.models import JobState, ValidationResult
 from agent_platform.devflow.runner.protocol import RunnerAdapterResult
+from agent_platform.devflow.runner.runner import CodingAgentRunner
 from agent_platform.devflow.state_sync import DevFlowStateSync
 from agent_platform.devflow.task_pack import (
     DevelopmentTask,

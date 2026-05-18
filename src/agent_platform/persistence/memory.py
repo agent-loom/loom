@@ -266,6 +266,16 @@ class InMemoryAgentSessionRepository:
             ]
         return items
 
+    async def count_sessions(
+        self,
+        *,
+        agent_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> int:
+        """统计会话数量。"""
+        items = await self.list_sessions(agent_id=agent_id, tenant_id=tenant_id)
+        return len(items)
+
 
 class InMemoryWebhookDeliveryRepository:
     """Webhook 投递记录的内存存储实现。"""

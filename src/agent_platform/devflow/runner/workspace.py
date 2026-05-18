@@ -150,7 +150,7 @@ class WorkspaceManager:
                 results.append(CommandResult(
                     command=cmd, exit_code=1,
                     stdout="", stderr=f"命令 '{cmd_base}' 不在白名单中",
-                    duration_seconds=0.0,
+                    duration_ms=0,
                 ))
                 all_passed = False
                 continue

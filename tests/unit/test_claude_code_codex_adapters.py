@@ -42,14 +42,14 @@ class TestBuildSafeEnv:
             "PLANE_API_KEY": "secret123",
             "GITLAB_TOKEN": "tok",
             "MY_PASSWORD": "pass",
-            "NORMAL_VAR": "ok",
+            "HOME": "/home/user",
         }, clear=True):
             env = build_safe_env()
             assert "PLANE_API_KEY" not in env
             assert "GITLAB_TOKEN" not in env
             assert "MY_PASSWORD" not in env
             assert env["PATH"] == "/usr/bin"
-            assert env["NORMAL_VAR"] == "ok"
+            assert env["HOME"] == "/home/user"
 
 
 class TestClaudeCodeAdapter:

@@ -19,6 +19,7 @@ from agent_platform.domain.models import (
     AgentSession,
     SessionMessage,
     ToolCallTrace,
+    TraceEvent,
 )
 from agent_platform.persistence.context import get_audit_context
 from agent_platform.persistence.tables import (
@@ -447,6 +448,10 @@ class SqlAgentRunRepository:
                 else None
             ),
             metadata_json=run.metadata or None,
+            trace_events_json=[
+                te.model_dump(mode="json")
+                for te in (run.trace_events or [])
+            ] or None,
         )
         _fill_audit(row)
         async with self._sf() as session:
@@ -508,6 +513,10 @@ class SqlAgentRunRepository:
             if row.error_json
             else None
         )
+        trace_events = [
+            TraceEvent.model_validate(te)
+            for te in (row.trace_events_json or [])
+        ]
         return AgentRun(
             run_id=row.run_id,
             request_id=row.request_id,
@@ -520,6 +529,7 @@ class SqlAgentRunRepository:
             status=AgentRunStatus(row.status),
             latency_ms=row.latency_ms,
             tool_calls=tool_calls,
+            trace_events=trace_events,
             error=error,
             metadata=row.metadata_json or {},
         )

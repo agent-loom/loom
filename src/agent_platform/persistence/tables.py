@@ -168,6 +168,9 @@ class AgentRunRow(AuditMixin, Base):
     metadata_json: Mapped[dict | None] = mapped_column(
         JSON, nullable=True
     )
+    trace_events_json: Mapped[list | None] = mapped_column(
+        JSON, nullable=True
+    )
 
 
 class AgentSessionRow(AuditMixin, Base):

@@ -764,7 +764,7 @@ def create_app() -> FastAPI:
     app.state.mcp_sse = mcp_sse
 
     from agent_platform.admin.routes import router as admin_ui_router
-    app.include_router(admin_ui_router)
+    app.include_router(admin_ui_router, dependencies=[_ROLE_ADMIN])
 
     app.state.key_store = key_store
     app.state._key_store = key_store
@@ -775,10 +775,6 @@ def create_app() -> FastAPI:
     app.state.dlq = dlq
     app.state.webhook_retry_service = webhook_retry_service
 
-    app.add_middleware(
-        AuthMiddleware, api_key=settings.api_key, key_store=key_store,
-        service_auth=service_auth, env=settings.env,
-    )
     _rl_backend = None
     if _redis_client is not None:
         from agent_platform.api.rate_limiter import RedisRateLimiterBackend
@@ -786,6 +782,10 @@ def create_app() -> FastAPI:
     app.add_middleware(
         RateLimiterMiddleware, requests_per_minute=120, burst=20,
         backend=_rl_backend,
+    )
+    app.add_middleware(
+        AuthMiddleware, api_key=settings.api_key, key_store=key_store,
+        service_auth=service_auth, env=settings.env,
     )
     app.add_middleware(AccessLogMiddleware)
     app.add_middleware(
@@ -1679,6 +1679,8 @@ def create_app() -> FastAPI:
                 )
             except PlaneWebhookError as exc:
                 raise HTTPException(status_code=401, detail=str(exc)) from exc
+        else:
+            logger.warning("PLANE_WEBHOOK_SECRET 未配置，跳过签名验证")
 
         if x_plane_delivery and await webhook_repo.exists(x_plane_delivery):
             return {
@@ -1721,6 +1723,8 @@ def create_app() -> FastAPI:
                 GitLabWebhookVerifier(settings.gitlab_webhook_secret).verify(x_gitlab_token)
             except GitLabWebhookError as exc:
                 raise HTTPException(status_code=401, detail=str(exc)) from exc
+        else:
+            logger.warning("GITLAB_WEBHOOK_SECRET 未配置，跳过签名验证")
 
         raw_body = await request.body()
         payload = json.loads(raw_body) if raw_body else {}

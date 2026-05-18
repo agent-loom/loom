@@ -95,24 +95,25 @@ class TestSafeEnv:
             "MY_SECRET_VAR": "secret-val",
             "DB_PASSWORD": "secret-db",
             "AWS_CREDENTIAL_FILE": "/creds",
-            "SAFE_VAR": "ok",
+            "LANG": "en_US.UTF-8",
         }
         with patch.dict(os.environ, test_env, clear=True):
             safe = build_safe_env()
             assert "PATH" in safe
             assert "HOME" in safe
-            assert "SAFE_VAR" in safe
+            assert "LANG" in safe
             assert "PLANE_API_KEY" not in safe
             assert "GITLAB_TOKEN" not in safe
             assert "MY_SECRET_VAR" not in safe
             assert "DB_PASSWORD" not in safe
             assert "AWS_CREDENTIAL_FILE" not in safe
 
-    def test_case_insensitive_stripping(self):
-        test_env = {"my_api_key": "val"}
+    def test_only_whitelisted_vars(self):
+        test_env = {"RANDOM_VAR": "val", "PATH": "/bin"}
         with patch.dict(os.environ, test_env, clear=True):
             safe = build_safe_env()
-            assert "my_api_key" not in safe
+            assert "RANDOM_VAR" not in safe
+            assert "PATH" in safe
 
 
 # ---------------------------------------------------------------------------

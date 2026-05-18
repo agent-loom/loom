@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
 from collections import deque
@@ -158,7 +159,7 @@ class AgentWebSocketManager:
                     "key_id": record.key_id,
                 }
 
-        if self._api_key and token == self._api_key:
+        if self._api_key and hmac.compare_digest(token, self._api_key):
             return {"subject": "api-key-user", "role": "platform_admin"}
 
         await websocket.close(code=4001, reason="invalid credentials")

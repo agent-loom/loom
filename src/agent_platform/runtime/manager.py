@@ -61,12 +61,16 @@ class RuntimeManager:
         langfuse_tracer: Any | None = None,
         approval_gate: ApprovalGate | None = None,
     ):
+        self.run_store = run_store or InMemoryAgentRunRepository()
+        self.session_store: AgentSessionRepository = (
+            session_store or InMemoryAgentSessionRepository()
+        )
         self._backends = {
             NativeRuntimeBackend.name: NativeRuntimeBackend(tool_executor=tool_executor),
             HermesRuntimeBackend.name: HermesRuntimeBackend(
                 model_gateway=model_gateway,
                 tool_executor=tool_executor,
-                session_store=session_store,
+                session_store=self.session_store,
                 approval_gate=approval_gate,
             ),
             LangGraphRuntimeBackend.name: LangGraphRuntimeBackend(
@@ -74,10 +78,6 @@ class RuntimeManager:
                 model_gateway=model_gateway,
             ),
         }
-        self.run_store = run_store or InMemoryAgentRunRepository()
-        self.session_store: AgentSessionRepository = (
-            session_store or InMemoryAgentSessionRepository()
-        )
         self.policy_engine = policy_engine
         self.hook_registry = hook_registry
         self.metrics_collector = metrics_collector
@@ -293,7 +293,8 @@ class RuntimeManager:
                 if output_violations:
                     logger.warning("output policy violations: %s", output_violations)
 
-            if session:
+            # Hermes 后端已通过 memory_bridge + state_snapshot 持久化会话，跳过重复写入
+            if session and backend_name != "hermes":
                 display = response.response.output.text.display
                 session.add_message("assistant", display)
                 await self.session_store.save(session)

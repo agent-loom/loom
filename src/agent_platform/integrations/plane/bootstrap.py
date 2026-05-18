@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
 
 from agent_platform.devflow.state_machine import DevFlowState
 from agent_platform.devflow.state_sync import DEVFLOW_STATE_MAP
