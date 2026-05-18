@@ -1,8 +1,12 @@
 # 实现与设计差距分析
 
-> Last verified against code: 2026-05-19（S8 DevFlow 真实 Codex Runner 端到端闭环完成）
+> Last verified against code: 2026-05-19（S8 DevFlow 真实 Codex Runner 端到端闭环完成 + S9 稳定性修复 4 项）
 >
-> S8 新增完成：**DevFlow 真实 E2E 跑通**（Plane Webhook → DevFlowOrchestrator → GitLab 分支 + MR → Codex Runner 编码 → Plane 状态回写）、Hermes SDK import 修复（`run_agent.AIAgent` 公开别名）、Alembic `render_as_batch=True` + DATABASE_URL 环境变量支持 + 新迁移（复合索引 / UniqueConstraint / trace_events_json）、orchestrator `add_comment` 崩溃修复、CodingAgentRunner 失败状态回退（AI Developing）+ Plane 评论增强（MR 链接 / 图标）、GitLab 反向 webhook GITLAB_WEBHOOK_SECRET 配置、mock E2E 脚本（6 场景 23 断言）+ 真实 E2E 脚本（13/13 全通过）。当前测试：**1609 passed, 1 skipped**；ruff clean。
+> S8 新增完成：**DevFlow 真实 E2E 跑通**（Plane Webhook → DevFlowOrchestrator → GitLab 分支 + MR → Codex Runner 编码 → Plane 状态回写）、Hermes SDK import 修复（`run_agent.AIAgent` 公开别名）、Alembic `render_as_batch=True` + DATABASE_URL 环境变量支持 + 新迁移（复合索引 / UniqueConstraint / trace_events_json）、orchestrator `add_comment` 崩溃修复、CodingAgentRunner 失败状态回退（AI Developing）+ Plane 评论增强（MR 链接 / 图标）、GitLab 反向 webhook GITLAB_WEBHOOK_SECRET 配置、mock E2E 脚本（6 场景 23 断言）+ 真实 E2E 脚本（13/13 全通过）。
+>
+> S9 稳定性修复（2026-05-19）：(1) 仅 "Ready for AI Dev" 触发 DevFlow，移除 "In Progress" 误触发；(2) mr_url 通过 orchestrator → runner → CodingJob 完整透传至 Plane 评论；(3) workspace.create() 改为克隆默认分支后 fetch+checkout 目标分支，消除竞态；(4) 清理 task_pack required_outputs 中的非路径描述字符串。
+>
+> 当前测试：**1609 passed, 1 skipped**；ruff clean。
 >
 > 2026-05-17 review hardening 已补齐：持久化 API key 不再允许 `x-tenant-id` 覆盖绑定租户；AuthMiddleware 写入 `AuditContext`；`AgentRun` 显式携带 `tenant_id`；`/api/v1/agent-runs` 强制 read scope 并按租户过滤；Deployment repository 的 general fallback 仅匹配 `tenant_id IS NULL`；SQL Deployment save 改为 upsert。目标测试：`uv run pytest tests/unit/test_auth.py tests/unit/test_repository_contracts.py tests/unit/test_runtime_manager_queries.py tests/unit/test_api.py`，105 passed。
 

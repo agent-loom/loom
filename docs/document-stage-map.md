@@ -17,13 +17,13 @@
 | S0 | 架构基线 | 冻结平台边界、MVP、核心契约 | 已完成，持续维护 |
 | S1 | MVP 骨架 | 跑通多 Agent、统一 API、manifest、runtime、eval、DevFlow 骨架 | 已基本实现 |
 | S2 | 生产化底座 | 持久化、artifact、发布审计、回滚、权限、观测 | 部分完成；Registry/Deployment/Audit 主链路已接入，Deployment upsert/strict tenant resolve 和 agent-runs 租户过滤已补齐；远程 artifact、保护环境、服务间鉴权仍待补 |
-| S3 | Hermes 真接入 | 从 stub/adapter 原型变成真实 Hermes runtime 能力 | 部分完成；Spike A 已完成，官方 Hermes SDK Spike B 待实施 |
+| S3 | Hermes 真接入 | 从 stub/adapter 原型变成真实 Hermes runtime 能力 | ✅ 已完成；Spike A + Spike B 均已完成（SDK 工具桥接 + fallback + result normalization + HermesStreamMapper）；memory 持久化后端待补 |
 | S4 | AI 研发闭环 | CodingAgentRunner、workspace、path guard、Plane/GitLab 状态同步 | 大部分完成；runner/workspace/path guard 已生产化，ScmAdapter 协议抽象已完成，HttpClient 连接池+重试已完成，GitLab webhook 反向同步已实现，job 持久化+可观测性端点已接入，分支名清理已实现；真实 runner adapter (Claude Code / Codex) 待接入，端到端联调待做 |
 | S5 | 平台生产化与规模化 | 主链路可靠性校准、semantic routing、model gateway、knowledge/RAG、admin API、MCP、治理 | ✅ 已完成 Phase 0-3（670 tests passed, ruff clean）；入口为 `development-plan-s5.md` |
 | S6 | 生产运营加固 | Admin key CRUD、EvalRunner auto-persist、per-role rate limiting、access log、canary metrics、WebSocket 重连 | ✅ 已完成（988 tests passed） |
 | S7 | 多维评测与运营深化 | 多 provider ModelGateway、ToolAudit、AgentStreamEvent、KnowledgeSyncScheduler、多维 EvalRunner、TenantQuota、HermesStreamMapper | ✅ 已完成（1075 tests passed） |
 | S8 | 生产交付 | Prometheus metrics、Session 持久化、Admin eval 增强、真实 runner E2E、Plane/GitLab E2E | ✅ 已完成（1609 passed）；DevFlow Codex 真实 E2E 跑通、GitLab 反向 webhook、Hermes SDK 修复、Alembic 完善 |
-| S9 | 运维与扩展 | Admin UI、PathGuard `**` 递归修复、CI/CD SLO 门禁、多 Agent 协作、生产部署 | 🔶 规划中 |
+| S9 | 运维与扩展 | Admin UI、PathGuard `**` 递归修复、CI/CD SLO 门禁、多 Agent 协作、生产部署 | 🔶 进行中；已完成 DevFlow 四项稳定性修复；**P0 待解决**：(1) Codex adapter `--dangerously-bypass-approvals-and-sandbox` 需沙箱隔离替代方案；(2) DLQ 重试回调实际接通（`api/app.py:455` 当前为空操作）；**P1 待解决**：Hermes memory 持久化后端、SLO 指标持久化、Knowledge per-tenant 隔离、服务间鉴权 |
 
 ## 2. 文档状态定义
 
