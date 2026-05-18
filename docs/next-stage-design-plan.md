@@ -299,18 +299,18 @@ Owner: platform
 
 ## 5. 推荐设计顺序（S8 剩余工作）
 
-S7 完成后，多维评测引擎、多 provider 路由、工具审计、流式事件映射、租户配额等能力已全部落地。S8 Phase 1（Prometheus metrics + Session 持久化 + Admin eval 增强）已完成。剩余设计按优先级：
+S7 完成后，多维评测引擎、多 provider 路由、工具审计、流式事件映射、租户配额等能力已全部落地。S8 Phase 1（Prometheus metrics + Session 持久化 + Admin eval 增强）已完成。2026-05-18 已跑通真实 Codex Coding Runner E2E，并完成一次 Plane + GitLab + Codex + validation + commit/push + 回写的真实验证。剩余设计按优先级：
 
-1. **真实 coding runner 端到端联调** — Claude Code CLI / Codex CLI 在真实 workspace 执行，验证 prompt→code→commit 管线
-2. **Plane + GitLab 端到端联调** — 使用真实实例验证完整 DevFlow 管线，补齐强状态机和 DLQ
+1. **Claude Code 真实 runner 补充验证** — Codex 已跑通；Claude Code CLI 仍需稳定完成 prompt→code→commit 管线
+2. **Plane + GitLab 生产化状态同步** — 正向真实链路已跑通；继续补齐强状态机、DLQ、reconciliation 和 pipeline/MR webhook 反向同步
 3. **Hermes 深度集成** — memory 持久化 + 错误/重试映射 + HITL 事件映射
 4. **Admin UI** — Web-based 管理界面（agent/eval/devflow/metrics）
 5. **生产加固** — SLO 门禁、产物签名、服务间鉴权、S3 ArtifactStore、压力测试
 
 理由：
 
-1. 真实 runner 联调是 DevFlow 闭环的最后一环，直接决定平台是否具备端到端交付能力。
-2. Plane/GitLab 联调验证完整管线，是 AI 研发平台的核心价值。
+1. 真实 Codex runner 联调已经证明平台具备端到端交付能力，但多 runner 策略需要 Claude Code 也完成验证。
+2. Plane/GitLab 正向联调已经验证完整管线；下一步重点是异常恢复、状态一致性和生产可运维性。
 3. Hermes 深度集成使 runtime 能力从"可用"提升到"可信赖"。
 4. Admin UI 是运维必需品，阻塞生产团队采用。
 5. 生产加固是上线前的最后屏障。
@@ -321,6 +321,6 @@ S7 全部完成、S8 Phase 1 已完成后，平台已具备：持久化可靠、
 
 S8 剩余建议聚焦三条线：
 
-1. **DevFlow 端到端**：真实 coding runner + Plane/GitLab 联调，打通 AI 研发闭环最后一公里。
+1. **DevFlow 生产化**：在已跑通真实 Codex E2E 的基础上，补 Claude Code E2E、DLQ、强状态机、runner 日志持久化。
 2. **Runtime 深化**：Hermes memory 持久化 + 错误映射，使多轮对话跨 run 连续。
 3. **交付准备**：Admin UI + SLO 门禁 + 产物签名 + 压力测试，达到生产交付标准。

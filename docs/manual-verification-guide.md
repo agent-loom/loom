@@ -671,6 +671,69 @@ curl -N -X POST http://localhost:8000/api/v1/agent/chat \
 
 ---
 
+## 17. DevFlow 真实 Coding Runner E2E
+
+用途：验证 `Plane -> GitLab -> Coding Runner -> validation -> commit/push -> GitLab/Plane 回写` 完整链路。
+
+前置条件：
+
+- Plane 实例可访问，且 `.env` 中配置了 `PLANE_BASE_URL`、`PLANE_API_KEY`、`PLANE_WORKSPACE_SLUG`、`PLANE_PROJECT_ID`。
+- GitLab 实例可访问，且 `.env` 中配置了 `GITLAB_BASE_URL`、`GITLAB_TOKEN`、`GITLAB_PROJECT_ID`。
+- `DEVFLOW_REPO_URL` 指向可 clone/push 的 GitLab 仓库地址。
+- `DEVFLOW_DEFAULT_BRANCH` 或 `GITLAB_DEFAULT_BRANCH` 与仓库默认分支一致；当前联调仓库使用 `master`。
+- `DEVFLOW_RUNNER_ADAPTER=codex` 时，本机 `codex --version` 可用且已登录。
+
+推荐命令：
+
+```bash
+.venv/bin/python scripts/devflow_real_e2e.py
+```
+
+可选环境变量：
+
+| 环境变量 | 用途 |
+|---|---|
+| `DEVFLOW_RUNNER_ADAPTER` | `mock` / `codex` / `claude_code` |
+| `DEVFLOW_REPO_URL` | Runner clone/push 的仓库地址 |
+| `DEVFLOW_WORKSPACE_BASE_DIR` | workspace 根目录 |
+| `DEVFLOW_CLEANUP_ON_SUCCESS` | 成功后是否清理 workspace，排查时建议 `false` |
+| `DEVFLOW_TEST_AGENT_ID` | 测试目标 agent，默认 `echo` |
+| `DEVFLOW_TEST_TASK_TYPE` | 测试任务类型，默认 `agent:change` |
+| `DEVFLOW_TEST_REQUIREMENT` | 覆盖默认测试需求 |
+
+验证点：
+
+- [ ] Plane API 可达
+- [ ] GitLab API 可达
+- [ ] Plane Work Item 创建成功
+- [ ] GitLab feature branch 创建成功
+- [ ] GitLab MR 创建成功
+- [ ] Coding Runner job 状态为 `SUCCEEDED`
+- [ ] `job.result.status == success`
+- [ ] `job.result.commit_sha` 非空
+- [ ] GitLab MR 有 Runner 报告评论
+- [ ] Plane Work Item 有 MR 和 Runner 结果评论
+
+2026-05-18 验证记录：
+
+| 项 | 值 |
+|---|---|
+| Runner | `codex` |
+| 结果 | `13 passed, 0 failed` |
+| GitLab MR | `!11` |
+| Runner commit | `3d7d6a99dac657bc4987b8891ab839d5cac8f650` |
+
+常见失败和处理：
+
+| 失败 | 原因 | 处理 |
+|---|---|---|
+| `target branch main is missing` | GitLab 默认分支不是 `main` | 设置 `DEVFLOW_DEFAULT_BRANCH=master` 或 `GITLAB_DEFAULT_BRANCH=master` |
+| `path_violation` | TaskPack scope 未覆盖真实 changed files | 检查 `write_allowed`，必要时补充 `pyproject.toml`、`uv.lock`、`eval-report.json` |
+| `No such file or directory: pytest` | clean env 下 PATH 找不到 pytest | 当前代码已解析为 `sys.executable -m pytest`；旧版本需升级 |
+| Codex 卡住或无输出 | Codex CLI 登录、网络或 app-server 初始化问题 | 先在普通终端运行 `codex exec ...` 验证本机环境 |
+
+---
+
 ## 附录 A：环境变量速查
 
 | 环境变量 | 默认值 | 用途 |
@@ -688,8 +751,12 @@ curl -N -X POST http://localhost:8000/api/v1/agent/chat \
 | `GITLAB_BASE_URL` | 无 | GitLab 集成（需同时设置下面 2 个） |
 | `GITLAB_TOKEN` | 无 | GitLab access token |
 | `GITLAB_PROJECT_ID` | 无 | GitLab project ID |
+| `DEVFLOW_RUNNER_ADAPTER` | `mock` | DevFlow runner adapter，支持 `mock` / `codex` / `claude_code` |
+| `DEVFLOW_REPO_URL` | 无 | Coding Runner clone/push 的仓库地址 |
+| `DEVFLOW_DEFAULT_BRANCH` | `main` | DevFlow 创建 MR 的目标分支 |
+| `DEVFLOW_WORKSPACE_BASE_DIR` | 系统临时目录 | Coding Runner workspace 根目录 |
 
-> DevFlow 功能需要同时设置 `PLANE_BASE_URL`、`PLANE_API_KEY`、`GITLAB_BASE_URL`、`GITLAB_TOKEN`、`GITLAB_PROJECT_ID` 五个变量。
+> DevFlow 功能需要同时设置 `PLANE_BASE_URL`、`PLANE_API_KEY`、`GITLAB_BASE_URL`、`GITLAB_TOKEN`、`GITLAB_PROJECT_ID`、`DEVFLOW_REPO_URL`。使用真实 Codex/Claude runner 时，还需要本机 CLI 已安装并已登录。
 
 ---
 
@@ -728,6 +795,7 @@ curl -N -X POST http://localhost:8000/api/v1/agent/chat \
 | 16 | SQLite 持久化 | 设置 DATABASE_URL + 重启验证 | 无 | 3 min |
 | 17 | WebSocket | wscat / Python 脚本 | wscat 或 websockets | 2 min |
 | 18 | HITL 审批 | 设置 HITL_ENABLED + 修改 risk_level | 无 | 5 min |
-| | **合计** | | | **~30 min** |
+| 19 | DevFlow 真实 Runner E2E | `scripts/devflow_real_e2e.py` | Plane + GitLab + Codex/Claude CLI | 5-15 min |
+| | **合计** | | | **~40 min** |
 
 全部通过即可确认平台核心功能模块正常工作。

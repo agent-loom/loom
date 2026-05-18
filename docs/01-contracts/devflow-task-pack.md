@@ -85,6 +85,9 @@ scope:
     - src/agent_platform/**
     - tests/**
     - docs/**
+    - pyproject.toml
+    - uv.lock
+    - eval-report.json
   write_denied:
     - .env
     - secrets/**

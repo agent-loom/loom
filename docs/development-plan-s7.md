@@ -78,7 +78,7 @@
 | 8.1.5 | Admin eval 增强端点 | implementation-gap §P1 Eval | POST /evals/{agent_id}/run 触发执行；GET /evals/compare 跨版本对比；/status 增强 | ✅ |
 | 8.1.6 | 测试 + ruff + 提交 + 文档更新 | — | 全量测试通过；ruff clean；implementation-gap 校准 | ✅ |
 
-### S8 Phase 2：真实 Runner 端到端联调
+### S8 Phase 2：真实 Runner 端到端联调 — 🔶 Codex 已跑通
 
 **目标**：使用 Claude Code CLI 或 Codex CLI 在真实 workspace 中完成 prompt→code→commit→MR 全链路。
 
@@ -87,11 +87,11 @@
 | # | 任务 | 设计来源 | 验收标准 | 状态 |
 |---|---|---|---|---|
 | 8.2.1 | Claude Code CLI 端到端 | devflow-runner-workspace §验收 | 从 task pack 创建 workspace → Claude Code 执行 → diff 验证 → commit → push → MR 创建 | ⬜ |
-| 8.2.2 | Codex CLI 端到端 | devflow-runner-workspace §验收 | 同上，使用 Codex adapter | ⬜ |
+| 8.2.2 | Codex CLI 端到端 | devflow-runner-workspace §验收 | 同上，使用 Codex adapter | ✅ 已跑通：MR !11，commit `3d7d6a99dac657bc4987b8891ab839d5cac8f650` |
 | 8.2.3 | Runner 执行日志持久化 | implementation-gap §4.3 | runner stdout/stderr 写入 DB 或文件；Admin 可回放查看 | ⬜ |
 | 8.2.4 | 安全沙箱 PoC | implementation-gap §4.3 | Docker 容器隔离执行环境原型；PathGuard 在容器内 enforce | ⬜ |
 
-### S8 Phase 3：Plane + GitLab 端到端联调
+### S8 Phase 3：Plane + GitLab 端到端联调 — 🔶 正向链路已跑通
 
 **目标**：使用真实 Plane/GitLab 环境验证完整 DevFlow 管线。
 
@@ -100,7 +100,7 @@
 | # | 任务 | 设计来源 | 验收标准 | 状态 |
 |---|---|---|---|---|
 | 8.3.1 | Plane bootstrap 脚本 | next-stage-design-plan §P0-5 | 创建标准 states (8 个)、labels、custom properties；可重复执行 | ⬜ |
-| 8.3.2 | Plane→GitLab 正向流 | devflow-state-sync | Work Item 状态变更 → webhook → parse requirement → generate issues → create branch/MR → assign runner | ⬜ |
+| 8.3.2 | Plane→GitLab 正向流 | devflow-state-sync | Work Item 状态变更 → webhook → parse requirement → generate issues → create branch/MR → assign runner | ✅ 已跑通：`scripts/devflow_real_e2e.py` 13/13 |
 | 8.3.3 | GitLab→Plane 反向流 | devflow-state-sync | pipeline pass/fail → Plane state 更新 + comment；MR merged → Done 状态 | ⬜ |
 | 8.3.4 | Dead Letter Queue | implementation-gap §3.3 | webhook 投递失败进入 DB-backed retry queue；可查询/重试/清理 | ⬜ |
 | 8.3.5 | Plane 强状态机 | next-stage-design-plan §P0-5 | 8 状态严格流转；非法跳转拒绝并告警 | ⬜ |

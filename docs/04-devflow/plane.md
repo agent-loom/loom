@@ -263,6 +263,8 @@ issue
 | `data.properties.agent_id` | 目标业务 Agent | 可选 |
 | `data.properties.task_type` | DevFlow 任务类型 | 可选，缺省 `platform:change` |
 
+当前实现会优先读取 Plane `get_work_item()` 返回的详情字段；如果详情里没有 `properties/custom_properties`，会回退读取 webhook payload 中的 `properties/custom_properties`。这是为了兼容 Plane 自定义字段未在详情接口完整返回的部署形态。
+
 ### 2.1.5 回写 Plane 的数据
 
 DevFlow 成功创建 SCM 分支和 MR 后，平台应回写 Plane：
@@ -343,9 +345,46 @@ class ScmAdapter(Protocol):
 | Plane -> GitLab branch/MR | 已实现 | `src/agent_platform/devflow/orchestrator.py` |
 | GitLab MR 链接回写 Plane | 已实现 | `src/agent_platform/devflow/orchestrator.py` |
 | CodingRunner 派发 | 已实现基础版 | `src/agent_platform/devflow/runner/runner.py` |
+| 真实 Codex Runner E2E | 已跑通 | `scripts/devflow_real_e2e.py` |
 | GitHub 主链路 | 未实现 | 待新增 `GitHubAdapter` / `ScmAdapter` |
 | Hermes RuntimeBackend | 已实现轻量后端 | `src/agent_platform/runtime/hermes.py` |
 | Hermes 官方 runtime/planner/memory/event stream | 未完整接入 | 见 `03-runtime/hermes-runtime.md` |
+
+### 2.1.9 真实 E2E 验证记录
+
+2026-05-18 已完成一次真实链路验证：
+
+```text
+Plane Work Item
+  -> DevFlowOrchestrator
+  -> GitLab branch + MR
+  -> Codex Runner 修改代码
+  -> pytest / contract / manifest / eval 验证
+  -> commit + push
+  -> GitLab MR comment
+  -> Plane comment
+```
+
+验证结果：
+
+| 项 | 值 |
+| --- | --- |
+| 命令 | `.venv/bin/python scripts/devflow_real_e2e.py` |
+| Runner | `codex` |
+| GitLab MR | `!11` |
+| Branch | `feat/80c3aa2e-9c16-41e4-b675-3bc502eb009c` |
+| Runner commit | `3d7d6a99dac657bc4987b8891ab839d5cac8f650` |
+| 结果 | `13 passed, 0 failed` |
+
+该结果说明 Plane -> GitLab -> Coding Runner -> 验证 -> commit/push -> Plane/GitLab 回写已经具备可复现的内测闭环。
+
+仍未完成的生产项：
+
+1. Claude Code 真实 E2E 稳定验证。
+2. Plane 标准 states / labels / custom properties bootstrap。
+3. GitLab pipeline webhook -> Plane 反向强状态同步。
+4. DB-backed DLQ、失败重试和 reconciliation。
+5. Runner stdout/stderr 长日志持久化与 Admin UI 回放。
 
 ## 2.2 生产反馈到 Plane 候选需求
 

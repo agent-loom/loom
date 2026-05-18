@@ -1,9 +1,9 @@
 # DevFlow Runner / Workspace 设计
 
-> Status: Draft
+> Status: Implemented (真实 Codex Runner E2E 已跑通)
 > Stage: S4
 > Owner: platform
-> Last verified against code: 2026-05-15
+> Last verified against code: 2026-05-18
 
 本文档定义 CodingAgentRunner、Workspace、PathGuard 以及 Job 生命周期的完整设计。目标是让 DevFlow 能够从 task pack 出发，自动调用 Codex / Claude Code / OpenHands 完成编码，并将结果提交到 GitLab MR、回写 Plane。
 
@@ -17,12 +17,20 @@
 DevFlowOrchestrator  -->  Plane webhook 触发
                      -->  TaskPackGenerator 生成 DevelopmentTask
                      -->  GitLabAdapter 创建 branch + MR
-                     -->  PlaneAdapter 回写 comment / 状态
+                     -->  PlaneAdapter 回写 comment / 状态 / custom properties
+                     -->  CodingAgentRunner 调用 mock / codex / claude_code
+                     -->  WorkspaceManager clone / validate / commit / push
+                     -->  GitLab MR comment + Plane comment 回写
 ```
 
-### 1.2 缺失的部分
+### 1.2 当前仍缺失的部分
 
-当前 DevFlow 只完成了"准备"阶段。从 task pack 到 "代码修改 -> 测试 -> 提交 -> 回写" 的执行闭环完全缺失。本文档补齐这一段。
+当前代码已经跑通真实 Codex Runner 的 "代码修改 -> 测试 -> 提交 -> 回写" 闭环，但仍有以下生产化缺口：
+
+1. Claude Code 真实 E2E 尚未完成稳定验证。
+2. Runner job 日志仍主要依赖进程输出和内存 execution log，缺少可长期查询的 stdout/stderr 文件或 DB 存储。
+3. workspace 隔离仍是本地目录级隔离，未引入容器、网络策略、资源限制或 secret 隔离。
+4. Plane/GitLab 强状态机、DLQ、失败重试和 reconciliation 仍以设计为主，未完全生产化。
 
 ### 1.3 整体流程
 
@@ -134,6 +142,7 @@ class ResultStatus(str, enum.Enum):
     VALIDATION_FAILED = "validation_failed"
     RUNNER_ERROR = "runner_error"
     PATH_VIOLATION = "path_violation"
+    NO_CHANGES = "no_changes"
     TIMEOUT = "timeout"
     CANCELLED = "cancelled"
 
@@ -456,7 +465,7 @@ logger = logging.getLogger(__name__)
 class ClaudeCodeAdapter:
     """通过 Claude Code CLI 执行编码任务。
 
-    调用方式：claude --print --output-format json --max-turns N
+    调用方式：claude --print --output-format json --permission-mode bypassPermissions --no-session-persistence --max-turns N
     工作目录设为 workspace_dir。
     """
 
@@ -489,6 +498,8 @@ class ClaudeCodeAdapter:
             self.cli_path,
             "--print",
             "--output-format", "json",
+            "--permission-mode", "bypassPermissions",
+            "--no-session-persistence",
             "--max-turns", str(self.max_turns),
         ]
         if self.model:
@@ -514,6 +525,7 @@ class ClaudeCodeAdapter:
                 exit_code=exit_code,
                 stdout=stdout,
                 stderr=stderr,
+                error_message=stderr.strip()[-1000:] if exit_code != 0 else None,
             )
 
         except asyncio.TimeoutError:
@@ -636,7 +648,7 @@ logger = logging.getLogger(__name__)
 class CodexAdapter:
     """通过 OpenAI Codex CLI 执行编码任务。
 
-    调用方式：codex --approval-mode full-auto --quiet
+    调用方式：codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check --ephemeral <prompt>
     """
 
     def __init__(self, *, cli_path: str = "codex", model: str | None = None):
@@ -656,7 +668,13 @@ class CodexAdapter:
         timeout_seconds: int = 600,
     ) -> RunnerAdapterResult:
         prompt = self._build_prompt(task)
-        cmd = [self.cli_path, "--approval-mode", "full-auto", "--quiet"]
+        cmd = [
+            self.cli_path,
+            "exec",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "--skip-git-repo-check",
+            "--ephemeral",
+        ]
         if self.model:
             cmd.extend(["--model", self.model])
         cmd.append(prompt)
@@ -672,10 +690,14 @@ class CodexAdapter:
                 self._process.communicate(),
                 timeout=timeout_seconds,
             )
+            stdout = stdout_bytes.decode(errors="replace")
+            stderr = stderr_bytes.decode(errors="replace")
+            exit_code = self._process.returncode or 0
             return RunnerAdapterResult(
-                exit_code=self._process.returncode or 0,
-                stdout=stdout_bytes.decode(errors="replace"),
-                stderr=stderr_bytes.decode(errors="replace"),
+                exit_code=exit_code,
+                stdout=stdout,
+                stderr=stderr,
+                error_message=stderr.strip()[-1000:] if exit_code != 0 else None,
             )
         except asyncio.TimeoutError:
             await self.cancel()
@@ -1032,6 +1054,11 @@ class WorkspaceManager:
             )
 ```
 
+当前实现与初始伪代码相比有两点生产化调整：
+
+1. 验证命令不使用 shell 直接执行，而是通过白名单和 `shlex.split()` 拆分，降低注入风险。
+2. `pytest ...` 会解析为当前平台解释器的 `sys.executable -m pytest ...`，`python ...` 会解析为当前平台解释器，避免 clean env 下找不到 `.venv/bin/pytest`。
+
 ### 5.3 Workspace 策略
 
 | 策略 | 说明 |
@@ -1129,12 +1156,22 @@ class PathGuard:
 
 ```python
 scope={
-    "write_allowed": ["src/agent_platform/**", "agents/**", "tests/**", "docs/**"],
+    "write_allowed": [
+        "src/agent_platform/**",
+        "agents/**",
+        "tests/**",
+        "docs/**",
+        "pyproject.toml",
+        "uv.lock",
+        "eval-report.json",
+    ],
     "write_denied": [".env", "secrets/**", "deploy/prod/**", "infra/prod/**"],
 }
 ```
 
 PathGuard 直接消费这些字段，无需额外转换。
+
+注意：路径匹配必须使用面向仓库相对路径的 glob 语义。真实联调中验证过 `PurePosixPath.match("agents/**")` 不能按预期匹配多级路径，因此当前代码使用 `fnmatchcase()`，确保 `agents/echo/evals/golden.yaml`、`src/agent_platform/tools/schema_validator.py`、`tests/unit/test_echo_agent.py` 都能被正确允许。
 
 ## 7. Job 状态机
 
@@ -1629,16 +1666,58 @@ async def test_mr_comment_contains_results():
     assert "abc12345" in comment
 ```
 
+### 14.4 真实 E2E 验证记录
+
+2026-05-18 已使用真实 Plane、GitLab 和 Codex CLI 跑通端到端链路：
+
+```bash
+.venv/bin/python scripts/devflow_real_e2e.py
+```
+
+验证环境：
+
+| 项 | 值 |
+| --- | --- |
+| Runner | `DEVFLOW_RUNNER_ADAPTER=codex` |
+| Plane | `http://10.193.0.147:3333` |
+| GitLab | `https://gitlab.ttyuyin.com` |
+| 目标默认分支 | `master` |
+| 验证结果 | `13 passed, 0 failed` |
+| GitLab MR | `!11` |
+| Runner commit | `3d7d6a99dac657bc4987b8891ab839d5cac8f650` |
+
+该验证覆盖：
+
+1. Plane API 可达和 Work Item 创建。
+2. GitLab API 可达、feature branch 创建、MR 创建。
+3. `DevFlowOrchestrator` 生成 TaskPack，并把默认分支、MR 链接、custom properties 回写 Plane。
+4. `CodingAgentRunner` 创建真实 workspace，调用 `CodexAdapter` 修改代码。
+5. `PathGuard` 校验真实 changed files。
+6. `WorkspaceManager` 执行 `pytest`、contract test、manifest validate、agent eval。
+7. 验证通过后 commit/push 到 GitLab branch。
+8. GitLab MR comment 和 Plane comment 回写。
+
+本次验证暴露并已修复的问题：
+
+| 问题 | 修复 |
+| --- | --- |
+| Plane detail 不一定返回 `properties.agent_id/task_type` | Orchestrator 回退读取 webhook payload |
+| GitLab 默认分支不是 `main` | TaskPack 使用 `DevFlowOrchestrator.default_branch` |
+| `agents/**` glob 误判多级路径越界 | PathGuard 使用 `fnmatchcase()` |
+| Codex 会合理生成 `uv.lock` / `eval-report.json` | TaskPack 默认 scope 显式允许 |
+| clean env 下找不到 `pytest` | validation 命令解析为 `sys.executable -m pytest` |
+
 ## 15. MVP 限制和后续扩展
 
 ### 15.1 MVP 范围
 
-1. 支持 MockRunnerAdapter 和 ClaudeCodeAdapter。
+1. 支持 MockRunnerAdapter、CodexAdapter 和 ClaudeCodeAdapter。
 2. workspace 每次创建新 clone，不复用。
-3. PathGuard 使用 fnmatch glob，不支持正则。
+3. PathGuard 使用仓库相对路径 glob，不支持正则。
 4. 重试最多 1 次（可配置为更多）。
-5. job 状态存内存，不持久化（持久化依赖 S2 阶段的 persistence 设计）。
+5. job 状态可通过 repository 持久化，但 stdout/stderr 长日志仍需进一步归档。
 6. 不支持多 job 并发执行（后续加 async job queue）。
+7. 真实 Codex E2E 已跑通；Claude Code 真实 E2E 仍需单独稳定验证。
 
 ### 15.2 后续扩展
 
