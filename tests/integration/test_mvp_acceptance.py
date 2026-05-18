@@ -130,7 +130,16 @@ class TestDevFlowPipeline:
     """MVP §6.3 — 研发链路验收: task pack → deploy."""
 
     def setup_method(self):
-        self.client = TestClient(app)
+        import os
+        from unittest.mock import patch
+        from agent_platform.config import get_settings
+        get_settings.cache_clear()
+        with patch.dict(os.environ, {"PLANE_WEBHOOK_SECRET": ""}, clear=False):
+            get_settings.cache_clear()
+            from agent_platform.api.app import create_app
+            _app = create_app()
+        get_settings.cache_clear()
+        self.client = TestClient(_app)
 
     def test_task_pack_generation(self):
         response = self.client.post(

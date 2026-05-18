@@ -223,8 +223,10 @@ class TestConfigValidation:
 
     def test_mock_runner_is_default(self):
         get_settings.cache_clear()
-        s = get_settings()
-        assert s.devflow_runner_adapter == "mock"
+        with patch.dict(os.environ, {"DEVFLOW_RUNNER_ADAPTER": "mock"}, clear=False):
+            get_settings.cache_clear()
+            s = get_settings()
+            assert s.devflow_runner_adapter == "mock"
 
 
 # ---------------------------------------------------------------------------

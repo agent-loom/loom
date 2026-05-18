@@ -84,10 +84,15 @@ def test_webhook_duplicate_delivery_returns_duplicate(monkeypatch):
     assert second.json()["status"] == "duplicate"
 
 
-def test_webhook_no_devflow_status_when_devflow_disabled():
-    from agent_platform.api.app import app
+def test_webhook_no_devflow_status_when_devflow_disabled(monkeypatch):
+    monkeypatch.delenv("PLANE_WEBHOOK_SECRET", raising=False)
+    monkeypatch.delenv("PLANE_BASE_URL", raising=False)
+    get_settings.cache_clear()
+    from agent_platform.api.app import create_app
+    _app = create_app()
+    get_settings.cache_clear()
 
-    client = TestClient(app)
+    client = TestClient(_app)
 
     response = client.post(
         "/api/v1/integrations/plane/webhook",

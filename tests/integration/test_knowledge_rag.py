@@ -119,7 +119,8 @@ async def test_knowledge_rag_injection():
     )
 
     with patch("agent_platform.runtime.hermes.HERMES_AVAILABLE", True), \
-         patch("agent_platform.runtime.hermes._HermesAIAgent") as MockAgentClass:
+         patch("agent_platform.runtime.hermes.AIAgent") as MockAgentClass, \
+         patch("agent_platform.runtime.hermes._HermesAIAgent", MockAgentClass):
         mock_agent_instance = MockAgentClass.return_value
         mock_agent_instance.run_conversation.return_value = {
             "final_response": "The price of water is 1 USD.",
