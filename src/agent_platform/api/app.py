@@ -1225,7 +1225,9 @@ def create_app() -> FastAPI:
         allowed_tools = spec.manifest.tools.allow or []
         missing_tools = []
         for tool_name in allowed_tools:
-            if not tool_registry.get(tool_name):
+            try:
+                tool_registry.get(tool_name)
+            except LookupError:
                 missing_tools.append(tool_name)
         checks.append({
             "name": "tools_registered", "passed": len(missing_tools) == 0,
@@ -1816,17 +1818,23 @@ def _error_response(
 
 
 def _missing_required_context(request: AgentRequest, required_paths: list[str]) -> list[str]:
-    """检查请求负载中是否缺少必填的上下文路径。"""
+    """检查请求负载中是否缺少必填的上下文路径。同时检查 alias 和 canonical 字段名。"""
     missing: list[str] = []
-    payload = request.model_dump(by_alias=True)
+    payload_alias = request.model_dump(by_alias=True)
+    payload_canonical = request.model_dump(by_alias=False)
     for path in required_paths:
-        value = payload
-        for part in path.split("."):
-            if not isinstance(value, dict) or part not in value:
-                value = None
+        found = False
+        for payload in (payload_alias, payload_canonical):
+            value = payload
+            for part in path.split("."):
+                if not isinstance(value, dict) or part not in value:
+                    value = None
+                    break
+                value = value[part]
+            if value not in (None, ""):
+                found = True
                 break
-            value = value[part]
-        if value in (None, ""):
+        if not found:
             missing.append(path)
     return missing
 
