@@ -117,6 +117,16 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 | 16 | Observability | §2.1、§5 P1 | 已覆盖 | OTel/Langfuse、结构化 trace event、dashboard/alerting 进入 S5 |
 | 17 | Knowledge / RAG | §2.1、§5 P0/P1、§7 | 已覆盖 | KnowledgeService 接 runtime 为 P0，真实 RAG backend 为 P1 |
 
+### 1.5 架构边界重申（2026-05-19）
+
+在 S9 规划期间，我们重新明确了 **DevFlow（研发控制面）** 与 **Hermes（运行数据面）** 的严格隔离边界：
+
+1. **DevFlow 负责研发生命周期**：Plane 需求 → Webhook → DevFlowOrchestrator → GitLab Branch/MR → CodingAgentRunner (Codex/Claude Code) 修改代码 → Eval/CI → 人审部署。Coding Runner 只在 TaskPack + Workspace 内运行，不在生产环境直接改线上代码。
+2. **Hermes 负责线上 Agent 运行时**：业务请求 → AgentRouter → RuntimeManager → HermesRuntimeBackend → Hermes SDK。Hermes **不**直接处理 Plane webhook，也**不**管理 MR/PR，更**不会**直接修改代码。
+3. **连接点只有 Manifest**：Plane 需求通过 DevFlow 驱动代码变更，代码变更可能新增/修改 `runtime.backend: hermes` 的 Agent Package。Eval 和部署通过后，线上请求才会进入 HermesRuntimeBackend。
+
+这是极为关键的架构原则，避免了让 Hermes 越权处理 CI/CD 流程的反模式。
+
 ## 2. 与 `agent-platform-design.md` 的差距
 
 ### 2.1 总体架构

@@ -23,7 +23,7 @@
 | S6 | 生产运营加固 | Admin key CRUD、EvalRunner auto-persist、per-role rate limiting、access log、canary metrics、WebSocket 重连 | ✅ 已完成（988 tests passed） |
 | S7 | 多维评测与运营深化 | 多 provider ModelGateway、ToolAudit、AgentStreamEvent、KnowledgeSyncScheduler、多维 EvalRunner、TenantQuota、HermesStreamMapper | ✅ 已完成（1075 tests passed） |
 | S8 | 生产交付 | Prometheus metrics、Session 持久化、Admin eval 增强、真实 runner E2E、Plane/GitLab E2E | ✅ 已完成（1609 passed）；DevFlow Codex 真实 E2E 跑通、GitLab 反向 webhook、Hermes SDK 修复、Alembic 完善 |
-| S9 | 运维与扩展 | Admin UI、PathGuard `**` 递归修复、CI/CD SLO 门禁、多 Agent 协作、生产部署 | 🔶 进行中；已完成 DevFlow 四项稳定性修复；**P0 待解决**：(1) Codex adapter `--dangerously-bypass-approvals-and-sandbox` 需沙箱隔离替代方案；(2) DLQ 重试回调实际接通（`api/app.py:455` 当前为空操作）；**P1 待解决**：Hermes memory 持久化后端、SLO 指标持久化、Knowledge per-tenant 隔离、服务间鉴权 |
+| S9 | Hermes × DevFlow 反馈闭环生产化 | 修正文档状态差距、完成 DevFlow 强状态机（DB-backed DLQ + webhook retry）、完成 Hermes stream/HITL/trace 主链路、实现 FeedbackMiner 最小版本 | 🔶 进行中；已明确 DevFlow 与 Hermes 边界，完成首批 P0 稳定性加固（HITL 接通、DLQ 内存重试、Codex Sandbox 配置化）。下一步重点：收口 DevFlow 生产化（SqlDeadLetterQueue、Claude Code 真实 E2E）、打通 Runtime Feedback Intelligence。 |
 
 ## 2. 文档状态定义
 
