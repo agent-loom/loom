@@ -1,6 +1,6 @@
 # 实现与设计差距分析
 
-> Last verified against code: 2026-05-19（S8 DevFlow 真实 Codex Runner 端到端闭环完成 + S9 稳定性修复 4 项）
+> Last verified against code: 2026-05-19（S9 Runtime Feedback Intelligence 完整闭环 + DevFlowReconciler 全量对账）
 >
 > S8 新增完成：**DevFlow 真实 E2E 跑通**（Plane Webhook → DevFlowOrchestrator → GitLab 分支 + MR → Codex Runner 编码 → Plane 状态回写）、Hermes SDK import 修复（`run_agent.AIAgent` 公开别名）、Alembic `render_as_batch=True` + DATABASE_URL 环境变量支持 + 新迁移（复合索引 / UniqueConstraint / trace_events_json）、orchestrator `add_comment` 崩溃修复、CodingAgentRunner 失败状态回退（AI Developing）+ Plane 评论增强（MR 链接 / 图标）、GitLab 反向 webhook GITLAB_WEBHOOK_SECRET 配置、mock E2E 脚本（6 场景 23 断言）+ 真实 E2E 脚本（13/13 全通过）。
 >
@@ -8,7 +8,9 @@
 >
 > S9 P0/P1 修复（2026-05-19）：(1) 修复 `test_hermes_hitl.py` 并在 `_run_with_hermes()` 中真实接入 HITL Bridge 拦截器；(2) Hermes session_id 三段式命名支持 (`tenant_id:agent_id:session_id`)；(3) 增加 Hermes manifest extensions 字段 `require_sdk` 和 `fallback_on_error` 支持；(4) DevFlow DLQ 重试回调接通（动态路由 plane/gitlab）；(5) Codex 沙箱模式配置化（支持 bypass / docker）。
 >
-> 当前测试：**1635 passed, 1 skipped**；ruff clean。
+> S9 Runtime Feedback Intelligence（2026-05-19）：(1) FeedbackCollector（从 agent_runs 表采集运行时信号，按 status/error_json 分类 error/fallback/run）；(2) FeedbackMiner（按 agent_id + 错误模式聚合，≥3 同类错误生成 bug 提案，≥5 fallback 生成优化提案）；(3) ProposalGate（五维门控：agent_blocked > low_confidence > insufficient_impact > quota_exceeded > approved，日配额限制）；(4) PlanePublisher（approved 提案发布为 Plane Work Item，含 Markdown 描述和自定义属性）；(5) FeedbackIntelligenceService（全链路编排器，每阶段异常隔离）；(6) SqlDeadLetterQueue（SQLAlchemy 持久化 + TTL 清理）；(7) DevFlowReconciler.run_reconciliation() 全量状态对账（批量并发 5/batch）；(8) 44 个新增测试全通过。
+>
+> 当前测试：**1686 passed, 1 skipped**；ruff clean。
 >
 > 2026-05-17 review hardening 已补齐：持久化 API key 不再允许 `x-tenant-id` 覆盖绑定租户；AuthMiddleware 写入 `AuditContext`；`AgentRun` 显式携带 `tenant_id`；`/api/v1/agent-runs` 强制 read scope 并按租户过滤；Deployment repository 的 general fallback 仅匹配 `tenant_id IS NULL`；SQL Deployment save 改为 upsert。目标测试：`uv run pytest tests/unit/test_auth.py tests/unit/test_repository_contracts.py tests/unit/test_runtime_manager_queries.py tests/unit/test_api.py`，105 passed。
 
@@ -346,7 +348,7 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 
 - Plane project、state、label、custom property 初始化还没有自动化。
 - 当前只处理部分 webhook event 和字段，真实 Plane payload 兼容性还需要压测。
-- 没有 dead-letter queue，webhook 失败后不易恢复。
+- ~~没有 dead-letter queue，webhook 失败后不易恢复。~~ ✅ SqlDeadLetterQueue 已完成（SQLAlchemy 持久化 + TTL 清理 + 动态路由重试）
 - ~~没有把 GitLab pipeline/eval 状态稳定同步回 Plane。~~ ✅ 已完成（`GitLabEventHandler` 处理 pipeline running/failed/success 和 MR merged/closed 事件，幂等同步 Plane 状态）
 - ~~DevFlow 只有在 Plane base url、Plane key、GitLab base url、GitLab token、GitLab project id 都存在时才启用；缺少启动时配置诊断。~~ ✅ 已完成（`_validate_startup_config` 在启动时检查并报警）
 
@@ -550,6 +552,23 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 
 剩余差距：安全沙箱（Docker/Firecracker）、runner 执行日志持久化和回放
 
+### 4.5 Runtime Feedback Intelligence
+
+✅ **S9 已完成** — 运行时反馈数据自动挖掘为候选需求，经门控审批后发布到 Plane Backlog。
+
+已完成任务：
+
+1. ✅ FeedbackCollector（从 agent_runs 表采集信号，按 status/error_json 分类）
+2. ✅ FeedbackMiner（按 agent_id + 错误模式聚合，阈值触发 bug/优化提案，置信度计算）
+3. ✅ ProposalGate（五维门控：agent_blocked > low_confidence > insufficient_impact > quota_exceeded > approved）
+4. ✅ PlanePublisher（approved 提案发布为 Plane Work Item，含 Markdown 描述和自定义属性）
+5. ✅ FeedbackIntelligenceService（全链路编排器，每阶段异常隔离不向外传播）
+6. ✅ SqlDeadLetterQueue（SQLAlchemy 持久化 DLQ + TTL 清理 + 动态路由重试回调）
+7. ✅ DevFlowReconciler.run_reconciliation()（全量状态对账，批量并发 5/batch）
+8. ✅ 44 个新增测试覆盖 reconciler(11) + miner(11) + gate(9) + publisher(6) + service(7)
+
+剩余差距：FeedbackMiner 当前为纯 Python 聚合（按 error_message 精确匹配），缺少 LLM 语义分析和相似错误聚类；Reconciler 缺少 GitLab MR/Pipeline 状态交叉校验
+
 ### 阶段 4：生产治理
 
 目标：支撑 staging/prod 灰度、回滚、审计和多 agent 运维。
@@ -581,7 +600,7 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 
 ## 8. 总结
 
-当前项目已完成 S5 全部 4 个 Phase + DevFlow 集成生产化 + API 层生产化加固 + AsyncJobQueue/RedisJobQueue 异步/分布式执行 + WeaviateKnowledgeBackend 真实向量后端 + 生产基础设施（LangfuseTracer + SqlApiKeyStore + WebSocket 鉴权/背压 + Docker Compose + 生产验证脚本）+ S6 生产运营加固 + S7 多维评测/租户配额/ModelGateway/Hermes 流式映射 + S8 Phase 1（Prometheus metrics + Session 持久化 + Admin eval 增强），从 MVP 骨架演进为具备生产化能力的多 Agent 平台。1113 个测试通过，ruff clean。
+当前项目已完成 S5 全部 4 个 Phase + DevFlow 集成生产化 + API 层生产化加固 + AsyncJobQueue/RedisJobQueue 异步/分布式执行 + WeaviateKnowledgeBackend 真实向量后端 + 生产基础设施（LangfuseTracer + SqlApiKeyStore + WebSocket 鉴权/背压 + Docker Compose + 生产验证脚本）+ S6 生产运营加固 + S7 多维评测/租户配额/ModelGateway/Hermes 流式映射 + S8 Phase 1（Prometheus metrics + Session 持久化 + Admin eval 增强）+ S9（Runtime Feedback Intelligence 完整闭环 + SqlDeadLetterQueue + DevFlowReconciler 全量对账），从 MVP 骨架演进为具备生产化能力的多 Agent 平台。1686 个测试通过，ruff clean。
 
 S5 完成后的主要成果：Registry/Deployment 持久化、ArtifactStore Protocol 化、Hermes SDK 真接入（Spike B）、ModelGateway token/cost tracking、MCP Server、OpenTelemetry 集成、SemanticRouter 自动规则加载、HITL 审批门、Admin API。
 
@@ -602,6 +621,9 @@ S8 Phase 1 新增成果：Prometheus metrics 端点（GET /api/v1/admin/metrics 
 下一阶段（S8 Phase 2-6）建议优先：
 1. **真实 coding runner 端到端联调** — Claude Code CLI 或 Codex CLI 在真实 workspace 中执行，验证 prompt→code→commit 管线
 2. **Plane + GitLab 端到端联调** — 使用真实 Plane/GitLab 环境验证完整 DevFlow 管线
-3. **Hermes 深度集成** — memory 持久化 + 错误/重试映射 + HITL 事件映射
-4. **Admin UI** — 管理 agent、版本、灰度、DevFlow jobs、eval 报告
-5. **生产加固** — SLO 门禁、产物签名、服务间鉴权、S3 ArtifactStore、压力测试
+3. **Hermes 深度集成** — memory 持久化 + streaming + 错误/重试映射 + HITL 事件映射
+4. **GitLab Webhook 入口** — `POST /webhooks/gitlab` 处理 MR/Pipeline 事件，补全 DevFlow 代码→MR→Pipeline→合并 链路
+5. **Admin UI** — 管理 agent、版本、灰度、DevFlow jobs、eval 报告
+6. **生产加固** — SLO 门禁、产物签名、服务间鉴权、S3 ArtifactStore、压力测试
+
+S9 新增成果：Runtime Feedback Intelligence 完整闭环（FeedbackCollector 从 agent_runs 信号采集 + FeedbackMiner 按错误模式聚合生成候选提案 + ProposalGate 五维门控 + PlanePublisher 发布到 Plane Backlog + FeedbackIntelligenceService 全链路编排器）、SqlDeadLetterQueue 持久化 DLQ（SQLAlchemy + TTL 清理 + 动态路由重试）、DevFlowReconciler.run_reconciliation() 全量状态对账（批量并发 5/batch + 单 item 失败不阻塞）、service.py bug 修复（publish 只传 approved 列表而非全量 decisions）、44 个新增测试。

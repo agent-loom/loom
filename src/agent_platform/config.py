@@ -59,6 +59,7 @@ class Settings(BaseModel):
     plane_human_review_state_id: str | None = None
     plane_staging_state_id: str | None = None
     plane_done_state_id: str | None = None
+    plane_project_id: str | None = None
 
     gitlab_base_url: str | None = None
     gitlab_token: str | None = None
@@ -110,6 +111,7 @@ def get_settings() -> Settings:
         plane_human_review_state_id=os.getenv("PLANE_HUMAN_REVIEW_STATE_ID"),
         plane_staging_state_id=os.getenv("PLANE_STAGING_STATE_ID"),
         plane_done_state_id=os.getenv("PLANE_DONE_STATE_ID"),
+        plane_project_id=os.getenv("PLANE_PROJECT_ID"),
         gitlab_base_url=os.getenv("GITLAB_BASE_URL"),
         gitlab_token=os.getenv("GITLAB_TOKEN"),
         gitlab_project_id=os.getenv("GITLAB_PROJECT_ID"),

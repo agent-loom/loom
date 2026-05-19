@@ -7,10 +7,12 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agent_platform.api.tenant_quota import TenantQuotaManager
+    from agent_platform.devflow.reconcile import DevFlowReconciler
     from agent_platform.devflow.runner.execution_log import ExecutionLogRepository
     from agent_platform.devflow.runner.runner import CodingAgentRunner
     from agent_platform.devflow.state_sync import DevFlowStateSync
     from agent_platform.evals.runner import EvalRunner
+    from agent_platform.feedback.service import FeedbackIntelligenceService
     from agent_platform.governance.slo import SLOGate
     from agent_platform.observability.metrics import MetricsCollector
     from agent_platform.persistence.repositories import (
@@ -50,3 +52,5 @@ class AdminDeps:
     coding_job_repo: CodingJobRepository | None = None
     coding_runner: CodingAgentRunner | None = None
     definition_repo: AgentDefinitionRepository | None = None
+    feedback_service: FeedbackIntelligenceService | None = None
+    reconciler: DevFlowReconciler | None = None

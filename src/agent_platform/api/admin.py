@@ -902,7 +902,7 @@ async def list_jobs(
     deps = _deps(request)
     if deps.execution_log_repo is None:
         raise HTTPException(status_code=501, detail="execution log repo not configured")
-    job_ids = deps.execution_log_repo.list_jobs_with_logs(limit=limit)
+    job_ids = await deps.execution_log_repo.list_jobs_with_logs(limit=limit)
     return {"jobs": job_ids, "count": len(job_ids)}
 
 
@@ -926,7 +926,7 @@ async def get_job_logs(
                 status_code=400,
                 detail=f"无效的 stream 类型: {stream}，可选: stdout, stderr",
             ) from None
-    entries = deps.execution_log_repo.get_logs(job_id, stream=log_stream)
+    entries = await deps.execution_log_repo.get_logs(job_id, stream=log_stream)
     return {
         "job_id": job_id,
         "entries": [e.model_dump(mode="json") for e in entries],
@@ -948,4 +948,51 @@ async def cancel_job(
         await adapter.cancel()
         return {"status": "cancel_requested", "job_id": job_id}
     raise HTTPException(status_code=501, detail="adapter 不支持取消")
+
+
+# ---------------------------------------------------------------------------
+# Feedback Intelligence
+# ---------------------------------------------------------------------------
+
+
+@router.post("/feedback-intelligence/run")
+async def run_feedback_intelligence(
+    request: Request,
+    hours: int = Query(default=24, ge=1, le=168),
+) -> dict[str, Any]:
+    """手动触发一次反馈智能闭环。"""
+    deps = _deps(request)
+    if deps.feedback_service is None:
+        raise HTTPException(
+            status_code=501, detail="feedback intelligence service not configured"
+        )
+    result = await deps.feedback_service.run(hours=hours)
+    return {
+        "signals_collected": result.signals_collected,
+        "proposals_generated": result.proposals_generated,
+        "proposals_approved": result.proposals_approved,
+        "proposals_rejected": result.proposals_rejected,
+        "work_items_created": result.work_items_created,
+        "rejection_reasons": result.rejection_reasons,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Reconciler
+# ---------------------------------------------------------------------------
+
+
+@router.post("/reconcile")
+async def run_reconciliation(
+    request: Request,
+    project_id: str = Query(..., description="Plane project ID"),
+) -> dict[str, Any]:
+    """手动触发一次 DevFlow 状态对账。"""
+    deps = _deps(request)
+    if deps.reconciler is None:
+        raise HTTPException(
+            status_code=501, detail="reconciler not configured"
+        )
+    summary = await deps.reconciler.run_reconciliation(project_id)
+    return summary
 

@@ -31,12 +31,17 @@ from agent_platform.persistence.tables import (
     CodingJobRow,
     DeploymentAuditEventRow,
     EvalRunRow,
+    ExecutionLogRow,
     RoutingDecisionRow,
     WebhookDeliveryRow,
     DeadLetterEntryModel,
 )
 from agent_platform.registry.deployment import DeploymentEvent
 from agent_platform.webhooks.dead_letter import DeadLetterEntry, DeadLetterQueue
+from agent_platform.devflow.runner.execution_log import (
+    ExecutionLogEntry,
+    LogStream,
+)
 
 
 def _fill_audit(row: Any) -> None:
@@ -1353,3 +1358,72 @@ class SqlDeadLetterQueue:
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
+
+
+# ------------------------------------------------------------------
+# ExecutionLog
+# ------------------------------------------------------------------
+
+
+class SqlExecutionLogRepository:
+    """Runner 执行日志的 SQL 存储实现。"""
+
+    def __init__(
+        self, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        self._sf = session_factory
+
+    async def record(self, entry: ExecutionLogEntry) -> None:
+        row = ExecutionLogRow(
+            job_id=entry.job_id,
+            stream=entry.stream.value,
+            content=entry.content,
+            adapter_name=entry.adapter_name,
+            logged_at=entry.timestamp,
+        )
+        _fill_audit(row)
+        async with self._sf() as session:
+            session.add(row)
+            await session.commit()
+
+    async def get_logs(
+        self,
+        job_id: str,
+        stream: LogStream | None = None,
+    ) -> list[ExecutionLogEntry]:
+        stmt = (
+            select(ExecutionLogRow)
+            .where(ExecutionLogRow.job_id == job_id)
+        )
+        if stream is not None:
+            stmt = stmt.where(ExecutionLogRow.stream == stream.value)
+        stmt = stmt.order_by(ExecutionLogRow.logged_at.asc())
+
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+
+        return [
+            ExecutionLogEntry(
+                job_id=r.job_id,
+                timestamp=r.logged_at,
+                stream=LogStream(r.stream),
+                content=r.content,
+                adapter_name=r.adapter_name,
+            )
+            for r in rows
+        ]
+
+    async def list_jobs_with_logs(self, limit: int = 50) -> list[str]:
+        stmt = (
+            select(
+                ExecutionLogRow.job_id,
+                func.max(ExecutionLogRow.logged_at).label("last_active"),
+            )
+            .group_by(ExecutionLogRow.job_id)
+            .order_by(func.max(ExecutionLogRow.logged_at).desc())
+            .limit(limit)
+        )
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            return [row[0] for row in result.all()]

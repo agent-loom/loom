@@ -100,7 +100,7 @@ class FeedbackIntelligenceService:
 
         # 4. 发布到 Plane
         try:
-            created = await self._publisher.publish(decisions)
+            created = await self._publisher.publish(approved)
             result.work_items_created = len(created)
             logger.info("已创建 %d 个 Plane Work Item", result.work_items_created)
         except Exception:

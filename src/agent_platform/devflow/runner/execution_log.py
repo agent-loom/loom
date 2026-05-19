@@ -35,11 +35,11 @@ class ExecutionLogEntry(BaseModel):
 class ExecutionLogRepository(Protocol):
     """执行日志仓库协议，定义记录和查询接口。"""
 
-    def record(self, entry: ExecutionLogEntry) -> None:
+    async def record(self, entry: ExecutionLogEntry) -> None:
         """记录一条日志。"""
         ...
 
-    def get_logs(
+    async def get_logs(
         self,
         job_id: str,
         stream: LogStream | None = None,
@@ -47,7 +47,7 @@ class ExecutionLogRepository(Protocol):
         """获取指定 job 的日志，可按 stream 类型过滤。"""
         ...
 
-    def list_jobs_with_logs(self, limit: int = 50) -> list[str]:
+    async def list_jobs_with_logs(self, limit: int = 50) -> list[str]:
         """列出存在日志记录的 job_id 列表（按最近活跃排序）。"""
         ...
 
@@ -64,12 +64,12 @@ class InMemoryExecutionLogRepository:
         # 记录每个 job 最后一次活跃时间，用于排序
         self._last_active: dict[str, datetime] = {}
 
-    def record(self, entry: ExecutionLogEntry) -> None:
+    async def record(self, entry: ExecutionLogEntry) -> None:
         """记录一条日志到内存。"""
         self._logs[entry.job_id].append(entry)
         self._last_active[entry.job_id] = entry.timestamp
 
-    def get_logs(
+    async def get_logs(
         self,
         job_id: str,
         stream: LogStream | None = None,
@@ -80,7 +80,7 @@ class InMemoryExecutionLogRepository:
             entries = [e for e in entries if e.stream == stream]
         return list(entries)
 
-    def list_jobs_with_logs(self, limit: int = 50) -> list[str]:
+    async def list_jobs_with_logs(self, limit: int = 50) -> list[str]:
         """列出存在日志记录的 job_id（按最后活跃时间降序排列）。"""
         sorted_jobs = sorted(
             self._last_active.items(),
@@ -89,7 +89,7 @@ class InMemoryExecutionLogRepository:
         )
         return [job_id for job_id, _ in sorted_jobs[:limit]]
 
-    def clear(self) -> None:
+    async def clear(self) -> None:
         """清空所有日志（便于测试）。"""
         self._logs.clear()
         self._last_active.clear()
@@ -115,7 +115,7 @@ class FileExecutionLogRepository:
         """获取 job 的日志目录。"""
         return self._base_dir / job_id
 
-    def record(self, entry: ExecutionLogEntry) -> None:
+    async def record(self, entry: ExecutionLogEntry) -> None:
         """追加写入日志到文件。"""
         job_dir = self._job_dir(entry.job_id)
         job_dir.mkdir(parents=True, exist_ok=True)
@@ -134,7 +134,7 @@ class FileExecutionLogRepository:
             f.write(entry.model_dump_json())
             f.write("\n")
 
-    def get_logs(
+    async def get_logs(
         self,
         job_id: str,
         stream: LogStream | None = None,
@@ -159,7 +159,7 @@ class FileExecutionLogRepository:
                 logger.warning("解析日志行失败: %s", line[:100])
         return entries
 
-    def list_jobs_with_logs(self, limit: int = 50) -> list[str]:
+    async def list_jobs_with_logs(self, limit: int = 50) -> list[str]:
         """列出存在日志的 job_id（按目录修改时间降序排列）。"""
         if not self._base_dir.exists():
             return []

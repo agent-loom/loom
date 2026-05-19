@@ -78,8 +78,8 @@ class TestExecutionLogWiring:
         job = await runner.run(task)
 
         assert job.state == JobState.SUCCEEDED
-        stdout_logs = log_repo.get_logs(job.job_id, stream=LogStream.STDOUT)
-        stderr_logs = log_repo.get_logs(job.job_id, stream=LogStream.STDERR)
+        stdout_logs = await log_repo.get_logs(job.job_id, stream=LogStream.STDOUT)
+        stderr_logs = await log_repo.get_logs(job.job_id, stream=LogStream.STDERR)
         assert len(stdout_logs) == 1
         assert stdout_logs[0].content == "代码已生成"
         assert stdout_logs[0].adapter_name == "mock"
@@ -200,33 +200,34 @@ class TestOrchestratorStateSyncWiring:
         assert mock_state_sync.sync_to_plane.call_count >= 1
 
 
+@pytest.mark.asyncio
 class TestExecutionLogRepository:
     """InMemoryExecutionLogRepository 扩展测试。"""
 
-    def test_list_jobs_ordering(self):
+    async def test_list_jobs_ordering(self):
         repo = InMemoryExecutionLogRepository()
-        repo.record(ExecutionLogEntry(
+        await repo.record(ExecutionLogEntry(
             job_id="job-a", stream=LogStream.STDOUT, content="first",
         ))
-        repo.record(ExecutionLogEntry(
+        await repo.record(ExecutionLogEntry(
             job_id="job-b", stream=LogStream.STDOUT, content="second",
         ))
-        repo.record(ExecutionLogEntry(
+        await repo.record(ExecutionLogEntry(
             job_id="job-a", stream=LogStream.STDERR, content="third",
         ))
 
-        jobs = repo.list_jobs_with_logs()
+        jobs = await repo.list_jobs_with_logs()
         assert jobs[0] == "job-a"
 
-    def test_filter_by_stream(self):
+    async def test_filter_by_stream(self):
         repo = InMemoryExecutionLogRepository()
-        repo.record(ExecutionLogEntry(
+        await repo.record(ExecutionLogEntry(
             job_id="job-x", stream=LogStream.STDOUT, content="out",
         ))
-        repo.record(ExecutionLogEntry(
+        await repo.record(ExecutionLogEntry(
             job_id="job-x", stream=LogStream.STDERR, content="err",
         ))
 
-        stdout = repo.get_logs("job-x", stream=LogStream.STDOUT)
+        stdout = await repo.get_logs("job-x", stream=LogStream.STDOUT)
         assert len(stdout) == 1
         assert stdout[0].content == "out"

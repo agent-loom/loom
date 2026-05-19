@@ -242,7 +242,7 @@ class CodingAgentRunner:
             job.invocations.append(invocation)
             last_result = adapter_result
 
-            self._record_adapter_output(job.job_id, invocation, adapter_result)
+            await self._record_adapter_output(job.job_id, invocation, adapter_result)
 
             if adapter_result.success:
                 return adapter_result
@@ -408,7 +408,7 @@ class CodingAgentRunner:
 
         return "\n".join(parts)
 
-    def _record_adapter_output(
+    async def _record_adapter_output(
         self,
         job_id: str,
         invocation: RunnerInvocation,
@@ -419,14 +419,14 @@ class CodingAgentRunner:
             return
         try:
             if result.stdout:
-                self._log_repo.record(ExecutionLogEntry(
+                await self._log_repo.record(ExecutionLogEntry(
                     job_id=job_id,
                     stream=LogStream.STDOUT,
                     content=result.stdout,
                     adapter_name=invocation.adapter_type,
                 ))
             if result.stderr:
-                self._log_repo.record(ExecutionLogEntry(
+                await self._log_repo.record(ExecutionLogEntry(
                     job_id=job_id,
                     stream=LogStream.STDERR,
                     content=result.stderr,

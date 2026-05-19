@@ -108,18 +108,21 @@ class DevFlowReconciler:
                 except Exception:
                     logger.debug("获取 MR %s 的 pipeline 失败", mr_iid, exc_info=True)
 
-    async def run_reconciliation(self, project_id: str) -> None:
+    async def run_reconciliation(self, project_id: str) -> dict[str, Any]:
         """全量对账指定项目下的 DevFlow 工作项。
 
         从 Plane 拉取所有工作项，过滤出 DevFlow 关心的中间状态项，
         每批最多 5 个并发调用 reconcile_item()，并汇总日志。
+
+        Returns:
+            对账结果摘要字典。
         """
         # 1. 从 Plane 拉取所有工作项
         try:
             response = await self.plane.list_work_items(project_id)
         except Exception:
             logger.error("对账失败：无法从 Plane 拉取项目 %s 的工作项", project_id, exc_info=True)
-            return
+            return {"status": "error", "total_candidates": 0, "processed": 0}
 
         results = response.get("results", [])
         logger.info("对账开始：项目 %s 共获取到 %d 个工作项", project_id, len(results))
@@ -177,3 +180,8 @@ class DevFlowReconciler:
             total,
             corrected,
         )
+        return {
+            "status": "completed",
+            "total_candidates": total,
+            "processed": corrected,
+        }

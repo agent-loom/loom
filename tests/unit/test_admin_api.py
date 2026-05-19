@@ -71,13 +71,14 @@ def test_get_agent_unknown_returns_404():
 
 
 def test_admin_jobs_lists_execution_log_jobs():
+    import asyncio
     repo = InMemoryExecutionLogRepository()
-    repo.record(ExecutionLogEntry(
+    asyncio.get_event_loop().run_until_complete(repo.record(ExecutionLogEntry(
         job_id="job-admin-1",
         stream=LogStream.STDOUT,
         content="runner output",
         adapter_name="codex",
-    ))
+    )))
     previous = app.state.admin_deps.execution_log_repo
     app.state.admin_deps.execution_log_repo = repo
     try:
@@ -91,19 +92,20 @@ def test_admin_jobs_lists_execution_log_jobs():
 
 
 def test_admin_job_logs_can_filter_by_stream():
+    import asyncio
     repo = InMemoryExecutionLogRepository()
-    repo.record(ExecutionLogEntry(
+    asyncio.get_event_loop().run_until_complete(repo.record(ExecutionLogEntry(
         job_id="job-admin-2",
         stream=LogStream.STDOUT,
         content="stdout output",
         adapter_name="claude_code",
-    ))
-    repo.record(ExecutionLogEntry(
+    )))
+    asyncio.get_event_loop().run_until_complete(repo.record(ExecutionLogEntry(
         job_id="job-admin-2",
         stream=LogStream.STDERR,
         content="stderr output",
         adapter_name="claude_code",
-    ))
+    )))
     previous = app.state.admin_deps.execution_log_repo
     app.state.admin_deps.execution_log_repo = repo
     try:

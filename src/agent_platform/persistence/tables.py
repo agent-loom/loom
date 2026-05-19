@@ -382,3 +382,16 @@ class DeadLetterEntryModel(AuditMixin, Base):
     max_retries: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+
+
+class ExecutionLogRow(AuditMixin, Base):
+    """Runner 执行日志表行模型。"""
+    __tablename__ = "execution_logs"
+
+    job_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    stream: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    adapter_name: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    logged_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )

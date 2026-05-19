@@ -496,7 +496,15 @@ async def _app_lifespan(app: FastAPI):
         except Exception:
             logger.warning("SemanticRouter 从 registry 加载规则失败", exc_info=True)
 
+    # DevFlow 调度器
+    _devflow_scheduler = getattr(app.state, "_devflow_scheduler", None)
+    if _devflow_scheduler is not None:
+        await _devflow_scheduler.start()
+
     yield
+
+    if _devflow_scheduler is not None:
+        await _devflow_scheduler.stop()
 
     if _knowledge_scheduler is not None:
         await _knowledge_scheduler.stop()
@@ -911,15 +919,19 @@ def create_app() -> FastAPI:
             FileExecutionLogRepository,
             InMemoryExecutionLogRepository,
         )
-        log_base = (
-            Path(settings.devflow_workspace_base_dir) / "_logs"
-            if settings.devflow_workspace_base_dir
-            else None
-        )
-        execution_log_repo = (
-            FileExecutionLogRepository(log_base) if log_base
-            else InMemoryExecutionLogRepository()
-        )
+        if db_session_factory is not None:
+            from agent_platform.persistence.sql import SqlExecutionLogRepository
+            execution_log_repo = SqlExecutionLogRepository(db_session_factory)
+        else:
+            log_base = (
+                Path(settings.devflow_workspace_base_dir) / "_logs"
+                if settings.devflow_workspace_base_dir
+                else None
+            )
+            execution_log_repo = (
+                FileExecutionLogRepository(log_base) if log_base
+                else InMemoryExecutionLogRepository()
+            )
 
         workspace_manager = WorkspaceManager(base_dir=workspace_base)
         adapter = create_adapter(
@@ -978,6 +990,29 @@ def create_app() -> FastAPI:
     # GitLab reverse sync handler
     gitlab_event_handler: GitLabEventHandler | None = None
     if devflow is not None:
+
+        async def _on_pipeline_failed(
+            *, project_id: str, work_item_id: str, ref: str
+        ) -> None:
+            """Pipeline 失败后重新触发 coding runner。"""
+            logger.info(
+                "Pipeline 失败回调: 重新触发 runner, project=%s item=%s ref=%s",
+                project_id, work_item_id, ref,
+            )
+            try:
+                work_item = await plane_adapter.get_work_item(
+                    project_id, work_item_id
+                )
+                payload = {
+                    "event": "work_item.updated",
+                    "data": work_item,
+                }
+                await devflow.handle_webhook_event("work_item.updated", payload)
+            except Exception:
+                logger.warning(
+                    "Pipeline 失败重跑触发异常: item=%s", work_item_id, exc_info=True
+                )
+
         gitlab_event_handler = GitLabEventHandler(
             plane=plane_adapter,
             webhook_repo=webhook_repo,
@@ -986,6 +1021,7 @@ def create_app() -> FastAPI:
             staging_state_id=settings.plane_staging_state_id,
             done_state_id=settings.plane_done_state_id,
             ai_developing_state_id=settings.plane_ai_developing_state_id,
+            on_pipeline_failed=_on_pipeline_failed,
         )
 
     app.state.devflow_orchestrator = devflow
@@ -997,6 +1033,50 @@ def create_app() -> FastAPI:
         app.state.admin_deps.execution_log_repo = execution_log_repo
         app.state.admin_deps.coding_job_repo = coding_job_repo
         app.state.admin_deps.coding_runner = coding_runner
+
+        # DevFlow Reconciler
+        from agent_platform.devflow.reconcile import DevFlowReconciler
+        reconciler = DevFlowReconciler(
+            state_sync=devflow_state_sync,
+            plane=plane_adapter,
+            gitlab=gitlab_adapter,
+            gitlab_project_id=settings.gitlab_project_id,
+        )
+        app.state.admin_deps.reconciler = reconciler
+
+    # Feedback Intelligence Service
+    if db_session_factory is not None:
+        from agent_platform.feedback.collector import FeedbackCollector
+        from agent_platform.feedback.gate import ProposalGate
+        from agent_platform.feedback.miner import FeedbackMiner
+        from agent_platform.feedback.publisher import PlanePublisher
+        from agent_platform.feedback.service import FeedbackIntelligenceService
+
+        feedback_collector = FeedbackCollector(session_factory=db_session_factory)
+        feedback_miner = FeedbackMiner()
+        feedback_gate = ProposalGate()
+        feedback_publisher = PlanePublisher(
+            plane=plane_adapter,
+            project_id=settings.plane_project_id or "",
+        )
+        feedback_service = FeedbackIntelligenceService(
+            collector=feedback_collector,
+            miner=feedback_miner,
+            gate=feedback_gate,
+            publisher=feedback_publisher,
+        )
+        app.state.admin_deps.feedback_service = feedback_service
+
+    # DevFlow 后台调度器
+    from agent_platform.devflow.scheduler import DevFlowScheduler
+    scheduler = DevFlowScheduler(
+        reconciler=getattr(app.state.admin_deps, "reconciler", None),
+        feedback_service=getattr(app.state.admin_deps, "feedback_service", None),
+        project_id=settings.plane_project_id,
+        reconcile_interval=300,
+        feedback_interval=3600,
+    )
+    app.state._devflow_scheduler = scheduler
 
     @app.get("/health")
     async def health() -> dict[str, str]:

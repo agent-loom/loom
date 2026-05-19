@@ -1,3 +1,7 @@
+from agent_platform.observability.fastapi_instrumentation import (
+    instrument_app,
+    uninstrument_app,
+)
 from agent_platform.observability.instrumentation import (
     instrument_agent_run,
     instrument_route,
@@ -26,8 +30,10 @@ __all__ = [
     "configure_tracing",
     "get_tracer",
     "instrument_agent_run",
+    "instrument_app",
     "instrument_route",
     "instrument_tool_call",
     "setup_logging",
     "traced",
+    "uninstrument_app",
 ]

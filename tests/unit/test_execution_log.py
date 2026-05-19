@@ -70,49 +70,52 @@ class TestProtocolConformance:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestInMemoryExecutionLogRepository:
-    def test_record_and_get_logs(self, mem_repo):
+    async def test_record_and_get_logs(self, mem_repo):
         """验证记录日志后可以查询到。"""
         entry = _make_entry()
-        mem_repo.record(entry)
+        await mem_repo.record(entry)
 
-        logs = mem_repo.get_logs("job-001")
+        logs = await mem_repo.get_logs("job-001")
         assert len(logs) == 1
         assert logs[0].content == "hello world"
         assert logs[0].stream == LogStream.STDOUT
 
-    def test_get_logs_empty(self, mem_repo):
+    async def test_get_logs_empty(self, mem_repo):
         """验证查询不存在的 job_id 返回空列表。"""
-        logs = mem_repo.get_logs("nonexistent")
+        logs = await mem_repo.get_logs("nonexistent")
         assert logs == []
 
-    def test_filter_by_stream(self, mem_repo):
+    async def test_filter_by_stream(self, mem_repo):
         """验证按 stream 过滤日志。"""
-        mem_repo.record(_make_entry(stream=LogStream.STDOUT, content="out1"))
-        mem_repo.record(_make_entry(stream=LogStream.STDERR, content="err1"))
-        mem_repo.record(_make_entry(stream=LogStream.STDOUT, content="out2"))
+        await mem_repo.record(_make_entry(stream=LogStream.STDOUT, content="out1"))
+        await mem_repo.record(_make_entry(stream=LogStream.STDERR, content="err1"))
+        await mem_repo.record(_make_entry(stream=LogStream.STDOUT, content="out2"))
 
-        stdout_logs = mem_repo.get_logs("job-001", stream=LogStream.STDOUT)
+        stdout_logs = await mem_repo.get_logs("job-001", stream=LogStream.STDOUT)
         assert len(stdout_logs) == 2
         assert all(e.stream == LogStream.STDOUT for e in stdout_logs)
 
-        stderr_logs = mem_repo.get_logs("job-001", stream=LogStream.STDERR)
+        stderr_logs = await mem_repo.get_logs("job-001", stream=LogStream.STDERR)
         assert len(stderr_logs) == 1
         assert stderr_logs[0].content == "err1"
 
-    def test_multiple_jobs(self, mem_repo):
+    async def test_multiple_jobs(self, mem_repo):
         """验证多个 job 的日志互不干扰。"""
-        mem_repo.record(_make_entry(job_id="job-001", content="log1"))
-        mem_repo.record(_make_entry(job_id="job-002", content="log2"))
+        await mem_repo.record(_make_entry(job_id="job-001", content="log1"))
+        await mem_repo.record(_make_entry(job_id="job-002", content="log2"))
 
-        assert len(mem_repo.get_logs("job-001")) == 1
-        assert len(mem_repo.get_logs("job-002")) == 1
-        assert mem_repo.get_logs("job-001")[0].content == "log1"
-        assert mem_repo.get_logs("job-002")[0].content == "log2"
+        logs1 = await mem_repo.get_logs("job-001")
+        logs2 = await mem_repo.get_logs("job-002")
+        assert len(logs1) == 1
+        assert len(logs2) == 1
+        assert logs1[0].content == "log1"
+        assert logs2[0].content == "log2"
 
-    def test_list_jobs_with_logs(self, mem_repo):
+    async def test_list_jobs_with_logs(self, mem_repo):
         """验证列出有日志的 job_id（按时间倒序）。"""
-        mem_repo.record(
+        await mem_repo.record(
             ExecutionLogEntry(
                 job_id="job-old",
                 timestamp=datetime(2024, 1, 1, tzinfo=UTC),
@@ -120,7 +123,7 @@ class TestInMemoryExecutionLogRepository:
                 content="old",
             )
         )
-        mem_repo.record(
+        await mem_repo.record(
             ExecutionLogEntry(
                 job_id="job-new",
                 timestamp=datetime(2024, 6, 1, tzinfo=UTC),
@@ -129,13 +132,13 @@ class TestInMemoryExecutionLogRepository:
             )
         )
 
-        jobs = mem_repo.list_jobs_with_logs()
+        jobs = await mem_repo.list_jobs_with_logs()
         assert jobs == ["job-new", "job-old"]
 
-    def test_list_jobs_with_limit(self, mem_repo):
+    async def test_list_jobs_with_limit(self, mem_repo):
         """验证 limit 参数限制返回数量。"""
         for i in range(10):
-            mem_repo.record(
+            await mem_repo.record(
                 ExecutionLogEntry(
                     job_id=f"job-{i:03d}",
                     timestamp=datetime(2024, 1, 1 + i, tzinfo=UTC),
@@ -144,24 +147,27 @@ class TestInMemoryExecutionLogRepository:
                 )
             )
 
-        jobs = mem_repo.list_jobs_with_logs(limit=3)
+        jobs = await mem_repo.list_jobs_with_logs(limit=3)
         assert len(jobs) == 3
 
-    def test_clear(self, mem_repo):
+    async def test_clear(self, mem_repo):
         """验证清空功能。"""
-        mem_repo.record(_make_entry())
-        assert len(mem_repo.get_logs("job-001")) == 1
+        await mem_repo.record(_make_entry())
+        logs = await mem_repo.get_logs("job-001")
+        assert len(logs) == 1
 
-        mem_repo.clear()
-        assert len(mem_repo.get_logs("job-001")) == 0
-        assert mem_repo.list_jobs_with_logs() == []
+        await mem_repo.clear()
+        logs = await mem_repo.get_logs("job-001")
+        assert len(logs) == 0
+        jobs = await mem_repo.list_jobs_with_logs()
+        assert jobs == []
 
-    def test_adapter_name_preserved(self, mem_repo):
+    async def test_adapter_name_preserved(self, mem_repo):
         """验证 adapter_name 字段被正确保存。"""
         entry = _make_entry(adapter_name="claude-code")
-        mem_repo.record(entry)
+        await mem_repo.record(entry)
 
-        logs = mem_repo.get_logs("job-001")
+        logs = await mem_repo.get_logs("job-001")
         assert logs[0].adapter_name == "claude-code"
 
 
@@ -170,95 +176,96 @@ class TestInMemoryExecutionLogRepository:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestFileExecutionLogRepository:
-    def test_record_creates_files(self, file_repo, tmp_path):
+    async def test_record_creates_files(self, file_repo, tmp_path):
         """验证记录日志后在磁盘创建了正确的文件。"""
         entry = _make_entry()
-        file_repo.record(entry)
+        await file_repo.record(entry)
 
         job_dir = tmp_path / ".logs" / "job-001"
         assert job_dir.exists()
         assert (job_dir / "stdout.log").exists()
         assert (job_dir / "entries.jsonl").exists()
 
-    def test_record_and_get_logs(self, file_repo):
+    async def test_record_and_get_logs(self, file_repo):
         """验证文件仓库的记录和查询。"""
         entry = _make_entry(content="line1")
-        file_repo.record(entry)
+        await file_repo.record(entry)
 
-        logs = file_repo.get_logs("job-001")
+        logs = await file_repo.get_logs("job-001")
         assert len(logs) == 1
         assert logs[0].content == "line1"
 
-    def test_get_logs_empty(self, file_repo):
+    async def test_get_logs_empty(self, file_repo):
         """验证查询不存在的 job_id 返回空列表。"""
-        assert file_repo.get_logs("nonexistent") == []
+        assert await file_repo.get_logs("nonexistent") == []
 
-    def test_filter_by_stream(self, file_repo):
+    async def test_filter_by_stream(self, file_repo):
         """验证文件仓库的 stream 过滤。"""
-        file_repo.record(_make_entry(stream=LogStream.STDOUT, content="stdout-line"))
-        file_repo.record(_make_entry(stream=LogStream.STDERR, content="stderr-line"))
+        await file_repo.record(_make_entry(stream=LogStream.STDOUT, content="stdout-line"))
+        await file_repo.record(_make_entry(stream=LogStream.STDERR, content="stderr-line"))
 
-        stdout = file_repo.get_logs("job-001", stream=LogStream.STDOUT)
+        stdout = await file_repo.get_logs("job-001", stream=LogStream.STDOUT)
         assert len(stdout) == 1
         assert stdout[0].content == "stdout-line"
 
-        stderr = file_repo.get_logs("job-001", stream=LogStream.STDERR)
+        stderr = await file_repo.get_logs("job-001", stream=LogStream.STDERR)
         assert len(stderr) == 1
         assert stderr[0].content == "stderr-line"
 
-    def test_stream_text_files(self, file_repo, tmp_path):
+    async def test_stream_text_files(self, file_repo, tmp_path):
         """验证纯文本日志文件的内容。"""
-        file_repo.record(_make_entry(stream=LogStream.STDOUT, content="hello"))
-        file_repo.record(_make_entry(stream=LogStream.STDOUT, content="world"))
+        await file_repo.record(_make_entry(stream=LogStream.STDOUT, content="hello"))
+        await file_repo.record(_make_entry(stream=LogStream.STDOUT, content="world"))
 
         text = file_repo.get_stream_text("job-001", LogStream.STDOUT)
         assert "hello" in text
         assert "world" in text
 
-    def test_stderr_file_created(self, file_repo, tmp_path):
+    async def test_stderr_file_created(self, file_repo, tmp_path):
         """验证 stderr 日志文件的创建。"""
-        file_repo.record(_make_entry(stream=LogStream.STDERR, content="error msg"))
+        await file_repo.record(_make_entry(stream=LogStream.STDERR, content="error msg"))
 
         job_dir = tmp_path / ".logs" / "job-001"
         assert (job_dir / "stderr.log").exists()
         assert "error msg" in (job_dir / "stderr.log").read_text(encoding="utf-8")
 
-    def test_list_jobs_with_logs(self, file_repo):
+    async def test_list_jobs_with_logs(self, file_repo):
         """验证列出有日志的 job_id。"""
-        file_repo.record(_make_entry(job_id="job-aaa", content="a"))
-        file_repo.record(_make_entry(job_id="job-bbb", content="b"))
+        await file_repo.record(_make_entry(job_id="job-aaa", content="a"))
+        await file_repo.record(_make_entry(job_id="job-bbb", content="b"))
 
-        jobs = file_repo.list_jobs_with_logs()
+        jobs = await file_repo.list_jobs_with_logs()
         assert set(jobs) == {"job-aaa", "job-bbb"}
 
-    def test_list_jobs_with_limit(self, file_repo):
+    async def test_list_jobs_with_limit(self, file_repo):
         """验证 limit 参数限制返回数量。"""
         for i in range(5):
-            file_repo.record(_make_entry(job_id=f"job-{i:03d}", content=f"log-{i}"))
+            await file_repo.record(_make_entry(job_id=f"job-{i:03d}", content=f"log-{i}"))
 
-        jobs = file_repo.list_jobs_with_logs(limit=2)
+        jobs = await file_repo.list_jobs_with_logs(limit=2)
         assert len(jobs) == 2
 
-    def test_multiple_entries_append(self, file_repo):
+    async def test_multiple_entries_append(self, file_repo):
         """验证多次写入同一 job 会追加而非覆盖。"""
-        file_repo.record(_make_entry(content="line1"))
-        file_repo.record(_make_entry(content="line2"))
-        file_repo.record(_make_entry(content="line3"))
+        await file_repo.record(_make_entry(content="line1"))
+        await file_repo.record(_make_entry(content="line2"))
+        await file_repo.record(_make_entry(content="line3"))
 
-        logs = file_repo.get_logs("job-001")
+        logs = await file_repo.get_logs("job-001")
         assert len(logs) == 3
         contents = [e.content for e in logs]
         assert contents == ["line1", "line2", "line3"]
 
-    def test_get_stream_text_empty(self, file_repo):
+    async def test_get_stream_text_empty(self, file_repo):
         """验证不存在的 stream 返回空字符串。"""
         text = file_repo.get_stream_text("nonexistent", LogStream.STDOUT)
         assert text == ""
 
-    def test_jsonl_format(self, file_repo, tmp_path):
+    async def test_jsonl_format(self, file_repo, tmp_path):
         """验证 entries.jsonl 文件格式正确。"""
-        file_repo.record(_make_entry(content="test-content"))
+        await file_repo.record(_make_entry(content="test-content"))
 
         jsonl_path = tmp_path / ".logs" / "job-001" / "entries.jsonl"
         lines = jsonl_path.read_text(encoding="utf-8").strip().split("\n")

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hmac
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from agent_platform.integrations.plane.adapter import PlaneAdapter
 from agent_platform.persistence.repositories import WebhookDeliveryRepository
@@ -55,6 +55,7 @@ class GitLabEventHandler:
         staging_state_id: str | None = None,
         done_state_id: str | None = None,
         ai_developing_state_id: str | None = None,
+        on_pipeline_failed: Callable[..., Awaitable[Any]] | None = None,
     ):
         self.plane = plane
         self.webhook_repo = webhook_repo
@@ -65,6 +66,7 @@ class GitLabEventHandler:
             "done": done_state_id,
             "ai_developing": ai_developing_state_id,
         }
+        self._on_pipeline_failed = on_pipeline_failed
 
     async def handle_event(
         self,
@@ -127,6 +129,20 @@ class GitLabEventHandler:
             await self._update_plane_state(project_id, work_item_id, target_state, action)
             comment = f"<p>GitLab Pipeline <strong>{status}</strong> on <code>{ref}</code></p>"
             await self._add_plane_comment(project_id, work_item_id, comment)
+
+            if status == "failed" and self._on_pipeline_failed:
+                try:
+                    await self._on_pipeline_failed(
+                        project_id=project_id,
+                        work_item_id=work_item_id,
+                        ref=ref,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Pipeline 失败回调执行异常: project=%s item=%s",
+                        project_id, work_item_id, exc_info=True,
+                    )
+
             return {"status": "synced", "action": action, "ref": ref}
 
         return {"status": "ignored", "reason": f"no mapping for pipeline status: {status}"}
