@@ -196,7 +196,15 @@ class AgentOwnershipResolver:
     @staticmethod
     def _properties(item: dict[str, Any]) -> dict[str, Any]:
         props = item.get("properties") or item.get("custom_properties") or {}
-        return props if isinstance(props, dict) else {}
+        if isinstance(props, dict):
+            return props
+        if isinstance(props, list):
+            return {
+                p["key"]: p["value"]
+                for p in props
+                if isinstance(p, dict) and "key" in p and "value" in p
+            }
+        return {}
 
     @staticmethod
     def _project_value(item: dict[str, Any]) -> str | None:
@@ -224,17 +232,17 @@ class AgentOwnershipResolver:
 
     @staticmethod
     def _labels(item: dict[str, Any]) -> list[str]:
-        labels = item.get("labels") or item.get("label_details") or []
         result: list[str] = []
-        if not isinstance(labels, list):
-            return result
-        for label in labels:
-            if isinstance(label, str):
-                result.append(label)
-            elif isinstance(label, dict):
-                name = label.get("name") or label.get("identifier")
-                if name:
-                    result.append(str(name))
+        for source in (item.get("labels") or [], item.get("label_details") or []):
+            if not isinstance(source, list):
+                continue
+            for label in source:
+                if isinstance(label, str):
+                    result.append(label)
+                elif isinstance(label, dict):
+                    name = label.get("name") or label.get("identifier")
+                    if name:
+                        result.append(str(name))
         return result
 
 
