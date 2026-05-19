@@ -129,6 +129,35 @@ Repository contract tests 使用 `@pytest.fixture(params=["memory", "sql"])` 参
 
 这是极为关键的架构原则，避免了让 Hermes 越权处理 CI/CD 流程的反模式。
 
+### 1.6 S9 自进化 Agent 系统差距（设计已补，代码未实现）
+
+S9 新增设计文档已经明确：
+
+```text
+Platform-Owned Evolution
+Hermes-Powered Intelligence
+
+Hermes writes candidates, Platform promotes assets.
+```
+
+当前代码尚未实现以下自进化平台能力：
+
+| 能力 | 设计文档 | 当前状态 |
+| --- | --- | --- |
+| Candidate Store | `07-evolution/candidate-contract.md` | 未实现 |
+| Candidate Validator / Promotion Workflow | `07-evolution/candidate-contract.md`、`07-evolution/evolution-engine-design.md` | 未实现 |
+| EvolutionCandidateRepository | `07-evolution/candidate-contract.md` | 未实现 |
+| EvolutionMemoryRepository | `07-evolution/memory-and-skills-design.md` | 未实现 |
+| SkillRegistry | `07-evolution/memory-and-skills-design.md` | 未实现 |
+| Background Review Fork | `07-evolution/evolution-engine-design.md` | 未实现 |
+| Eval Failure -> Candidate -> Proposal | `development-plan-s9.md` | 未实现 |
+| Candidate -> Plane Work Item | `development-plan-s9.md` | 未实现 |
+| Low-risk Proposal -> DevFlow MR | `development-plan-s9.md` | 未实现 |
+| Hermes Reviewer / ReleaseRiskReport | `development-plan-s9.md` | 未实现 |
+| Evolution Insights | `07-evolution/hermes-lessons-for-self-evolution.md` | 未实现 |
+
+这些能力不应被误认为已有 Runtime Feedback Intelligence 的等价实现。现有 FeedbackMiner/PlanePublisher 更接近“运行反馈提案发布原型”；S9 目标是进一步引入 Candidate Store、Promotion Workflow、Memory/Skill 治理和 Hermes Reviewer，使自进化闭环可审计、可晋升、可回滚。
+
 ## 2. 与 `agent-platform-design.md` 的差距
 
 ### 2.1 总体架构

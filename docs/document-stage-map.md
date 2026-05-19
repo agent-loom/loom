@@ -23,7 +23,7 @@
 | S6 | 生产运营加固 | Admin key CRUD、EvalRunner auto-persist、per-role rate limiting、access log、canary metrics、WebSocket 重连 | ✅ 已完成（988 tests passed） |
 | S7 | 多维评测与运营深化 | 多 provider ModelGateway、ToolAudit、AgentStreamEvent、KnowledgeSyncScheduler、多维 EvalRunner、TenantQuota、HermesStreamMapper | ✅ 已完成（1075 tests passed） |
 | S8 | 生产交付 | Prometheus metrics、Session 持久化、Admin eval 增强、真实 runner E2E、Plane/GitLab E2E | ✅ 已完成（1609 passed）；DevFlow Codex 真实 E2E 跑通、GitLab 反向 webhook、Hermes SDK 修复、Alembic 完善 |
-| S9 | Hermes × DevFlow 反馈闭环生产化 | 修正文档状态差距、完成 DevFlow 强状态机（DB-backed DLQ + webhook retry）、完成 Hermes stream/HITL/trace 主链路、实现 FeedbackMiner 最小版本 | 🔶 进行中；已明确 DevFlow 与 Hermes 边界，完成首批 P0 稳定性加固（HITL 接通、DLQ 内存重试、Codex Sandbox 配置化）。下一步重点：收口 DevFlow 生产化（SqlDeadLetterQueue、Claude Code 真实 E2E）、打通 Runtime Feedback Intelligence。 |
+| S9 | 自进化 Agent 系统 | 设计并实现运行反馈 -> 改进提案 -> Plane -> DevFlow -> MR -> review -> 发布门禁的受控闭环 | 🔶 设计中；已新增 `07-evolution` 文档集。下一步重点：先做 Eval Failure -> ImprovementProposal -> Plane Work Item 的低风险闭环，再逐步接 feedback/log pattern 和自动 DevFlow。 |
 
 ## 2. 文档状态定义
 
@@ -105,6 +105,21 @@
 | --- | --- | --- |
 | `development-plan-s7.md` | In Progress | S7（已完成）和 S8（进行中）执行入口；覆盖多维评测、运营深化、生产交付全部 Phase |
 
+### S9. 自进化 Agent 系统
+
+| 文档 | 状态 | 用途 |
+| --- | --- | --- |
+| `07-evolution/README.md` | Draft | 自进化文档入口和阅读顺序 |
+| `development-plan-s9.md` | Draft | S9 自进化系统执行计划 |
+| `07-evolution/self-evolving-agent-system.md` | Draft | 自进化总体架构和边界 |
+| `07-evolution/candidate-contract.md` | Draft | Candidate schema、状态机、晋升、API 和审计契约 |
+| `07-evolution/hermes-lessons-for-self-evolution.md` | Draft | Hermes self-improvement、memory、skills、kanban、checkpoint、approval、trajectory 的借鉴映射 |
+| `07-evolution/memory-and-skills-design.md` | Draft | Runtime Memory、Evolution Memory、Agent Skills 的平台化边界、数据模型、权限和阶段路线 |
+| `07-evolution/evolution-engine-design.md` | Draft | Evolution Engine 决策层设计 |
+| `07-evolution/improvement-proposal-contract.md` | Draft | 改进提案契约和 Plane/TaskPack/MR 映射 |
+| `07-evolution/risk-policy.md` | Draft | 自动化等级、路径权限和审批策略 |
+| `07-evolution/rollout-plan.md` | Draft | Phase 0-5 落地路线 |
+
 ## 4. 当前阶段阅读路径
 
 ### 4.1 继续实现平台底座
@@ -147,6 +162,21 @@
 3. `03-runtime/hermes-runtime.md` 的 `13.4` 节，明确 Hermes Insight Agent 职责和边界
 4. `05-production/security-tenant-policy-design.md` 的 `9.5` 节，明确脱敏、租户隔离和 prompt injection 防护
 
+### 4.3.2 设计自进化 Agent 系统
+
+按顺序读：
+
+1. `07-evolution/README.md`
+2. `development-plan-s9.md`
+3. `07-evolution/candidate-contract.md`
+4. `07-evolution/self-evolving-agent-system.md`
+5. `07-evolution/hermes-lessons-for-self-evolution.md`
+6. `07-evolution/memory-and-skills-design.md`
+7. `07-evolution/evolution-engine-design.md`
+8. `07-evolution/improvement-proposal-contract.md`
+9. `07-evolution/risk-policy.md`
+10. `07-evolution/rollout-plan.md`
+
 ### 4.4 新增业务 Agent
 
 按顺序读：
@@ -170,6 +200,7 @@
 | 修改 GitLab 流程或 CI gate | `04-devflow/gitlab.md` |
 | 修改 Hermes 接入边界 | `03-runtime/hermes-runtime.md`，必要时新增 ADR |
 | 修改生产反馈洞察、自动提需求、日志归因或 Plane 候选需求 | `02-architecture/ai-human-vibecoding-rd-platform.md`、`04-devflow/plane.md`、`03-runtime/hermes-runtime.md`、`05-production/security-tenant-policy-design.md` |
+| 修改自进化能力、proposal、风险策略或自动 DevFlow 边界 | `07-evolution/*`、`04-devflow/plane.md`、`04-devflow/devflow-runner-workspace-design.md` |
 | 修改部署、路由、持久化、DevFlow 实现状态 | `implementation-gap.md` |
 | 新增重大技术路线 | `adr/` 新增 ADR |
 | 修改文档阶段定义或文档状态 | `document-stage-map.md` 和 `README.md` |
@@ -216,6 +247,7 @@ docs/
   04-devflow/
   05-production/
   06-scale/
+  07-evolution/
   99-reference/
   adr/
   vendor/

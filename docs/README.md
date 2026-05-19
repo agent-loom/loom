@@ -15,12 +15,15 @@
 - [实现与设计差距分析](implementation-gap.md)
 - [下一阶段技术设计计划](next-stage-design-plan.md)
 - [S5 平台生产化与规模化开发计划](development-plan-s5.md)
+- [S9 自进化 Agent 系统开发计划](development-plan-s9.md)
 
 ## 总体设计
 
 - [多 Agent 平台设计](02-architecture/agent-platform-design.md)
 - [Agent Platform 核心功能设计](02-architecture/agent-platform-core-design.md)
 - [AI + 人 + Vibe Coding 研发一体化平台设计](02-architecture/ai-human-vibecoding-rd-platform.md)：生产反馈洞察与需求发现流程的总体入口
+- [自进化 Agent 系统文档索引](07-evolution/README.md)
+- [自进化 Agent 系统总体设计](07-evolution/self-evolving-agent-system.md)：运行反馈 -> 改进提案 -> Plane -> DevFlow -> MR -> review -> 发布的闭环入口
 - [Hermes Runtime 能力利用设计](03-runtime/hermes-runtime.md)：Hermes RuntimeBackend 与 Hermes Insight Agent 的边界
 - [GitLab 集成设计](04-devflow/gitlab.md)
 - [Plane 集成设计](04-devflow/plane.md)：Plane / SCM / Coding Runner / Hermes 端到端交互流程的主入口
@@ -36,6 +39,7 @@
 | S3 Hermes 真接入 | 验证真实 Hermes RuntimeBackend | [Hermes Runtime 能力利用设计](03-runtime/hermes-runtime.md) |
 | S4 AI 研发闭环 | 设计 runner、workspace、Plane/GitLab 状态同步 | [AI + 人 + Vibe Coding 研发一体化平台设计](02-architecture/ai-human-vibecoding-rd-platform.md)、[DevFlow Task Pack 契约](01-contracts/devflow-task-pack.md) |
 | S5 平台生产化与规模化 | 主链路可靠性校准、Hermes SDK、knowledge/RAG、MCP、观测、治理 | [S5 平台生产化与规模化开发计划](development-plan-s5.md)、[下一阶段技术设计计划](next-stage-design-plan.md) |
+| S9 自进化 Agent 系统 | 设计运行反馈到候选资产、改进提案、Plane Work Item、DevFlow 和 MR 的受控闭环 | [S9 自进化 Agent 系统开发计划](development-plan-s9.md)、[自进化 Agent 系统文档索引](07-evolution/README.md)、[Candidate 契约](07-evolution/candidate-contract.md)、[自进化 Agent 系统总体设计](07-evolution/self-evolving-agent-system.md)、[Hermes 自进化能力调研与借鉴](07-evolution/hermes-lessons-for-self-evolution.md)、[Platform Memory 与 Agent Skills 设计](07-evolution/memory-and-skills-design.md)、[Evolution Engine 设计](07-evolution/evolution-engine-design.md)、[Improvement Proposal 契约](07-evolution/improvement-proposal-contract.md)、[自进化风险策略](07-evolution/risk-policy.md) |
 
 ## 使用方式
 
@@ -44,6 +48,7 @@
 3. 如果改协议或 package，确认 `AgentRequest / AgentResponse` 和 `AgentManifest v1`。
 4. 如果改研发自动化，确认 `DevFlow Task Pack`、Plane 和 GitLab 设计；Plane / GitLab / GitHub / Hermes 交互流程以 `04-devflow/plane.md` 的 `2.1` 节为准。
 5. 如果改生产反馈洞察、自动提需求、日志归因或 Plane 候选需求，确认 `02-architecture/ai-human-vibecoding-rd-platform.md` 的 `5.3` 节、`04-devflow/plane.md` 的 `2.2` 节、`03-runtime/hermes-runtime.md` 的 `13.4` 节和 `05-production/security-tenant-policy-design.md` 的 `9.5` 节。
-6. 如果新增重大技术路线，新增 ADR。
+6. 如果改自进化能力，确认 `development-plan-s9.md`、`07-evolution/candidate-contract.md`、`07-evolution/self-evolving-agent-system.md`、`07-evolution/hermes-lessons-for-self-evolution.md`、`07-evolution/memory-and-skills-design.md`、`07-evolution/evolution-engine-design.md`、`07-evolution/improvement-proposal-contract.md` 和 `07-evolution/risk-policy.md`。
+7. 如果新增重大技术路线，新增 ADR。
 
 正式开发开始后，新增重大技术决策必须追加 ADR；修改接口、manifest 或 task pack 必须同步更新对应契约文档。
