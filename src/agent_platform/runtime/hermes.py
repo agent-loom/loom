@@ -299,6 +299,7 @@ def normalize_hermes_result(hermes_result: Any) -> dict[str, Any]:
     final_response = raw.get("final_response") or raw.get("response") or str(hermes_result)
 
     api_calls = raw.get("api_calls", [])
+    api_calls_count = len(api_calls) if isinstance(api_calls, (list, tuple)) else int(api_calls or 0)
     input_tokens = raw.get("input_tokens") or raw.get("prompt_tokens", 0)
     output_tokens = raw.get("output_tokens") or raw.get("completion_tokens", 0)
     total_tokens = raw.get("total_tokens", input_tokens + output_tokens)
@@ -328,7 +329,7 @@ def normalize_hermes_result(hermes_result: Any) -> dict[str, Any]:
             len(raw.get("messages", [])) if "messages" in raw
             else raw.get("iterations", 0)
         ),
-        "model_calls": len(api_calls) if api_calls else raw.get("model_calls", 0),
+        "model_calls": api_calls_count,
         "model": raw.get("model"),
         "prompt_tokens": input_tokens,
         "completion_tokens": output_tokens,
@@ -336,7 +337,7 @@ def normalize_hermes_result(hermes_result: Any) -> dict[str, Any]:
         "estimated_cost_usd": estimated_cost,
         "debug_extra": {
             "hermes_run_id": raw.get("run_id"),
-            "api_calls_count": len(api_calls) if api_calls else 0,
+            "api_calls_count": api_calls_count,
         },
     }
 

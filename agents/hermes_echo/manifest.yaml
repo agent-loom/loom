@@ -24,10 +24,12 @@ runtime:
 
 models:
   default:
-    provider: stub
-    model: stub
+    provider: openai
+    model: z-ai/glm-5
     temperature: 0.0
-    max_tokens: 256
+    max_tokens: 512
+    api_key_ref: ANTHROPIC_API_KEY
+    base_url_ref: HERMES_OPENAI_BASE_URL
 
 prompts:
   orchestrator: prompts/orchestrator.md
@@ -71,5 +73,5 @@ evals:
 
 extensions:
   hermes:
-    require_sdk: false
-    fallback_on_error: true
+    require_sdk: true
+    fallback_on_error: false
