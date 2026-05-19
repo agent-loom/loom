@@ -176,6 +176,18 @@ class ResolveApprovalRequest(BaseModel):
     actor: str
 
 
+class AnalyzeEvolutionEventRequest(BaseModel):
+    event_type: str
+    agent_id: str
+    tenant_id: str = "default"
+    summary: str
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class DismissProposalRequest(BaseModel):
+    reason: str = ""
+
+
 class RequestContextMiddleware(BaseHTTPMiddleware):
     """请求上下文中间件。
     
@@ -1085,6 +1097,21 @@ def create_app() -> FastAPI:
         )
         app.state.admin_deps.feedback_service = feedback_service
 
+    # ── Evolution Engine ──
+    from agent_platform.evolution.engine import EvolutionEngine
+    from agent_platform.evolution.repository import InMemoryProposalRepository
+
+    _evo_repo = InMemoryProposalRepository()
+    if devflow is not None:
+        evolution_engine = EvolutionEngine(
+            repo=_evo_repo,
+            plane_adapter=plane_adapter,
+            plane_project_id=settings.plane_project_id,
+        )
+    else:
+        evolution_engine = EvolutionEngine(repo=_evo_repo)
+    app.state.evolution_engine = evolution_engine
+
     # DevFlow 后台调度器
     from agent_platform.devflow.scheduler import DevFlowScheduler
     scheduler = DevFlowScheduler(
@@ -1972,6 +1999,83 @@ def create_app() -> FastAPI:
             "status": status_str,
             "actor": body.actor,
         }
+
+    # ── Evolution Engine API ──
+
+    @app.post("/api/v1/evolution/analyze")
+    async def evolution_analyze(
+        payload: AnalyzeEvolutionEventRequest,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ) -> dict:
+        from agent_platform.evolution.models import EvolutionEvent
+
+        event = EvolutionEvent(
+            event_type=payload.event_type,
+            agent_id=payload.agent_id,
+            tenant_id=payload.tenant_id,
+            summary=payload.summary,
+            details=payload.details,
+        )
+        proposal = await evolution_engine.process_event(event)
+        if proposal is None:
+            return {"status": "duplicate", "message": "事件已去重跳过"}
+        result = proposal.model_dump(mode="json")
+        auto = await evolution_engine.auto_dispatch_if_low_risk(proposal)
+        if auto:
+            result["auto_dispatch"] = auto
+        return result
+
+    @app.get("/api/v1/evolution/proposals")
+    async def list_evolution_proposals(
+        agent_id: str | None = None,
+        status: str | None = None,
+        limit: int = Query(default=50, ge=1, le=500),
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> list[dict]:
+        from agent_platform.evolution.models import ProposalStatus
+
+        status_filter = ProposalStatus(status) if status else None
+        if agent_id:
+            proposals = await _evo_repo.list_by_agent(
+                agent_id, status=status_filter, limit=limit,
+            )
+        else:
+            proposals = await _evo_repo.list_all(
+                status=status_filter, limit=limit,
+            )
+        return [p.model_dump(mode="json") for p in proposals]
+
+    @app.get("/api/v1/evolution/proposals/{proposal_id}")
+    async def get_evolution_proposal(
+        proposal_id: str,
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> dict:
+        proposal = await _evo_repo.get(proposal_id)
+        if proposal is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"proposal not found: {proposal_id}",
+            )
+        return proposal.model_dump(mode="json")
+
+    @app.post("/api/v1/evolution/proposals/{proposal_id}/dispatch")
+    async def dispatch_evolution_proposal(
+        proposal_id: str,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ) -> dict:
+        result = await evolution_engine.dispatch_to_plane(proposal_id)
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+        return result
+
+    @app.post("/api/v1/evolution/proposals/{proposal_id}/dismiss")
+    async def dismiss_evolution_proposal(
+        proposal_id: str,
+        body: DismissProposalRequest,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ) -> dict:
+        await evolution_engine.dismiss(proposal_id, body.reason)
+        return {"status": "dismissed", "proposal_id": proposal_id}
 
     # ── OpenTelemetry FastAPI Instrumentation ──
     # 在所有路由注册完成后挂载，如未安装 opentelemetry-instrumentation-fastapi 则静默跳过

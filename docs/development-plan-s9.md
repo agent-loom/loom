@@ -1,144 +1,177 @@
 # 开发计划（S9：自进化 Agent 系统）
 
-> Status: Draft
+> Status: 🔶 Phase 1 完成
 > Last updated: 2026-05-20
 
-S9 目标：把运行反馈、eval failure、用户反馈、日志模式转化为可审计、可验证、可晋升的候选资产，并逐步打通 `Candidate -> Proposal -> Plane -> DevFlow -> MR` 的低风险自进化闭环。
+本计划承接 S8（生产交付）。S9 核心目标：让平台具备**受治理的自进化能力**——从运行反馈自动发现问题、生成改进提案、通过 DevFlow 执行修改、经 Eval 验证后由人工 review 合并。
 
-核心原则：
+## 设计原则
 
-```text
-Platform-Owned Evolution
-Hermes-Powered Intelligence
+1. **自驱动，不自治**：自动发现 + 自动提案 + 自动编码，但 review 和合并必须人工。
+2. **证据驱动**：每个提案必须绑定 trace/eval/feedback 证据。
+3. **低风险先行**：Phase 1 只允许自动改 prompt/eval/docs/contract tests。
+4. **复用已有基础设施**：DevFlow + Plane + GitLab + EvalRunner + PathGuard + FeedbackIntelligence。
+5. **Platform-Owned, Hermes-Powered**：Platform 拥有事实源和治理权，Hermes 提供分析能力。
 
-Hermes writes candidates, Platform promotes assets.
+## 设计文档
+
+| 文档 | 职责 |
+|---|---|
+| `07-evolution/self-evolving-agent-system.md` | 总体架构和原则 |
+| `07-evolution/evolution-engine-design.md` | Engine 详细设计（远景） |
+| `07-evolution/improvement-proposal-contract.md` | ImprovementProposal 契约 |
+| `07-evolution/risk-policy.md` | 风险策略和路径管控 |
+| `07-evolution/memory-and-skills-design.md` | Memory/Skills 分层（Phase 3+） |
+| `07-evolution/rollout-plan.md` | 阶段推进路线 |
+
+## 当前基线
+
+| 指标 | S8 结束 |
+|---|---|
+| 测试 | 1779 passed（+68 evolution） |
+| DevFlow | Plane→GitLab 正向+反向流跑通，Code First MR Later |
+| Hermes | 真实模型 E2E 跑通（z-ai/glm-5） |
+| FeedbackIntelligence | 日志挖掘 → 候选需求 → Plane 工单（已实现） |
+
+---
+
+## S9 Phase 1：Evolution Engine 核心 — ✅ 完成
+
+**目标**：实现从事件到提案的完整链路，含风险分类、证据绑定、去重、Plane 分发和 API。
+
+### 已实现
+
+| # | 任务 | 文件 | 状态 |
+|---|---|---|---|
+| 9.1.1 | `ImprovementProposal` 数据模型 | `src/agent_platform/evolution/models.py` | ✅ |
+| 9.1.2 | 风险分类器 | `src/agent_platform/evolution/risk_classifier.py` | ✅ |
+| 9.1.3 | `EvolutionProposalRepository` Protocol + InMemory | `src/agent_platform/evolution/repository.py` | ✅ |
+| 9.1.4 | `EvolutionEngine` 核心逻辑 | `src/agent_platform/evolution/engine.py` | ✅ |
+
+### 待完成
+
+| # | 任务 | 验收标准 | 状态 |
+|---|---|---|---|
+| 9.1.5 | Evolution API 端点 | proposals CRUD + dispatch-to-plane + dismiss | ✅ |
+| 9.1.6 | 接入 app.py | 条件初始化 EvolutionEngine，注册 API 端点 | ✅ |
+| 9.1.7 | 单元测试 | 模型/引擎/Repository/风险分类器全覆盖（68 tests） | ✅ |
+
+### 数据模型
+
+```python
+# 核心契约
+ImprovementProposal(
+    proposal_id, title, summary,
+    tenant_id, agent_id, task_type, source,
+    status: draft → ready → dispatched → closed | dismissed,
+    risk: RiskAssessment(level, reason, requires_human_*),
+    root_cause: RootCause(category, confidence, explanation),
+    evidence: list[Evidence],  # 至少 1 条
+    proposed_changes: list[ProposedChange],
+    allowed_paths, blocked_paths,
+    validation: ValidationSpec(commands, regression_allowed),
+    plane_work_item_id, gitlab_mr_iid,
+)
 ```
 
-## 当前设计入口
+### 风险策略（已实现）
 
-| 文档 | 用途 |
-| --- | --- |
-| `07-evolution/README.md` | 自进化文档入口 |
-| `07-evolution/self-evolving-agent-system.md` | 总体架构和边界 |
-| `07-evolution/candidate-contract.md` | Candidate 契约 |
-| `07-evolution/evolution-engine-design.md` | Evolution Engine |
-| `07-evolution/memory-and-skills-design.md` | Memory / Skills |
-| `07-evolution/improvement-proposal-contract.md` | ImprovementProposal |
-| `07-evolution/risk-policy.md` | 风险策略 |
-| `07-evolution/rollout-plan.md` | 分阶段路线 |
+| 路径 | 风险等级 |
+|---|---|
+| `agents/<id>/prompts/**`, `agents/<id>/evals/**`, `tests/contract/**`, `docs/**` | Low |
+| `agents/<id>/tools/**`, `agents/<id>/adapters/**`, `manifest.yaml` | Medium |
+| `src/agent_platform/**`, `deploy/**`, `.env`, `secrets/**` | Blocked |
 
-## Phase 0：文档冻结与契约确认
+### API 端点（设计）
 
-目标：收口设计，确认实现边界。
+```http
+POST /api/v1/evolution/analyze          # 提交事件，生成提案
+GET  /api/v1/evolution/proposals        # 列出提案
+GET  /api/v1/evolution/proposals/{id}   # 查看提案详情
+POST /api/v1/evolution/proposals/{id}/dispatch  # 分发到 Plane
+POST /api/v1/evolution/proposals/{id}/dismiss   # 驳回
+```
 
-| # | 任务 | 验收标准 | 状态 |
-| --- | --- | --- | --- |
-| 9.0.1 | Candidate 契约冻结 | schema、状态机、promotion target、API 草案明确 | ✅ 文档完成 |
-| 9.0.2 | Memory / Skills 边界冻结 | RuntimeMemory、EvolutionMemory、AgentSkills、Candidate Store 边界明确 | ✅ 文档完成 |
-| 9.0.3 | Hermes / Platform 自进化边界冻结 | Hermes self-improvement 与 Platform evolution 区分明确 | ✅ 文档完成 |
-| 9.0.4 | S9 差距进入 implementation-gap | 未实现能力进入事实源 | 🔶 待完成 |
+---
 
-## Phase 1：Candidate Store
+## S9 Phase 2：DevFlow 闭环 — ⬜
 
-目标：实现 Hermes/Platform 写入候选资产的最小持久化能力。
+**目标**：低风险提案自动进入 DevFlow，Runner 修改 prompt/eval 并提交 MR。
+
+**前置条件**：Phase 1 完成。
 
 | # | 任务 | 验收标准 | 状态 |
-| --- | --- | --- | --- |
-| 9.1.1 | `EvolutionCandidate` domain model | 支持 candidate_id/type/status/risk/payload/evidence/promotion | ⬜ |
-| 9.1.2 | Repository Protocol | `create/get/list/update_status/mark_promoted` | ⬜ |
-| 9.1.3 | InMemory repository | 单测覆盖 create/list/status/promote | ⬜ |
-| 9.1.4 | SQL repository + migration | tenant/agent/status/type 索引；payload JSON | ⬜ |
-| 9.1.5 | Audit event | created/validated/promoted/rejected 事件可记录 | ⬜ |
+|---|---|---|---|
+| 9.2.1 | Proposal → TaskPack 转换 | ImprovementProposal 映射为 DevelopmentTask | ⬜ |
+| 9.2.2 | 低风险自动推进 | risk=low 的 Plane Work Item 自动推进 Ready for AI Dev | ⬜ |
+| 9.2.3 | PathGuard 增强 | Runner 严格执行 proposal 的 allowed_paths/blocked_paths | ⬜ |
+| 9.2.4 | Eval 回归验证 | MR 必须通过现有 eval + 新增 eval case | ⬜ |
+| 9.2.5 | E2E 验证 | eval failure → proposal → Plane → DevFlow → MR → eval pass | ⬜ |
 
-## Phase 2：Candidate Validation / Promotion
+---
 
-目标：Candidate 不能直接生效，必须由 Platform 校验和晋升。
+## S9 Phase 3：FeedbackIntelligence 集成 + 持久化 — ⬜
 
-| # | 任务 | 验收标准 | 状态 |
-| --- | --- | --- | --- |
-| 9.2.1 | CandidateValidator | schema/evidence/scope/PII/secret/injection 校验 | ⬜ |
-| 9.2.2 | Duplicate detection | 相同 agent/symptom/time window 不重复创建 | ⬜ |
-| 9.2.3 | Risk consistency check | candidate risk 与 policy 匹配 | ⬜ |
-| 9.2.4 | Promotion workflow | candidate -> EvolutionMemory / ImprovementProposal | ⬜ |
-| 9.2.5 | Admin API | validate/approve/promote/reject/supersede | ⬜ |
-
-## Phase 3：Eval Failure -> Candidate -> Proposal
-
-目标：从 eval failure 生成候选资产，再晋升为正式 ImprovementProposal。
+**目标**：统一 FeedbackIntelligence 和 EvolutionEngine 的入口；SQL 持久化。
 
 | # | 任务 | 验收标准 | 状态 |
-| --- | --- | --- | --- |
-| 9.3.1 | EvalFailure collector | 从 EvalRun/EvalReport 提取失败 case | ⬜ |
-| 9.3.2 | HermesAnalyzer adapter | 输入脱敏 evidence，输出 `ProposalDraft` / `EvalCaseDraft` | ⬜ |
-| 9.3.3 | Candidate 写入 | Hermes 输出写入 Candidate Store | ⬜ |
-| 9.3.4 | Proposal promotion | Low-risk proposal_draft 可晋升 ImprovementProposal | ⬜ |
-| 9.3.5 | 单元/集成测试 | eval failure 可生成 proposal，high risk 不进入 DevFlow | ⬜ |
+|---|---|---|---|
+| 9.3.1 | FeedbackMiner → EvolutionEvent 适配 | RequirementProposal 转换为 EvolutionEvent | ⬜ |
+| 9.3.2 | 双路去重 | 避免 FeedbackIntelligence 和 EvolutionEngine 重复创建工单 | ⬜ |
+| 9.3.3 | `SqlProposalRepository` | evolution_proposals 表 + Alembic 迁移 | ⬜ |
+| 9.3.4 | Admin 提案管理 | 按 agent/status/risk 查询；dismiss/dispatch 操作 | ⬜ |
+| 9.3.5 | 自进化指标 | 提案生成数/通过率/回归率/平均修复时间 | ⬜ |
 
-## Phase 4：Candidate -> Plane Work Item
+---
 
-目标：正式 proposal 可以创建 Plane Work Item，但默认先人工确认。
+## S9 Phase 4：Memory / Skills 平台化 — ⬜
 
-| # | 任务 | 验收标准 | 状态 |
-| --- | --- | --- | --- |
-| 9.4.1 | Proposal -> Plane mapper | Markdown 描述、custom properties、labels | ⬜ |
-| 9.4.2 | dispatch-to-plane API | 幂等创建 Work Item | ⬜ |
-| 9.4.3 | Plane ownership 兼容 | Work Item 可被 ownership resolver 解析到 Agent | ⬜ |
-| 9.4.4 | 审计链路 | proposal_id/candidate_id/work_item_id 可追踪 | ⬜ |
-
-## Phase 5：Low-risk 自动 DevFlow
-
-目标：低风险 prompt/eval/docs/contract tests 可以自动走 DevFlow MR。
+**目标**：引入 EvolutionMemory 和 SkillRegistry，但不急于 runtime 注入。
 
 | # | 任务 | 验收标准 | 状态 |
-| --- | --- | --- | --- |
-| 9.5.1 | Proposal -> TaskPack | allowed_paths/blocked_paths/validation/evidence 完整 | ⬜ |
-| 9.5.2 | low-risk auto trigger | policy 允许后自动推进 Ready for AI Dev | ⬜ |
-| 9.5.3 | Runner 安全检查增强 | blocked path 和 dangerous command 阻断 | ⬜ |
-| 9.5.4 | MR report 增强 | 包含 candidate/proposal/evidence/risk/validation | ⬜ |
-| 9.5.5 | E2E | Eval failure -> Candidate -> Proposal -> Plane -> MR | ⬜ |
+|---|---|---|---|
+| 9.4.1 | EvolutionMemory model/repo | evidence/confidence/trust_level/status | ⬜ |
+| 9.4.2 | Memory 写入和查询 API | 按 agent/tenant/type 过滤 | ⬜ |
+| 9.4.3 | SkillRegistry scanner | `agents/<id>/skills/**` 索引 | ⬜ |
+| 9.4.4 | Skill 使用记录 | 记录 proposal/MR 层 skill 引用 | ⬜ |
 
-## Phase 6：Memory / Skill Registry
+---
 
-目标：先做 EvolutionMemory 和 SkillRegistry，不急于 runtime 注入。
+## S8 遗留项（S9 并行处理）
 
-| # | 任务 | 验收标准 | 状态 |
-| --- | --- | --- | --- |
-| 9.6.1 | EvolutionMemory model/repo | evidence/confidence/trust_level/status | ⬜ |
-| 9.6.2 | MemoryCandidate promotion | candidate -> EvolutionMemory | ⬜ |
-| 9.6.3 | Skill manifest schema | `agents/<agent_id>/skills/**/manifest.yaml` | ⬜ |
-| 9.6.4 | SkillRegistry scanner | list/get/version/status | ⬜ |
-| 9.6.5 | Skill usage metrics 草案 | 先记录 proposal/MR 层 usage | ⬜ |
+| # | 任务 | 来源 | 状态 |
+|---|---|---|---|
+| 9.L.1 | Claude Code CLI 端到端 | S8 8.2.1 | ⬜ |
+| 9.L.2 | Runner 日志持久化默认接入 | S8 8.2.3 | ⬜ |
+| 9.L.3 | Plane bootstrap 脚本 | S8 8.3.1 | ⬜ |
 
-## Phase 7：Hermes Reviewer / Release Risk
+---
 
-目标：让 Hermes 在 MR 和发布前做第二审查员，但不拥有 merge/release 权。
+## 依赖关系
 
-| # | 任务 | 验收标准 | 状态 |
-| --- | --- | --- | --- |
-| 9.7.1 | MR ReviewReport candidate | 分析是否修复 proposal、是否越权、eval 是否充分 | ⬜ |
-| 9.7.2 | ReleaseRiskReport candidate | 分析变更影响 agent/tenant/channel 和历史失败模式 | ⬜ |
-| 9.7.3 | Review feedback loop | accepted/rejected 反馈进入 Hermes self-improvement evidence | ⬜ |
-| 9.7.4 | Admin UI 展示 | 查看 candidate/proposal/review/risk 链路 | ⬜ |
+```text
+S9 Phase 1（Engine 核心）
+    ↓
+S9 Phase 2（DevFlow 闭环）
+    ↓
+S9 Phase 3（FeedbackIntelligence + 持久化）
+    ↓
+S9 Phase 4（Memory / Skills）
+```
 
 ## 里程碑
 
 | 里程碑 | 目标 | 验收 |
-| --- | --- | --- |
-| M1 | Candidate Store 可用 | 可创建/查询/校验/拒绝 candidate |
-| M2 | Candidate Promotion 可用 | `ProposalDraft -> ImprovementProposal` 跑通 |
-| M3 | Eval Failure 闭环 | eval failure 可生成 proposal |
-| M4 | Plane 闭环 | proposal 可创建 Plane Work Item |
-| M5 | Low-risk DevFlow 闭环 | 低风险 proposal 可生成 MR |
-| M6 | Memory/Skill 治理 | EvolutionMemory 和 SkillRegistry 可查询和审计 |
+|---|---|---|
+| M1: 提案引擎 | Phase 1 | eval failure → ImprovementProposal → API 可查询 → Plane 可分发 |
+| M2: 自动修复 | Phase 2 | 低风险提案自动通过 DevFlow 生成 MR |
+| M3: 统一闭环 | Phase 3 | FeedbackIntelligence + EvolutionEngine 统一 + SQL 持久化 |
+| M4: 知识治理 | Phase 4 | EvolutionMemory + SkillRegistry 可查询和审计 |
 
-## 非目标
+## 非目标（S9 不做）
 
-S9 不做：
-
-1. Hermes 直接改业务代码。
-2. Hermes 直接写正式 Platform Memory。
-3. Hermes 直接写 Agent Package。
-4. 自动 merge MR。
-5. 自动 prod 发布。
-6. 复杂 RL 训练闭环。
-
+1. 自动 merge MR
+2. 自动 prod 发布
+3. Hermes 直接改业务代码或写正式 Agent Package
+4. RL fine-tuning 闭环
+5. 容器化安全沙箱
