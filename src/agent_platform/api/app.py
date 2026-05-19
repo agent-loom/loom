@@ -1101,7 +1101,11 @@ def create_app() -> FastAPI:
     from agent_platform.evolution.engine import EvolutionEngine
     from agent_platform.evolution.repository import InMemoryProposalRepository
 
-    _evo_repo = InMemoryProposalRepository()
+    if db_session_factory is not None:
+        from agent_platform.persistence.sql import SqlProposalRepository
+        _evo_repo = SqlProposalRepository(db_session_factory)
+    else:
+        _evo_repo = InMemoryProposalRepository()
     if devflow is not None:
         evolution_engine = EvolutionEngine(
             repo=_evo_repo,

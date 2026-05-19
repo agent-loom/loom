@@ -28,7 +28,7 @@
 
 | 指标 | S8 结束 |
 |---|---|
-| 测试 | 1799 passed（+88 evolution） |
+| 测试 | 1812 passed（+101 evolution） |
 | DevFlow | Plane→GitLab 正向+反向流跑通，Code First MR Later |
 | Hermes | 真实模型 E2E 跑通（z-ai/glm-5） |
 | FeedbackIntelligence | 日志挖掘 → 候选需求 → Plane 工单（已实现） |
@@ -110,16 +110,16 @@ POST /api/v1/evolution/proposals/{id}/dismiss   # 驳回
 
 ---
 
-## S9 Phase 3：FeedbackIntelligence 集成 + 持久化 — ⬜
+## S9 Phase 3：FeedbackIntelligence 集成 + 持久化 — 🔶 进行中
 
 **目标**：统一 FeedbackIntelligence 和 EvolutionEngine 的入口；SQL 持久化。
 
 | # | 任务 | 验收标准 | 状态 |
 |---|---|---|---|
-| 9.3.1 | FeedbackMiner → EvolutionEvent 适配 | RequirementProposal 转换为 EvolutionEvent | ⬜ |
-| 9.3.2 | 双路去重 | 避免 FeedbackIntelligence 和 EvolutionEngine 重复创建工单 | ⬜ |
-| 9.3.3 | `SqlProposalRepository` | evolution_proposals 表 + Alembic 迁移 | ⬜ |
-| 9.3.4 | Admin 提案管理 | 按 agent/status/risk 查询；dismiss/dispatch 操作 | ⬜ |
+| 9.3.1 | FeedbackMiner → EvolutionEvent 适配 | RequirementProposal 转换为 EvolutionEvent | ✅ |
+| 9.3.2 | 双路去重 | 避免 FeedbackIntelligence 和 EvolutionEngine 重复创建工单（通过 Engine 内置去重） | ✅ |
+| 9.3.3 | `SqlProposalRepository` | evolution_proposals 表 + SQL 实现 + app.py 条件切换 | ✅ |
+| 9.3.4 | Admin 提案管理 | 按 agent/status/risk 查询；dismiss/dispatch 操作（已通过 Evolution API 实现） | ✅ |
 | 9.3.5 | 自进化指标 | 提案生成数/通过率/回归率/平均修复时间 | ⬜ |
 
 ---

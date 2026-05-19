@@ -32,6 +32,7 @@ from agent_platform.persistence.tables import (
     DeploymentAuditEventRow,
     EvalRunRow,
     ExecutionLogRow,
+    EvolutionProposalRow,
     RoutingDecisionRow,
     WebhookDeliveryRow,
     DeadLetterEntryModel,
@@ -1436,3 +1437,155 @@ class SqlExecutionLogRepository:
         async with self._sf() as session:
             result = await session.execute(stmt)
             return [row[0] for row in result.all()]
+
+
+class SqlProposalRepository:
+    """ImprovementProposal 的 SQL 持久化实现。"""
+
+    def __init__(
+        self, session_factory: async_sessionmaker[AsyncSession],
+    ) -> None:
+        self._sf = session_factory
+
+    async def create(self, proposal: Any) -> None:
+        row = EvolutionProposalRow(
+            id=proposal.proposal_id,
+            proposal_id=proposal.proposal_id,
+            title=proposal.title,
+            summary=proposal.summary,
+            agent_id=proposal.agent_id,
+            tenant_id=proposal.tenant_id,
+            task_type=proposal.task_type,
+            source=proposal.source,
+            status=proposal.status,
+            risk_level=proposal.risk.level,
+            risk_reason=proposal.risk.reason,
+            root_cause_category=proposal.root_cause.category,
+            root_cause_confidence=proposal.root_cause.confidence,
+            root_cause_explanation=proposal.root_cause.explanation,
+            evidence_json=[e.model_dump(mode="json") for e in proposal.evidence],
+            proposed_changes_json=[c.model_dump(mode="json") for c in proposal.proposed_changes],
+            allowed_paths_json=proposal.allowed_paths,
+            blocked_paths_json=proposal.blocked_paths,
+            validation_json=proposal.validation.model_dump(mode="json"),
+            plane_work_item_id=proposal.plane_work_item_id,
+            gitlab_mr_iid=proposal.gitlab_mr_iid,
+            metadata_json=proposal.metadata,
+        )
+        _fill_audit(row)
+        async with self._sf() as session:
+            session.add(row)
+            await session.commit()
+
+    async def get(self, proposal_id: str) -> Any | None:
+        stmt = select(EvolutionProposalRow).where(
+            EvolutionProposalRow.proposal_id == proposal_id,
+        )
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row is None:
+                return None
+            return self._to_model(row)
+
+    async def list_by_agent(
+        self,
+        agent_id: str,
+        status: Any | None = None,
+        limit: int = 50,
+    ) -> list[Any]:
+        stmt = select(EvolutionProposalRow).where(
+            EvolutionProposalRow.agent_id == agent_id,
+        )
+        if status is not None:
+            stmt = stmt.where(EvolutionProposalRow.status == str(status))
+        stmt = stmt.order_by(EvolutionProposalRow.created_at.desc()).limit(limit)
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            return [self._to_model(r) for r in result.scalars().all()]
+
+    async def list_all(
+        self,
+        status: Any | None = None,
+        limit: int = 100,
+    ) -> list[Any]:
+        stmt = select(EvolutionProposalRow)
+        if status is not None:
+            stmt = stmt.where(EvolutionProposalRow.status == str(status))
+        stmt = stmt.order_by(EvolutionProposalRow.created_at.desc()).limit(limit)
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            return [self._to_model(r) for r in result.scalars().all()]
+
+    async def update_status(
+        self,
+        proposal_id: str,
+        status: Any,
+        **kwargs: object,
+    ) -> None:
+        async with self._sf() as session:
+            stmt = select(EvolutionProposalRow).where(
+                EvolutionProposalRow.proposal_id == proposal_id,
+            )
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row is None:
+                return
+            row.status = str(status)
+            row.updated_at = datetime.now(UTC)
+            if str(status) == "dispatched":
+                pwi = kwargs.get("plane_work_item_id")
+                if pwi:
+                    row.plane_work_item_id = str(pwi)
+            elif str(status) == "closed":
+                row.closed_at = datetime.now(UTC)
+                outcome = kwargs.get("outcome")
+                if outcome:
+                    row.outcome = str(outcome)
+            await session.commit()
+
+    @staticmethod
+    def _to_model(row: EvolutionProposalRow) -> Any:
+        from agent_platform.evolution.models import (
+            Evidence,
+            ImprovementProposal,
+            ProposalSource,
+            ProposalStatus,
+            RiskAssessment,
+            RiskLevel,
+            RootCause,
+            RootCauseCategory,
+            ProposedChange,
+            ValidationSpec,
+        )
+        return ImprovementProposal(
+            proposal_id=row.proposal_id,
+            title=row.title,
+            summary=row.summary,
+            agent_id=row.agent_id,
+            tenant_id=row.tenant_id or "default",
+            task_type=row.task_type,
+            source=ProposalSource(row.source),
+            status=ProposalStatus(row.status),
+            risk=RiskAssessment(
+                level=RiskLevel(row.risk_level),
+                reason=row.risk_reason,
+            ),
+            root_cause=RootCause(
+                category=RootCauseCategory(row.root_cause_category),
+                confidence=row.root_cause_confidence,
+                explanation=row.root_cause_explanation,
+            ),
+            evidence=[Evidence(**e) for e in (row.evidence_json or [])],
+            proposed_changes=[ProposedChange(**c) for c in (row.proposed_changes_json or [])],
+            allowed_paths=row.allowed_paths_json or [],
+            blocked_paths=row.blocked_paths_json or [],
+            validation=ValidationSpec(**(row.validation_json or {})),
+            plane_work_item_id=row.plane_work_item_id,
+            gitlab_mr_iid=row.gitlab_mr_iid,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+            closed_at=row.closed_at,
+            outcome=row.outcome,
+            metadata=row.metadata_json or {},
+        )

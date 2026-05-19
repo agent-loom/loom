@@ -395,3 +395,36 @@ class ExecutionLogRow(AuditMixin, Base):
     logged_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+
+
+class EvolutionProposalRow(AuditMixin, Base):
+    """自进化提案表行模型。"""
+    __tablename__ = "evolution_proposals"
+    __table_args__ = (
+        Index("ix_evo_agent_status", "agent_id", "status"),
+    )
+
+    proposal_id: Mapped[str] = mapped_column(
+        String(128), nullable=False, unique=True, index=True
+    )
+    title: Mapped[str] = mapped_column(String(256), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    agent_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    task_type: Mapped[str] = mapped_column(String(128), nullable=False, default="agent:prompt_eval_improvement")
+    source: Mapped[str] = mapped_column(String(64), nullable=False, default="evolution_engine")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft", index=True)
+    risk_level: Mapped[str] = mapped_column(String(32), nullable=False, default="medium")
+    risk_reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    root_cause_category: Mapped[str] = mapped_column(String(64), nullable=False)
+    root_cause_confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    root_cause_explanation: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    evidence_json: Mapped[str] = mapped_column(JSON, nullable=False, default=list)
+    proposed_changes_json: Mapped[str] = mapped_column(JSON, nullable=False, default=list)
+    allowed_paths_json: Mapped[str] = mapped_column(JSON, nullable=False, default=list)
+    blocked_paths_json: Mapped[str] = mapped_column(JSON, nullable=False, default=list)
+    validation_json: Mapped[str] = mapped_column(JSON, nullable=False, default=dict)
+    plane_work_item_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    gitlab_mr_iid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    outcome: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[str] = mapped_column(JSON, nullable=False, default=dict)
