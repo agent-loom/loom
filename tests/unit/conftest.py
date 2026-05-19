@@ -14,6 +14,9 @@ import agent_platform.config  # noqa: F401 — 触发 load_dotenv
 
 os.environ.pop("DATABASE_URL", None)
 os.environ.pop("AGENT_PLATFORM_API_KEY", None)
+# 清除真实 LLM key，避免 ModelGateway stub 测试意外调用真实 API
+os.environ.pop("ANTHROPIC_API_KEY", None)
+os.environ.pop("OPENAI_API_KEY", None)
 
 # 清除 settings 缓存，确保后续 get_settings() 重新读取（无 DB/API key）
 from agent_platform.config import get_settings  # noqa: E402
