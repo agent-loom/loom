@@ -70,20 +70,29 @@ class SqlAgentDefinitionRepository:
     async def save(
         self, definition: AgentDefinition
     ) -> None:
-        """将 Agent 定义持久化到数据库。"""
-        row = AgentDefinitionRow(
-            agent_id=definition.agent_id,
-            version=definition.version,
-            status=definition.status.value,
-            manifest_json=definition.manifest.model_dump(
-                mode="json"
-            ),
-            created_at=definition.created_at,
-            updated_at=definition.updated_at,
-        )
-        _fill_audit(row)
+        """将 Agent 定义持久化到数据库（upsert 语义）。"""
         async with self._sf() as session:
-            session.add(row)
+            stmt = select(AgentDefinitionRow).where(
+                AgentDefinitionRow.agent_id == definition.agent_id,
+                AgentDefinitionRow.version == definition.version,
+            )
+            result = await session.execute(stmt)
+            existing = result.scalar_one_or_none()
+            if existing is not None:
+                existing.status = definition.status.value
+                existing.manifest_json = definition.manifest.model_dump(mode="json")
+                existing.updated_at = definition.updated_at
+            else:
+                row = AgentDefinitionRow(
+                    agent_id=definition.agent_id,
+                    version=definition.version,
+                    status=definition.status.value,
+                    manifest_json=definition.manifest.model_dump(mode="json"),
+                    created_at=definition.created_at,
+                    updated_at=definition.updated_at,
+                )
+                _fill_audit(row)
+                session.add(row)
             await session.commit()
 
     async def get(

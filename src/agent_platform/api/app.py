@@ -925,6 +925,11 @@ def create_app() -> FastAPI:
         from agent_platform.devflow.state_sync import DevFlowStateSync
         devflow_state_sync = DevFlowStateSync(plane_adapter=plane_adapter)
 
+        from agent_platform.devflow.ownership import AgentOwnershipResolver
+        ownership_resolver = AgentOwnershipResolver.from_file(
+            settings.devflow_agent_ownership_config
+        )
+
         # 执行日志仓库
         from agent_platform.devflow.runner.execution_log import (
             FileExecutionLogRepository,
@@ -983,11 +988,12 @@ def create_app() -> FastAPI:
             gitlab_project_id=settings.gitlab_project_id,
             webhook_repo=webhook_repo,
             coding_runner=coding_runner,
-            job_queue=job_queue,
-            ai_developing_state_id=settings.plane_ai_developing_state_id,
-            default_branch=settings.devflow_default_branch,
-            state_sync=devflow_state_sync,
-        )
+                job_queue=job_queue,
+                ai_developing_state_id=settings.plane_ai_developing_state_id,
+                default_branch=settings.devflow_default_branch,
+                state_sync=devflow_state_sync,
+                ownership_resolver=ownership_resolver,
+            )
 
         app.state.execution_log_repo = execution_log_repo
         app.state.coding_runner = coding_runner
@@ -1868,6 +1874,10 @@ def create_app() -> FastAPI:
 
         if devflow and x_plane_event:
             payload = json.loads(raw_body) if raw_body else {}
+            if x_plane_delivery:
+                meta = payload.setdefault("_devflow", {})
+                if isinstance(meta, dict):
+                    meta["delivery_id"] = x_plane_delivery
             background_tasks.add_task(_run_devflow, devflow, x_plane_event, payload)
             result["devflow_status"] = "queued"
 

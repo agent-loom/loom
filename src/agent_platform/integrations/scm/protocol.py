@@ -47,6 +47,14 @@ class ScmAdapter(Protocol):
         """Create a merge/pull request and return a normalized result."""
         ...
 
+    async def find_open_merge_request(
+        self,
+        project_id: str,
+        source_branch: str,
+    ) -> MergeRequestResult | None:
+        """Find an open merge/pull request for *source_branch*, if one exists."""
+        ...
+
     async def get_merge_request(
         self,
         project_id: str,

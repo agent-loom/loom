@@ -1,0 +1,37 @@
+version: 1
+default_task_type: agent:change
+
+project_mappings:
+  - plane_project_id: ab49f9f8-be43-4923-8a6b-0f49f682719d
+    plane_project_name: agent-platform
+    agent_id: echo
+    task_type: agent:change
+
+  - plane_project_name: myj
+    agent_id: myj
+    task_type: agent:change
+
+  - plane_project_name: promo-recommendation
+    agent_id: promo_recommendation
+    task_type: agent:change
+
+label_mappings:
+  - label: agent:echo
+    agent_id: echo
+    task_type: agent:change
+
+  - label: agent:myj
+    agent_id: myj
+    task_type: agent:change
+
+keyword_mappings:
+  - keywords: ["echo", "回声", "复述"]
+    agent_id: echo
+    task_type: agent:change
+
+  - keywords: ["门店", "商品", "促销", "库存"]
+    agent_id: myj
+    task_type: agent:change
+
+fallback:
+  mode: require_manual

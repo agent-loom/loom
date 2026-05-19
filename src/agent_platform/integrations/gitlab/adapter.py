@@ -90,6 +90,28 @@ class GitLabAdapter:
             raw=raw,
         )
 
+    async def find_open_merge_request(
+        self,
+        project_id: str,
+        source_branch: str,
+    ) -> MergeRequestResult | None:
+        raw = await self._http.request(
+            "GET",
+            f"/api/v4/projects/{project_id}/merge_requests",
+            params={"source_branch": source_branch, "state": "opened", "per_page": 1},
+            error_cls=ScmError,
+        )
+        if not raw:
+            return None
+        item = raw[0]
+        return MergeRequestResult(
+            mr_id=item.get("iid", 0),
+            url=item.get("web_url", ""),
+            source_branch=item.get("source_branch") or source_branch,
+            target_branch=item.get("target_branch", ""),
+            raw=item,
+        )
+
     async def get_merge_request(
         self,
         project_id: str,

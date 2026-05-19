@@ -1,5 +1,7 @@
 """Tests for the admin API endpoints at /api/v1/admin/."""
 
+import os
+
 from fastapi.testclient import TestClient
 
 from agent_platform.api.app import app
@@ -9,7 +11,8 @@ from agent_platform.devflow.runner.execution_log import (
     LogStream,
 )
 
-client = TestClient(app)
+_api_key = os.environ.get("AGENT_PLATFORM_API_KEY", "")
+client = TestClient(app, headers={"X-API-Key": _api_key} if _api_key else {})
 
 
 def _ensure_agent_chat():

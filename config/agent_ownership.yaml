@@ -1,0 +1,25 @@
+version: 1
+default_task_type: agent:change
+
+project_mappings:
+  - plane_project_id: ab49f9f8-be43-4923-8a6b-0f49f682719d
+    plane_project_name: test-project
+    agent_id: echo
+    task_type: agent:change
+
+  - plane_project_name: TESTPROJEC
+    agent_id: echo
+    task_type: agent:change
+
+label_mappings:
+  - label: agent:echo
+    agent_id: echo
+    task_type: agent:change
+
+keyword_mappings:
+  - keywords: ["echo", "回声", "复述"]
+    agent_id: echo
+    task_type: agent:change
+
+fallback:
+  mode: require_manual
