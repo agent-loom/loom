@@ -58,10 +58,12 @@ class EvolutionEngine:
         *,
         plane_adapter: Any | None = None,
         plane_project_id: str | None = None,
+        ai_developing_state_id: str | None = None,
     ) -> None:
         self._repo = repo
         self._plane = plane_adapter
         self._plane_project_id = plane_project_id
+        self._ai_developing_state_id = ai_developing_state_id
         self._seen_keys: dict[str, datetime] = {}
 
     def _is_duplicate(self, event: EvolutionEvent) -> bool:
@@ -131,8 +133,37 @@ class EvolutionEngine:
                 ProposalStatus.DISPATCHED,
                 plane_work_item_id=work_item_id,
             )
+            proposal.plane_work_item_id = work_item_id
             logger.info("提案已分发到 Plane: %s -> %s", proposal_id, work_item_id)
-            return {"status": "dispatched", "plane_work_item_id": work_item_id}
+
+            dispatch_result: dict[str, Any] = {
+                "status": "dispatched",
+                "plane_work_item_id": work_item_id,
+            }
+
+            if (
+                proposal.risk.level == RiskLevel.LOW
+                and not proposal.risk.requires_human_confirmation_before_devflow
+                and self._ai_developing_state_id
+                and work_item_id
+            ):
+                try:
+                    await self._plane.update_work_item_state(
+                        project_id=self._plane_project_id,
+                        work_item_id=work_item_id,
+                        state_id=self._ai_developing_state_id,
+                    )
+                    dispatch_result["auto_devflow"] = True
+                    logger.info(
+                        "低风险提案自动推进 Ready for AI Dev: %s", proposal_id,
+                    )
+                except Exception:
+                    logger.warning(
+                        "自动推进 Ready for AI Dev 失败: %s", proposal_id,
+                        exc_info=True,
+                    )
+
+            return dispatch_result
         except Exception:
             logger.exception("分发到 Plane 失败: %s", proposal_id)
             return {"error": "Plane API 调用失败"}

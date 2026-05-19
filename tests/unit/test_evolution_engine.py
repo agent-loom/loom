@@ -43,10 +43,12 @@ def engine(repo) -> EvolutionEngine:
 def engine_with_plane(repo) -> tuple[EvolutionEngine, AsyncMock]:
     plane = AsyncMock()
     plane.create_work_item = AsyncMock(return_value={"id": "pw_mock_123"})
+    plane.update_work_item_state = AsyncMock()
     engine = EvolutionEngine(
         repo=repo,
         plane_adapter=plane,
         plane_project_id="proj_1",
+        ai_developing_state_id="state_ai_dev",
     )
     return engine, plane
 
@@ -242,3 +244,61 @@ class TestBuildPlaneBody:
         assert "eval 失败" in body
         assert "agents/echo/prompts/x.md" in body
         assert "pytest tests/ -x" in body
+
+
+class TestAutoDevFlowTransition:
+    @pytest.mark.asyncio
+    async def test_low_risk_auto_transitions_to_ai_dev(self, engine_with_plane):
+        engine, plane = engine_with_plane
+        proposal = await engine.process_event(_event())
+        if proposal.risk.level == RiskLevel.LOW:
+            result = await engine.dispatch_to_plane(proposal.proposal_id)
+            assert result.get("auto_devflow") is True
+            plane.update_work_item_state.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_medium_risk_no_auto_transition(self, repo):
+        plane = AsyncMock()
+        plane.create_work_item = AsyncMock(return_value={"id": "pw_1"})
+        plane.update_work_item_state = AsyncMock()
+        engine = EvolutionEngine(
+            repo=repo,
+            plane_adapter=plane,
+            plane_project_id="p1",
+            ai_developing_state_id="state_1",
+        )
+        proposal = await engine.process_event(_event(event_type="tool_error"))
+        result = await engine.dispatch_to_plane(proposal.proposal_id)
+        assert result.get("auto_devflow") is None
+        plane.update_work_item_state.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_auto_transition_failure_non_blocking(self, repo):
+        plane = AsyncMock()
+        plane.create_work_item = AsyncMock(return_value={"id": "pw_1"})
+        plane.update_work_item_state = AsyncMock(side_effect=Exception("网络错误"))
+        engine = EvolutionEngine(
+            repo=repo,
+            plane_adapter=plane,
+            plane_project_id="p1",
+            ai_developing_state_id="state_1",
+        )
+        proposal = await engine.process_event(_event())
+        if proposal.risk.level == RiskLevel.LOW:
+            result = await engine.dispatch_to_plane(proposal.proposal_id)
+            assert result["status"] == "dispatched"
+            assert result.get("auto_devflow") is None
+
+    @pytest.mark.asyncio
+    async def test_no_transition_without_state_id(self, repo):
+        plane = AsyncMock()
+        plane.create_work_item = AsyncMock(return_value={"id": "pw_1"})
+        plane.update_work_item_state = AsyncMock()
+        engine = EvolutionEngine(
+            repo=repo,
+            plane_adapter=plane,
+            plane_project_id="p1",
+        )
+        proposal = await engine.process_event(_event())
+        await engine.dispatch_to_plane(proposal.proposal_id)
+        plane.update_work_item_state.assert_not_called()

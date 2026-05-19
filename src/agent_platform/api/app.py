@@ -1107,6 +1107,7 @@ def create_app() -> FastAPI:
             repo=_evo_repo,
             plane_adapter=plane_adapter,
             plane_project_id=settings.plane_project_id,
+            ai_developing_state_id=settings.plane_ai_developing_state_id,
         )
     else:
         evolution_engine = EvolutionEngine(repo=_evo_repo)

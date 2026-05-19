@@ -28,7 +28,7 @@
 
 | 指标 | S8 结束 |
 |---|---|
-| 测试 | 1779 passed（+68 evolution） |
+| 测试 | 1799 passed（+88 evolution） |
 | DevFlow | Plane→GitLab 正向+反向流跑通，Code First MR Later |
 | Hermes | 真实模型 E2E 跑通（z-ai/glm-5） |
 | FeedbackIntelligence | 日志挖掘 → 候选需求 → Plane 工单（已实现） |
@@ -94,7 +94,7 @@ POST /api/v1/evolution/proposals/{id}/dismiss   # 驳回
 
 ---
 
-## S9 Phase 2：DevFlow 闭环 — ⬜
+## S9 Phase 2：DevFlow 闭环 — 🔶 进行中
 
 **目标**：低风险提案自动进入 DevFlow，Runner 修改 prompt/eval 并提交 MR。
 
@@ -102,10 +102,10 @@ POST /api/v1/evolution/proposals/{id}/dismiss   # 驳回
 
 | # | 任务 | 验收标准 | 状态 |
 |---|---|---|---|
-| 9.2.1 | Proposal → TaskPack 转换 | ImprovementProposal 映射为 DevelopmentTask | ⬜ |
-| 9.2.2 | 低风险自动推进 | risk=low 的 Plane Work Item 自动推进 Ready for AI Dev | ⬜ |
-| 9.2.3 | PathGuard 增强 | Runner 严格执行 proposal 的 allowed_paths/blocked_paths | ⬜ |
-| 9.2.4 | Eval 回归验证 | MR 必须通过现有 eval + 新增 eval case | ⬜ |
+| 9.2.1 | Proposal → TaskPack 转换 | ImprovementProposal 映射为 DevelopmentTask | ✅ |
+| 9.2.2 | 低风险自动推进 | risk=low 的 Plane Work Item 自动推进 Ready for AI Dev | ✅ |
+| 9.2.3 | PathGuard 增强 | Runner 严格执行 proposal 的 allowed_paths/blocked_paths（通过 converter scope 映射） | ✅ |
+| 9.2.4 | Eval 回归验证 | MR 必须通过现有 eval + 新增 eval case（converter 自动添加 eval 命令） | ✅ |
 | 9.2.5 | E2E 验证 | eval failure → proposal → Plane → DevFlow → MR → eval pass | ⬜ |
 
 ---
