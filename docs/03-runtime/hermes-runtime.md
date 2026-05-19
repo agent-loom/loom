@@ -14,6 +14,26 @@ Hermes 是可插拔 runtime / capability provider
 
 不建议把业务平台做进 Hermes，也不建议深 fork Hermes。推荐做一层 `HermesBackend Adapter`，把平台契约翻译成 Hermes 的 `AIAgent` 调用。
 
+## 0. 当前实现状态
+
+截至 2026-05-19，Hermes 相关设计和平台侧 adapter 骨架已经基本成型，但不能理解为“生产级 Hermes 全能力已完成”。
+
+已实现/已有基础：
+
+1. `HermesRuntimeBackend` 作为平台 `RuntimeBackend` 可被 manifest 选择。
+2. `ManifestMapper`、`ToolBridge`、`SessionBridge`、`ResponseMapper`、`TraceBridge`、`PolicyEnforcer` 等 adapter 组件已具备基础实现。
+3. 已支持 optional dependency `hermes-agent>=0.13.0,<1.0`，可在 SDK 可用时走 Hermes SDK 路径。
+4. SDK 不可用或测试场景下，可退回平台内置 lightweight conversation/tool-loop，用于保持 runtime 契约可测。
+5. 已补充 Hermes stream、memory、error、HITL 等平台映射层的设计和基础测试。
+
+仍未完成/需要继续验证：
+
+1. 真实 Hermes SDK 的生产 E2E 仍需在目标版本、目标模型 provider、目标工具集上压测。
+2. Hermes memory 与平台 `SessionStore` / 长期 memory 的持久化边界仍需强化。
+3. Hermes trace/event 与平台 `AgentRun`、SSE/WebSocket、Langfuse/OTel 的映射还需要完整线上样本验证。
+4. Hermes 不直接负责 Plane/GitLab/DevFlow 编排，也不建议直接调用 Codex/Claude Code 做代码修改。
+5. DevFlow 的 Codex/Claude Code runner 应继续由 Agent Platform 编排，Hermes 可以用于需求理解、日志分析、测试生成、修复建议生成等“研发辅助 Agent”。
+
 ## 1. Hermes 在平台里的定位
 
 ```mermaid

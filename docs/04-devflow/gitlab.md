@@ -118,7 +118,7 @@ Plane Work Item
 └── GitLab MR checklist
 ```
 
-### 2. DevFlow 创建 GitLab 分支和 MR
+### 2. DevFlow 创建 GitLab 分支，runner 成功后创建 MR
 
 AI DevFlow 从 Plane Work Item 生成 task pack：
 
@@ -141,14 +141,14 @@ task:
         - product-owner
 ```
 
-然后创建 GitLab 分支和 MR。
+当前实现先创建 GitLab 分支，并将分支信息回写 Plane。Coding Runner 在受控 workspace 中完成修改、validation、commit 和 push 后，再创建或复用 GitLab MR。这样最终 MR 天然包含 commit 和 changes，避免用户看到长时间空 MR。
 
-### 3. Codex / Claude Code 只围绕 GitLab MR 工作
+### 3. Codex / Claude Code 只围绕 TaskPack 和受控分支工作
 
 Coding Agent 的输入应该是：
 
 ```
-Plane Work Item + task pack + 当前代码仓库 + 允许修改路径
+Plane Work Item + task pack + 当前代码仓库 + 允许修改路径 + feature branch
 ```
 
 不要让 AI 自由读一个口头需求直接改全仓库。
@@ -179,6 +179,13 @@ tests
 docs
 MR 描述
 ```
+
+MR 创建规则：
+
+1. runner 没有产生变更或 validation 失败时，不创建最终 MR，只回写失败报告。
+2. commit + push 成功后，runner 调用 GitLab 创建 MR。
+3. 如果同一 source branch 已有打开 MR，平台复用已有 MR，避免 GitLab `409 Another open merge request already exists` 中断重试流程。
+4. 如果未来需要在 runner 前暴露工程入口，应使用 Draft MR，并在状态同步文档中明确 Draft -> Ready 的转换。
 
 ### 4. GitLab CI 执行测试和 Eval
 
@@ -505,12 +512,13 @@ Agent Platform:
 先做自动化：
 
 1. Plane Work Item 创建后，AI 生成需求规格。
-2. 点击“Ready for AI Dev”后，DevFlow 创建 GitLab branch + MR。
-3. Codex/Claude Code 根据 issue + task pack 修改代码。
-4. GitLab CI 跑 test + eval。
-5. 结果回写 MR 和 Plane。
-6. 人审通过后 merge。
-7. CI 注册 Agent 版本并发布 staging。
+2. 点击“Ready for AI Dev”后，DevFlow 创建 GitLab branch，并把 Plane 状态推进到 `AI Developing`。
+3. Codex/Claude Code 根据 issue + task pack + feature branch 修改代码，通过校验后 commit/push。
+4. Runner 在 commit/push 成功后创建或复用 GitLab MR，避免产生没有代码变更的最终 MR。
+5. GitLab CI 跑 test + eval。
+6. 结果回写 MR 和 Plane。
+7. 人审通过后 merge。
+8. CI 注册 Agent 版本并发布 staging。
 
 ### 不建议 MVP 里做
 

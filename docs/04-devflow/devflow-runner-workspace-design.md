@@ -3,7 +3,7 @@
 > Status: Implemented (真实 Codex Runner E2E 已跑通)
 > Stage: S4
 > Owner: platform
-> Last verified against code: 2026-05-18
+> Last verified against code: 2026-05-19
 
 本文档定义 CodingAgentRunner、Workspace、PathGuard 以及 Job 生命周期的完整设计。目标是让 DevFlow 能够从 task pack 出发，自动调用 Codex / Claude Code / OpenHands 完成编码，并将结果提交到 GitLab MR、回写 Plane。
 
@@ -16,10 +16,11 @@
 ```
 DevFlowOrchestrator  -->  Plane webhook 触发
                      -->  TaskPackGenerator 生成 DevelopmentTask
-                     -->  GitLabAdapter 创建 branch + MR
-                     -->  PlaneAdapter 回写 comment / 状态 / custom properties
+                     -->  GitLabAdapter 创建 branch
+                     -->  PlaneAdapter 回写 branch comment / 状态 / custom properties
                      -->  CodingAgentRunner 调用 mock / codex / claude_code
                      -->  WorkspaceManager clone / validate / commit / push
+                     -->  commit 成功后创建或复用 GitLab MR
                      -->  GitLab MR comment + Plane comment 回写
 ```
 
@@ -30,7 +31,8 @@ DevFlowOrchestrator  -->  Plane webhook 触发
 1. Claude Code 真实 E2E 尚未完成稳定验证。
 2. Runner job 日志仍主要依赖进程输出和内存 execution log，缺少可长期查询的 stdout/stderr 文件或 DB 存储。
 3. workspace 隔离仍是本地目录级隔离，未引入容器、网络策略、资源限制或 secret 隔离。
-4. Plane/GitLab 强状态机、DLQ、失败重试和 reconciliation 仍以设计为主，未完全生产化。
+4. Plane/GitLab 强状态机、DLQ、失败重试和 reconciliation 已有基础实现，但仍需生产化压测。
+5. 当前策略是 commit 成功后创建/复用 MR；如果未来要提前创建 MR，必须使用 Draft MR 并在文档中明确。
 
 ### 1.3 整体流程
 
@@ -40,7 +42,7 @@ Plane webhook
   v
 DevFlowOrchestrator
   |-- TaskPackGenerator.from_requirement() --> DevelopmentTask
-  |-- GitLabAdapter.create_branch() + create_merge_request()
+  |-- GitLabAdapter.create_branch()
   |-- PlaneAdapter.update_work_item_state("AI Developing")
   |
   v
@@ -50,6 +52,7 @@ CodingAgentRunner  <-- 本文档核心
   |-- RunnerAdapter.execute() (Claude Code / Codex / OpenHands)
   |-- Workspace.validate()
   |-- Workspace.commit_and_push()
+  |-- GitLabAdapter.create_merge_request() / find_open_merge_request()
   |-- GitLabAdapter.comment_merge_request()
   |-- PlaneAdapter.add_comment() + update_work_item_state()
   |
@@ -1668,10 +1671,10 @@ async def test_mr_comment_contains_results():
 
 ### 14.4 真实 E2E 验证记录
 
-2026-05-18 已使用真实 Plane、GitLab 和 Codex CLI 跑通端到端链路：
+2026-05-19 已使用真实 Plane、GitLab 和 Codex CLI 跑通端到端链路：
 
 ```bash
-.venv/bin/python scripts/devflow_real_e2e.py
+uv run python scripts/devflow_real_e2e.py --require-real-runner --require-commit
 ```
 
 验证环境：
@@ -1682,20 +1685,30 @@ async def test_mr_comment_contains_results():
 | Plane | `http://10.193.0.147:3333` |
 | GitLab | `https://gitlab.ttyuyin.com` |
 | 目标默认分支 | `master` |
-| 验证结果 | `13 passed, 0 failed` |
-| GitLab MR | `!11` |
-| Runner commit | `3d7d6a99dac657bc4987b8891ab839d5cac8f650` |
+| 验证结果 | `21 passed, 0 failed` |
+| GitLab MR | `!18` |
+| Runner commit | `7e4c9a7e5a4db4d073d74e3f543628f77a48ae15` |
+
+同日服务端 Plane webhook 链路也已验证通过：
+
+| 项 | 值 |
+| --- | --- |
+| Plane Work Item | `bb4ce9fb-1444-41c9-8ad0-99c9d0a6b58c` |
+| GitLab MR | `!19` |
+| Runner commit | `8fe0193411a8f41132b6a8f4b53b762561940280` |
+| Plane state | `In Testing` |
 
 该验证覆盖：
 
 1. Plane API 可达和 Work Item 创建。
-2. GitLab API 可达、feature branch 创建、MR 创建。
-3. `DevFlowOrchestrator` 生成 TaskPack，并把默认分支、MR 链接、custom properties 回写 Plane。
+2. GitLab API 可达、feature branch 创建。
+3. `DevFlowOrchestrator` 生成 TaskPack，并把默认分支、branch、custom properties 回写 Plane。
 4. `CodingAgentRunner` 创建真实 workspace，调用 `CodexAdapter` 修改代码。
 5. `PathGuard` 校验真实 changed files。
 6. `WorkspaceManager` 执行 `pytest`、contract test、manifest validate、agent eval。
 7. 验证通过后 commit/push 到 GitLab branch。
-8. GitLab MR comment 和 Plane comment 回写。
+8. commit 成功后创建或复用 GitLab MR。
+9. GitLab MR comment 和 Plane comment 回写。
 
 本次验证暴露并已修复的问题：
 

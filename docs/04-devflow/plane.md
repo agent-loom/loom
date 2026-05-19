@@ -144,12 +144,12 @@ flowchart LR
     Webhook --> Orchestrator
     Orchestrator --> TaskPack
     TaskPack --> Branch
-    Branch --> MR
+    Branch --> Runner
+    Runner --> MR
     MR --> CI
     Orchestrator --> Comment
     Orchestrator --> Props
     Orchestrator --> Runner
-    Runner --> MR
     CI --> Artifact
     CI --> Eval
     Eval --> Comment
@@ -180,11 +180,13 @@ sequenceDiagram
     AP->>Plane: get_work_item(project_id, work_item_id)
     AP->>AP: 生成 DevFlow TaskPack
     AP->>GitLab: create_branch(feat/<work_item_id>)
-    AP->>GitLab: create_merge_request(...)
-    AP->>Plane: add_comment(MR link)
-    AP->>Plane: update_custom_properties(gitlab_branch, gitlab_mr_url, gitlab_mr_iid)
-    AP->>Runner: run(task_pack, mr_iid, plane ids)
-    Runner->>GitLab: 提交代码 / 更新 MR
+    AP->>Plane: add_comment(branch link / AI developing)
+    AP->>Plane: update_custom_properties(gitlab_branch, agent_id, task_type)
+    AP->>Runner: run(task_pack, plane ids)
+    Runner->>GitLab: clone / checkout branch / 修改代码
+    Runner->>GitLab: validation pass 后 commit + push
+    Runner->>GitLab: create_or_reuse_merge_request(...)
+    Runner->>Plane: add_comment(MR link + runner report)
     GitLab->>Eval: CI 执行测试和 eval
     Eval->>GitLab: MR comment(eval report)
     Eval->>Plane: comment / state update
@@ -205,11 +207,11 @@ sequenceDiagram
 6. `DevFlowOrchestrator` 从 Plane 拉取 Work Item 详情。
 7. `TaskPackGenerator` 根据 Work Item 生成 DevFlow TaskPack。
 8. SCM Adapter 创建 feature branch；当前实现为 GitLab branch，未来可扩展为 GitHub branch。
-9. SCM Adapter 创建变更请求；当前实现为 GitLab MR，未来可扩展为 GitHub PR。
-10. `agent-platform` 把 branch、MR/PR 链接和 DevFlow 摘要评论回 Plane。
-11. `agent-platform` 把 `gitlab_branch`、`gitlab_mr_url`、`gitlab_mr_iid` 等工程信息写回 Plane custom properties。
-12. `CodingAgentRunner` 接收 TaskPack，调用 mock / codex / claude_code adapter 执行代码修改。
-13. Coding Runner 提交代码并更新 MR/PR，变更内容通常包括 manifest、adapter、tools、prompts、evals、tests 和 docs。
+9. `agent-platform` 把 branch、agent 归属和 DevFlow 摘要评论回 Plane，并把 Work Item 推进到 `AI Developing`。
+10. `agent-platform` 把 `agent_id`、`task_type`、`agent_ownership_source`、`gitlab_branch` 等工程信息写回 Plane custom properties。
+11. `CodingAgentRunner` 接收 TaskPack，调用 mock / codex / claude_code adapter 在受控 workspace 执行代码修改。
+12. Coding Runner 执行 validation，全部通过后 commit + push 到 feature branch。
+13. Coding Runner 创建或复用变更请求；当前实现为 GitLab MR，未来可扩展为 GitHub PR。MR 天然包含本次 commit，避免最终 MR 无变更。
 14. CI 执行 lint、unit tests、contract tests、agent eval 和 package；Eval 结果回写 MR/PR 和 Plane。
 15. Eval 和人工 Review 通过后，Agent Platform 执行 staging / prod canary / prod 部署，并记录 artifact、deployment 和 audit。
 16. 业务流量通过 `POST /api/v1/agent/chat` 进入平台，由 `AgentRouter` 和 `RuntimeManager` 根据 manifest 选择 `native`、`hermes` 或 `langgraph` runtime；配置为 `hermes` 的 Agent 才会进入 `HermesRuntimeBackend`。
@@ -219,7 +221,7 @@ sequenceDiagram
 | 边界 | 规则 |
 | --- | --- |
 | Plane -> Platform | Plane 只触发需求和状态事件，不直接运行 Agent |
-| Platform -> SCM | Platform 通过 adapter 创建 branch 和 MR/PR，不把 SCM 逻辑写死在 Plane adapter |
+| Platform -> SCM | Platform 通过 adapter 创建 branch；runner 成功 commit/push 后创建或复用 MR/PR |
 | SCM -> Runner | Coding Runner 只围绕 TaskPack 和受控工作区改代码 |
 | Eval -> Deploy | Eval 是部署门禁的一部分，不应绕过 |
 | Runtime -> Hermes | Hermes 是 runtime backend，不处理 Plane webhook，也不直接管理 MR/PR |
@@ -260,22 +262,34 @@ issue
 | `data.project` / `data.project_id` | Plane Project ID | 必需 |
 | `data.name` / `data.title` | 任务标题 | 可选，缺省 `Untitled` |
 | `data.state_detail.name` / `data.state.name` | 看板状态 | 必须为 Ready 状态 |
-| `data.properties.agent_id` | 目标业务 Agent | 可选 |
-| `data.properties.task_type` | DevFlow 任务类型 | 可选，缺省 `platform:change` |
+| `data.properties.agent_id` | 目标业务 Agent | 推荐；缺失时走 Agent 归属解析 |
+| `data.properties.task_type` | DevFlow 任务类型 | 推荐；缺省由归属解析或 TaskPack 默认值决定 |
 
 当前实现会优先读取 Plane `get_work_item()` 返回的详情字段；如果详情里没有 `properties/custom_properties`，会回退读取 webhook payload 中的 `properties/custom_properties`。这是为了兼容 Plane 自定义字段未在详情接口完整返回的部署形态。
 
+Agent 归属解析优先级：
+
+```text
+Work Item properties/custom_properties.agent_id
+  -> Plane Project ID / Project name 映射
+  -> Plane label / label_details 映射
+  -> title/description 关键词映射
+  -> fallback 策略
+```
+
+当启用 `DEVFLOW_AGENT_OWNERSHIP_CONFIG` 时，Project、Label 和关键词映射来自配置文件。若无法解析归属，平台会在 Plane 留言提示补充 `agent_id` 或映射配置，并停止生成可执行 TaskPack，避免出现 `<agent_id>` 占位符进入 validation。
+
 ### 2.1.5 回写 Plane 的数据
 
-DevFlow 成功创建 SCM 分支和 MR 后，平台应回写 Plane：
+DevFlow 成功创建 SCM 分支、runner 成功提交代码并创建/复用 MR 后，平台应回写 Plane：
 
 | Plane 位置 | 回写内容 | 目的 |
 | --- | --- | --- |
-| Comment | MR / PR 链接、分支名、DevFlow 摘要 | 让产品和研发在需求卡片里看到工程入口 |
+| Comment | 分支名、MR / PR 链接、Runner 报告、DevFlow 摘要 | 让产品和研发在需求卡片里看到工程入口 |
 | Custom Properties | `gitlab_branch`、`gitlab_mr_url`、`gitlab_mr_iid` | 后续状态同步、eval 回写、人工追踪 |
 | State | `AI Developing`、`Testing / Eval`、`Human Review` 等 | 让看板反映自动化研发进度 |
 
-当前代码已实现 MR comment 和 custom properties 回写；状态回写依赖配置 `ai_developing_state_id`，完整状态机见 `04-devflow/devflow-state-sync-design.md`。
+当前代码已实现 branch comment、MR comment、custom properties 和 runner report 回写；状态回写依赖 `PLANE_AI_DEVELOPING_STATE_ID`、`PLANE_TESTING_STATE_ID` 等配置，完整状态机见 `04-devflow/devflow-state-sync-design.md`。
 
 ### 2.1.6 Hermes 在流程中的位置
 
@@ -342,8 +356,9 @@ class ScmAdapter(Protocol):
 | Plane Webhook endpoint | 已实现 | `src/agent_platform/api/app.py` |
 | Webhook delivery 幂等 | 已实现，依赖 webhook repo | `src/agent_platform/api/app.py` |
 | Ready for AI Dev 触发 DevFlow | 已实现 | `src/agent_platform/devflow/orchestrator.py` |
-| Plane -> GitLab branch/MR | 已实现 | `src/agent_platform/devflow/orchestrator.py` |
-| GitLab MR 链接回写 Plane | 已实现 | `src/agent_platform/devflow/orchestrator.py` |
+| Plane -> GitLab branch | 已实现 | `src/agent_platform/devflow/orchestrator.py` |
+| Runner commit 后创建/复用 GitLab MR | 已实现 | `src/agent_platform/devflow/runner/runner.py` |
+| GitLab MR 链接回写 Plane | 已实现 | `src/agent_platform/devflow/runner/runner.py` |
 | CodingRunner 派发 | 已实现基础版 | `src/agent_platform/devflow/runner/runner.py` |
 | 真实 Codex Runner E2E | 已跑通 | `scripts/devflow_real_e2e.py` |
 | GitHub 主链路 | 未实现 | 待新增 `GitHubAdapter` / `ScmAdapter` |
@@ -352,29 +367,40 @@ class ScmAdapter(Protocol):
 
 ### 2.1.9 真实 E2E 验证记录
 
-2026-05-18 已完成一次真实链路验证：
+2026-05-19 已完成真实链路验证：
 
 ```text
 Plane Work Item
   -> DevFlowOrchestrator
-  -> GitLab branch + MR
+  -> GitLab branch
   -> Codex Runner 修改代码
   -> pytest / contract / manifest / eval 验证
   -> commit + push
+  -> GitLab MR 创建/复用
   -> GitLab MR comment
   -> Plane comment
+  -> Plane state: In Testing
 ```
 
 验证结果：
 
 | 项 | 值 |
 | --- | --- |
-| 命令 | `.venv/bin/python scripts/devflow_real_e2e.py` |
+| 命令 | `uv run python scripts/devflow_real_e2e.py --require-real-runner --require-commit` |
 | Runner | `codex` |
-| GitLab MR | `!11` |
-| Branch | `feat/80c3aa2e-9c16-41e4-b675-3bc502eb009c` |
-| Runner commit | `3d7d6a99dac657bc4987b8891ab839d5cac8f650` |
-| 结果 | `13 passed, 0 failed` |
+| GitLab MR | `!18` |
+| Runner commit | `7e4c9a7e5a4db4d073d74e3f543628f77a48ae15` |
+| 结果 | `21 passed, 0 failed` |
+
+同日服务端 Plane webhook 真实链路也已跑通：
+
+| 项 | 值 |
+| --- | --- |
+| Plane Work Item | `bb4ce9fb-1444-41c9-8ad0-99c9d0a6b58c` |
+| GitLab MR | `!19` |
+| Branch | `feat/bb4ce9fb-1444-41c9-8ad0-99c9d0a6b58c` |
+| Runner commit | `8fe0193411a8f41132b6a8f4b53b762561940280` |
+| Plane state | `In Testing` |
 
 该结果说明 Plane -> GitLab -> Coding Runner -> 验证 -> commit/push -> Plane/GitLab 回写已经具备可复现的内测闭环。
 
@@ -512,7 +538,7 @@ Canceled
 | `Clarifying` | AI / 人澄清需求 | AI 可自动补问题 |
 | `Designing` | 架构设计、方案确认 | AI 生成 design brief |
 | `Ready for AI Dev` | 可交给 coding agent | 触发 task pack |
-| `AI Developing` | Coding agent 开发中 | DevFlow 创建 GitLab MR |
+| `AI Developing` | Coding agent 开发中 | DevFlow 创建 GitLab branch 并派发 runner |
 | `Testing / Eval` | CI 和 eval 执行中 | GitLab pipeline webhook 更新 |
 | `Human Review` | 等待人审 | MR ready + eval pass |
 | `Staging` | 已进入 staging | Agent Platform 回写 |
@@ -682,8 +708,10 @@ sequenceDiagram
     User->>Plane: confirm requirement
     Plane->>Webhook: work item update state=Ready for AI Dev
     Webhook->>DevFlow: trigger task pack
-    DevFlow->>GitLab: create branch + MR
-    DevFlow->>Plane: update gitlab_mr + state=AI Developing
+    DevFlow->>GitLab: create branch
+    DevFlow->>Plane: update gitlab_branch + state=AI Developing
+    DevFlow->>GitLab: runner commit + create/reuse MR
+    DevFlow->>Plane: update gitlab_mr + runner report
 ```
 
 ## 11. Webhook 设计
@@ -797,8 +825,8 @@ AI 需求理解 Agent 回写评论：
 
 | 事件 | Plane 更新 | GitLab 更新 |
 | --- | --- | --- |
-| Work Item 进入 `Ready for AI Dev` | 生成 task pack | 创建 branch + draft MR |
-| MR 创建成功 | 写入 `gitlab_mr` 字段，状态到 `AI Developing` | MR 描述引用 Plane Work Item |
+| Work Item 进入 `Ready for AI Dev` | 生成 task pack，状态到 `AI Developing` | 创建 branch |
+| Runner commit 成功 | 写入 `gitlab_mr` 字段，回写 runner report | 创建或复用 MR，MR 描述引用 Plane Work Item |
 | CI 开始 | 状态到 `Testing / Eval` | pipeline running |
 | CI / Eval 通过 | 状态到 `Human Review` | MR ready for review |
 | MR 合并 | 状态到 `Staging` | main merged |
@@ -824,7 +852,7 @@ AI 需求理解 Agent 回写评论：
 6. 在 agent-platform 配置 `PLANE_BASE_URL`、`PLANE_API_KEY`、`PLANE_WORKSPACE_SLUG`。
 7. 实现 `PlaneAdapter` 的 work item 查询、评论、状态更新。
 8. 实现 webhook endpoint。
-9. 打通 `Ready for AI Dev -> GitLab MR`。
+9. 打通 `Ready for AI Dev -> GitLab branch -> Runner commit -> GitLab MR`。
 10. 把 CI / Eval 结果回写 Plane comment。
 
 第二阶段：
@@ -839,7 +867,7 @@ AI 需求理解 Agent 回写评论：
 
 1. `PLANE_API_KEY` 只放环境变量或 secret manager。
 2. Webhook secret 必须校验。
-3. Plane webhook 要做幂等，防止重复创建 MR。
+3. Plane webhook 要做幂等，防止重复创建 branch/MR 或重复派发 runner。
 4. Coding agent 不能直接拿高权限 Plane token。
 5. 生产发布仍以 GitLab + Agent Platform 审批为准，不能只靠 Plane 状态。
 6. Plane 评论里不能写密钥、完整用户隐私、内部 API token。

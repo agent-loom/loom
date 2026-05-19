@@ -1,9 +1,9 @@
 # Plane/GitLab 状态同步设计
 
-> Status: Draft
+> Status: Partially Implemented / 需生产化校准
 > Stage: S4
 > Owner: platform
-> Last verified against code: 2026-05-15
+> Last verified against code: 2026-05-19
 
 本文档定义 Plane Work Item、GitLab MR/Pipeline、Agent Platform 三者之间的状态同步机制，包括状态机、事件映射、webhook 幂等、重试策略、死信队列和冲突解决规则。
 
@@ -28,17 +28,18 @@
 | `PlaneAdapter` | `src/agent_platform/integrations/plane/adapter.py` | httpx async client；支持 work item CRUD、comment、state 更新、custom properties 更新 |
 | `GitLabAdapter` | `src/agent_platform/integrations/gitlab/adapter.py` | httpx async client；支持 branch、MR、comment、pipeline status、commit status、artifact |
 | `PlaneWebhookVerifier` | `src/agent_platform/integrations/plane/webhook.py` | HMAC-SHA256 签名校验 |
-| `DevFlowOrchestrator` | `src/agent_platform/devflow/orchestrator.py` | 单一转换：Plane "Ready for AI Dev" -> 创建 GitLab branch + MR -> 回写 Plane comment 和 custom properties |
-| webhook endpoint | `src/agent_platform/api/app.py` L500-542 | 接收 Plane webhook；内存 `set[str]` 做 delivery_id 幂等去重 |
+| `DevFlowOrchestrator` | `src/agent_platform/devflow/orchestrator.py` | Plane "Ready for AI Dev" -> 解析 Agent 归属 -> 生成 TaskPack -> 创建 GitLab branch -> 回写 Plane comment/custom properties -> 派发 runner |
+| `CodingAgentRunner` | `src/agent_platform/devflow/runner/runner.py` | 在受控 workspace 中执行真实或 mock runner；校验通过后 commit/push；成功后创建或复用 MR；回写 Plane/GitLab |
+| webhook endpoint | `src/agent_platform/api/app.py` | 接收 Plane webhook；支持 webhook secret / delivery id；SQL repo 配置后可持久化 delivery |
 
 ### 1.2 缺失
 
-1. **无状态机**：plane.md 定义了 Backlog -> ... -> Done 的状态流转，但代码里只处理 `Ready for AI Dev` 一个状态，没有强制合法转换。
-2. **无 GitLab -> Plane 反向同步**：GitLab pipeline fail/pass、MR merge、eval 结果均不会回写 Plane。
-3. **幂等仅内存**：`webhook_deliveries: set[str]` 在服务重启后丢失，无法防止重复创建 MR。
-4. **无重试**：adapter `_request` 方法不重试，外部调用失败直接丢失。
-5. **无死信队列**：webhook 处理失败只打 log，无法恢复。
-6. **无冲突解决**：Plane 状态和 GitLab MR 状态可能不一致时无规则判定谁为准。
+1. **强状态机未完全落地**：plane.md 定义了 Backlog -> ... -> Done 的状态流转，代码已覆盖 Ready -> AI Developing -> Testing 的主链路，但还没有对所有状态转换做统一强校验。
+2. **GitLab -> Plane 反向同步仍不完整**：GitLab pipeline fail/pass、MR merge、eval 结果的反向回写需要继续补齐和压测。
+3. **幂等已具备基础实现，但需生产压测**：SQL repo 配置后可持久化 delivery；业务幂等、并发 in-flight 冲突和重启恢复还需要按真实流量验证。
+4. **重试能力需要分层补齐**：HTTP adapter 已有基础重试方向，但 webhook 业务重试、runner job retry、DLQ replay 仍需生产化。
+5. **死信队列/对账需要运维化**：DLQ、reconcile 设计已有，但还需要管理端点、运行手册和告警闭环。
+6. **冲突解决未完整实现**：Plane 状态和 GitLab MR/Pipeline 状态不一致时，仍需要统一事实源和人工介入规则。
 
 ---
 
@@ -76,7 +77,7 @@ stateDiagram-v2
     Designing --> Ready_for_AI_Dev : 需求确认
     Designing --> Clarifying
     Designing --> Blocked
-    Ready_for_AI_Dev --> AI_Developing : DevFlow 创建 branch+MR
+    Ready_for_AI_Dev --> AI_Developing : DevFlow 创建 branch 并派发 runner
     Ready_for_AI_Dev --> Blocked
     AI_Developing --> Testing_Eval : coding agent 提交代码, CI 启动
     AI_Developing --> Blocked
@@ -212,8 +213,8 @@ def is_valid_transition(
 
 | 触发事件 | 来源 | 平台动作 | GitLab 动作 | Plane 回写 |
 | --- | --- | --- | --- | --- |
-| Work Item state -> `Ready for AI Dev` | Plane webhook | 生成 task pack | 创建 branch + draft MR | state -> `AI Developing`; 写入 `gitlab_mr` custom property; 添加 comment |
-| Coding agent 提交代码 | GitLab webhook (push) | 无 | MR 去掉 draft 标记 | 添加 comment (代码已提交) |
+| Work Item state -> `Ready for AI Dev` | Plane webhook | 解析 Agent 归属；生成 task pack；派发 runner | 创建 branch | state -> `AI Developing`; 写入 `gitlab_branch` custom property; 添加 comment |
+| Coding agent 提交代码 | Runner / GitLab push | 记录 runner report | 创建或复用 MR；push commit | 写入 `gitlab_mr` custom property；添加 comment (代码已提交) |
 | Pipeline started | GitLab webhook | 记录 pipeline_id | -- | state -> `Testing / Eval`; 添加 comment |
 | Pipeline failed | GitLab webhook | 解析失败原因 | 添加 MR comment (失败详情) | state -> `AI Developing`; 添加 comment (CI 失败 + 链接); 如果 eval 失败，写入 `eval_report_url` |
 | Pipeline success + eval pass | GitLab webhook | 提取 eval report URL | MR 去掉 draft; 添加 MR comment (eval 报告) | state -> `Human Review`; 写入 `eval_report_url` custom property; 添加 comment |
@@ -692,10 +693,11 @@ class PlaneEventHandler:
     async def _handle_ready_for_ai_dev(self, work_item: dict) -> dict:
         """当前 DevFlowOrchestrator.handle_webhook_event 的逻辑移入此处。"""
         # 1. 生成 task pack
-        # 2. 创建 GitLab branch + MR
-        # 3. 回写 Plane state -> AI Developing
-        # 4. 回写 Plane custom properties (gitlab_mr, gitlab_branch)
-        # 5. 添加 Plane comment
+        # 2. 解析 Agent 归属，未解析成功则回写 Plane comment 并停止
+        # 3. 创建 GitLab branch
+        # 4. 回写 Plane state -> AI Developing
+        # 5. 回写 Plane custom properties (agent_id, task_type, gitlab_branch)
+        # 6. 添加 Plane comment 并派发 runner
         ...
 ```
 
@@ -1048,7 +1050,7 @@ class Settings(BaseModel):
 4. 重构 `app.py` 的 webhook endpoint，使用 repository 替换内存 set。
 
 验收标准：
-- Plane webhook delivery 重复不会重复创建 MR。
+- Plane webhook delivery 重复不会重复创建 branch、重复派发 runner 或重复创建 MR。
 - 服务重启后幂等性不丢失。
 
 ### Phase 2：状态机 + GitLab -> Plane 同步
