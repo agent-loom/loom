@@ -898,6 +898,7 @@ def create_app() -> FastAPI:
 
     devflow: DevFlowOrchestrator | None = None
     devflow_state_sync: Any = None
+    execution_log_repo: Any = None
     if (
         settings.plane_base_url
         and settings.plane_api_key
@@ -1617,6 +1618,24 @@ def create_app() -> FastAPI:
         if job is None:
             raise HTTPException(status_code=404, detail=f"job not found: {job_id}")
         return job
+
+    @app.get("/api/v1/devflow/jobs/{job_id}/logs")
+    async def get_devflow_job_logs(
+        job_id: str,
+        stream: str | None = Query(default=None, description="stdout 或 stderr"),
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> list[dict]:
+        if execution_log_repo is None:
+            raise HTTPException(status_code=503, detail="execution log repository not configured")
+        from agent_platform.devflow.runner.execution_log import LogStream
+        stream_filter = None
+        if stream:
+            try:
+                stream_filter = LogStream(stream)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"invalid stream: {stream!r}")
+        entries = await execution_log_repo.get_logs(job_id, stream=stream_filter)
+        return [e.model_dump(mode="json") for e in entries]
 
     @app.get("/api/v1/devflow/status")
     async def devflow_status(
