@@ -292,14 +292,15 @@ async def main() -> None:
 
     if result:
         _check("分支名正确格式", result.branch.startswith("feat/"))
-        _check("MR IID 已创建", result.mr_iid is not None, f"mr_iid={result.mr_iid}")
-        _check("MR URL 非空", bool(result.mr_url))
+        _check("Orchestrator 不创建 MR（mr_iid 为 None）", result.mr_iid is None)
         print(f"  branch: {result.branch}")
-        print(f"  MR:     {result.mr_url}")
 
         job = result.coding_job
         _check("coding_job 不为 None", job is not None)
         if job:
+            # Runner 完成后 MR 由 Runner 创建
+            if job.mr_iid:
+                print(f"  MR (by Runner): !{job.mr_iid} → {job.mr_url}")
             _check("job 状态为 SUCCEEDED", job.state == JobState.SUCCEEDED, f"got {job.state}")
             if job.result:
                 print(f"  job.result.status: {job.result.status}")
@@ -312,11 +313,12 @@ async def main() -> None:
                 if args.require_commit or runner_adapter != "mock":
                     _check("Runner commit_sha 非空", bool(job.result.commit_sha))
 
-    # 步骤 5：验证 GitLab 上分支和 MR 存在
-    if result and result.mr_iid:
+    # 步骤 5：验证 GitLab 上分支和 MR 存在（MR 由 Runner 创建）
+    job_has_mr = result and result.coding_job and result.coding_job.mr_iid
+    if job_has_mr:
         print("\n--- 步骤 5：验证 GitLab MR ---")
         try:
-            mr = await gitlab.get_merge_request(gitlab_project_id, result.mr_iid)
+            mr = await gitlab.get_merge_request(gitlab_project_id, result.coding_job.mr_iid)
             _check("GitLab MR 存在", bool(mr.get("id") or mr.get("iid")))
             _check("MR source branch 匹配", mr.get("source_branch") == result.branch)
             _check("MR target branch 匹配", mr.get("target_branch") == default_branch)
@@ -338,7 +340,7 @@ async def main() -> None:
                 base_url=gitlab_base,
                 token=gitlab_token,
                 project_id=gitlab_project_id,
-                mr_iid=result.mr_iid,
+                mr_iid=result.coding_job.mr_iid,
             )
             note_bodies = "\n".join(_comment_text(note) for note in notes)
             _check("GitLab MR 有 Runner 报告评论", "DevFlow Runner" in note_bodies)
@@ -357,7 +359,7 @@ async def main() -> None:
         )
         comment_text = "\n".join(_comment_text(comment) for comment in comments)
         _check("Plane 工作项有评论（DevFlow 回写）", len(comments) > 0, f"comments={len(comments)}")
-        _check("Plane 评论包含 MR created", "MR created" in comment_text or "MR" in comment_text)
+        _check("Plane 评论包含分支创建通知", "分支已创建" in comment_text or "MR" in comment_text)
         _check("Plane 评论包含 Runner 报告", "DevFlow Runner" in comment_text)
     except Exception as e:
         _check("Plane 评论可查询", False, str(e))

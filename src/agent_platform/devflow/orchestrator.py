@@ -7,6 +7,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any
 
+from agent_platform.devflow.ownership import AgentOwnershipResolver
 from agent_platform.devflow.runner.models import CodingJob
 from agent_platform.devflow.state_machine import DevFlowState
 from agent_platform.devflow.state_sync import DevFlowStateSync
@@ -36,7 +37,8 @@ class DevFlowOrchestrator:
     """
     开发流程编排器。
     负责监听外部系统（如 Plane）的 Webhook 事件，并在状态变更为"准备 AI 开发"时，
-    触发代码生成流程，包括创建任务包、创建分支、创建 MR 以及派发代码编写任务。
+    触发代码生成流程，包括创建任务包、创建分支以及派发代码编写任务。
+    MR 的创建推迟到 Runner 完成 commit+push 后执行。
     """
 
     def __init__(
@@ -51,6 +53,7 @@ class DevFlowOrchestrator:
         ai_developing_state_id: str | None = None,
         default_branch: str = "main",
         state_sync: DevFlowStateSync | None = None,
+        ownership_resolver: AgentOwnershipResolver | None = None,
     ):
         self.plane = plane
         self.gitlab = gitlab
@@ -61,6 +64,7 @@ class DevFlowOrchestrator:
         self.ai_developing_state_id = ai_developing_state_id
         self.default_branch = default_branch
         self.state_sync = state_sync
+        self.ownership_resolver = ownership_resolver or AgentOwnershipResolver()
         self.task_pack_generator = TaskPackGenerator()
         self._max_processed = 10_000
         self._processed_items: OrderedDict[str, None] = OrderedDict()
@@ -85,18 +89,35 @@ class DevFlowOrchestrator:
 
         work_item = payload.get("data") or payload
         new_state = self._extract_state_name(work_item)
+        delivery_id = self._extract_delivery_id(payload)
+        project_id = work_item.get("project") or work_item.get("project_id", "")
+        work_item_id = work_item.get("id", "")
+        title = work_item.get("name") or work_item.get("title", "Untitled")
+
+        logger.info(
+            "DevFlow webhook received: event=%s delivery=%s project=%s item=%s state=%s title=%s",
+            event,
+            delivery_id,
+            project_id,
+            work_item_id,
+            new_state,
+            title,
+        )
         
         # 如果状态不符合触发条件，则忽略
         if new_state not in READY_FOR_AI_DEV_STATES:
             return None
 
-        project_id = work_item.get("project") or work_item.get("project_id", "")
-        work_item_id = work_item.get("id", "")
-        title = work_item.get("name") or work_item.get("title", "Untitled")
-
         # 使用 project_id + 工作项 ID + 状态构建幂等键：
-        # 同一状态重复 webhook 会被去重，但人工切回 Ready/In Progress 可重新触发。
-        idempotency_key = f"{project_id}:{work_item_id}:{new_state}"
+        # HTTP webhook 层已经按 x-plane-delivery 去重；这里优先把 delivery 放进 key，
+        # 避免同一个 item 失败后人工重新切回 Ready for AI Dev 时被永久拦截。
+        idempotency_key = self._build_idempotency_key(
+            project_id=project_id,
+            work_item_id=work_item_id,
+            state=new_state,
+            delivery_id=delivery_id,
+            work_item=work_item,
+        )
         # 原子幂等检查：加锁防止并发 webhook 重复触发
         async with self._idempotency_lock:
             if not await self._check_idempotency(idempotency_key, event, payload):
@@ -104,10 +125,28 @@ class DevFlowOrchestrator:
 
         # 获取工作项详细信息
         work_item_detail = await self._fetch_work_item_detail(project_id, work_item_id)
-        agent_id = self._extract_agent_id(work_item_detail) or self._extract_agent_id(work_item)
-        task_type = (
-            self._extract_task_type(work_item_detail, fallback=None)
-            or self._extract_task_type(work_item)
+        ownership = self.ownership_resolver.resolve(
+            work_item=work_item,
+            work_item_detail=work_item_detail,
+        )
+        if ownership is None:
+            await self._report_missing_agent_ownership(project_id, work_item_id)
+            logger.warning(
+                "DevFlow ownership unresolved: work_item=%s project=%s title=%s",
+                work_item_id,
+                project_id,
+                title,
+            )
+            return None
+
+        agent_id = ownership.agent_id
+        task_type = ownership.task_type
+        logger.info(
+            "DevFlow ownership resolved: item=%s agent_id=%s task_type=%s source=%s",
+            work_item_id,
+            agent_id,
+            task_type,
+            ownership.source,
         )
         background = (
             work_item_detail.get("description_stripped")
@@ -139,37 +178,16 @@ class DevFlowOrchestrator:
         # 安全地创建目标分支
         await self._create_branch_safe(branch)
 
-        # 在 MR 描述中嵌入 Plane 元数据，供 GitLab→Plane 反向同步使用
-        mr_description = task_pack.repository.merge_request.description or ""
-        mr_description += (
-            f"\n\n<!-- devflow:plane_project_id={project_id} "
-            f"plane_work_item_id={work_item_id} -->\n"
-        )
-
-        # 在 GitLab 上创建对应的合并请求
-        mr_result = await self.gitlab.create_merge_request(
-            project_id=self.gitlab_project_id,
-            source_branch=branch,
-            target_branch=task_pack.repository.default_branch,
-            title=task_pack.repository.merge_request.title,
-            description=mr_description,
-            labels=task_pack.repository.merge_request.labels,
-        )
-
-        mr_url = mr_result.url
-        mr_iid = mr_result.mr_id
-
         try:
-            safe_mr_url = html.escape(mr_url or "")
             safe_branch = html.escape(branch)
             await self.plane.add_comment(
                 project_id,
                 work_item_id,
-                f"<p>DevFlow: MR created — <a href='{safe_mr_url}'>{safe_branch}</a></p>",
+                f"<p>DevFlow: 分支已创建 — <code>{safe_branch}</code>，AI 正在编码...</p>",
             )
         except Exception:
             logger.warning(
-                "Failed to add MR comment to Plane work item %s",
+                "Failed to add branch comment to Plane work item %s",
                 work_item_id, exc_info=True,
             )
 
@@ -190,9 +208,11 @@ class DevFlowOrchestrator:
                 project_id,
                 work_item_id,
                 {
+                    "agent_id": agent_id,
+                    "task_type": task_type,
+                    "agent_ownership_source": ownership.source,
+                    "agent_ownership_confidence": str(ownership.confidence),
                     "gitlab_branch": branch,
-                    "gitlab_mr_url": mr_url,
-                    "gitlab_mr_iid": str(mr_iid) if mr_iid else None,
                 },
             )
         except Exception:
@@ -200,24 +220,22 @@ class DevFlowOrchestrator:
 
         coding_job: CodingJob | None = None
         job_submitted = False
-        if self.coding_runner is not None and mr_iid is not None:
+        if self.coding_runner is not None:
             # 状态同步：Runner 开始执行 → AI_DEVELOPING
             await self._sync_state(
                 work_item_id, project_id, DevFlowState.AI_DEVELOPING,
                 reason="Runner 开始执行编码任务",
             )
             coding_job, job_submitted = await self._dispatch_runner(
-                task_pack, mr_iid=mr_iid, mr_url=mr_url,
+                task_pack,
                 plane_project_id=project_id,
                 plane_work_item_id=work_item_id,
             )
 
-        logger.info("DevFlow: %s -> branch=%s mr=%s", work_item_id, branch, mr_url)
+        logger.info("DevFlow: %s -> branch=%s", work_item_id, branch)
         return DevFlowResult(
             task_pack=task_pack,
             branch=branch,
-            mr_url=mr_url,
-            mr_iid=mr_iid,
             coding_job=coding_job,
             job_submitted=job_submitted,
         )
@@ -259,30 +277,54 @@ class DevFlowOrchestrator:
             self._processed_items.popitem(last=False)
         return True
 
+    @staticmethod
+    def _extract_delivery_id(payload: dict[str, Any]) -> str | None:
+        meta = payload.get("_devflow") or {}
+        if isinstance(meta, dict) and meta.get("delivery_id"):
+            return str(meta["delivery_id"])
+        delivery_id = payload.get("delivery_id") or payload.get("idempotency_key")
+        return str(delivery_id) if delivery_id else None
+
+    @staticmethod
+    def _build_idempotency_key(
+        *,
+        project_id: str,
+        work_item_id: str,
+        state: str,
+        delivery_id: str | None,
+        work_item: dict[str, Any],
+    ) -> str:
+        if delivery_id:
+            return f"plane-delivery:{delivery_id}"
+        updated_at = (
+            work_item.get("updated_at")
+            or work_item.get("updated")
+            or work_item.get("modified_at")
+        )
+        if updated_at:
+            return f"{project_id}:{work_item_id}:{state}:{updated_at}"
+        return f"{project_id}:{work_item_id}:{state}"
+
     async def _dispatch_runner(
         self,
         task_pack: DevelopmentTask,
         *,
-        mr_iid: int,
-        mr_url: str | None,
         plane_project_id: str,
         plane_work_item_id: str,
     ) -> tuple[CodingJob | None, bool]:
-        """Dispatch coding runner — via async queue if available, else direct await.
+        """派发编码任务到 Runner — 通过异步队列或直接等待。
 
         Returns (job, submitted_async) where submitted_async=True means the job
         was submitted to the queue and will complete asynchronously.
         """
         runner_kwargs = dict(
-            mr_iid=mr_iid,
-            mr_url=mr_url,
             plane_project_id=plane_project_id,
             plane_work_item_id=plane_work_item_id,
         )
 
         if self.job_queue is not None:
             try:
-                job_id = f"{plane_work_item_id}-mr{mr_iid}"
+                job_id = f"{plane_work_item_id}-runner"
                 await self.job_queue.submit(
                     job_id,
                     lambda: self.coding_runner.run(task_pack, **runner_kwargs),
@@ -290,14 +332,14 @@ class DevFlowOrchestrator:
                 logger.info("Job %s submitted to async queue", job_id)
                 return None, True
             except Exception:
-                logger.exception("Failed to submit job to queue for MR !%s", mr_iid)
+                logger.exception("Failed to submit job to queue for item %s", plane_work_item_id)
                 return None, False
 
         try:
             job: CodingJob = await self.coding_runner.run(task_pack, **runner_kwargs)
             return job, False
         except Exception:
-            logger.exception("CodingAgentRunner dispatch failed for MR !%s", mr_iid)
+            logger.exception("CodingAgentRunner dispatch failed for item %s", plane_work_item_id)
             return None, False
 
     async def _fetch_work_item_detail(
@@ -313,7 +355,30 @@ class DevFlowOrchestrator:
                 "Failed to fetch work item detail: %s/%s",
                 project_id, work_item_id, exc_info=True,
             )
-            return {}
+        return {}
+
+    async def _report_missing_agent_ownership(
+        self,
+        project_id: str,
+        work_item_id: str,
+    ) -> None:
+        try:
+            await self.plane.add_comment(
+                project_id,
+                work_item_id,
+                (
+                    "<p>DevFlow: 无法确定此需求归属的 agent_id。"
+                    "请在 Work Item custom property 中补充 "
+                    "<code>agent_id</code>，或配置 Plane Project/Label 到 Agent 的映射后"
+                    "重新切换到 Ready for AI Dev。</p>"
+                ),
+            )
+        except Exception:
+            logger.warning(
+                "Failed to add missing ownership comment to work item %s",
+                work_item_id,
+                exc_info=True,
+            )
 
     async def _create_branch_safe(self, branch: str) -> None:
         try:

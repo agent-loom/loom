@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import html
 import logging
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from agent_platform.devflow.runner.execution_log import (
     ExecutionLogEntry,
@@ -21,6 +23,7 @@ from agent_platform.devflow.runner.path_guard import PathGuard
 from agent_platform.devflow.runner.protocol import RunnerAdapter, RunnerAdapterResult
 from agent_platform.devflow.runner.workspace import WorkspaceManager
 from agent_platform.devflow.task_pack import DevelopmentTask
+from agent_platform.integrations.errors import ScmError
 from agent_platform.integrations.plane.adapter import PlaneAdapter
 from agent_platform.integrations.scm.protocol import ScmAdapter
 from agent_platform.persistence.repositories import CodingJobRepository
@@ -65,8 +68,6 @@ class CodingAgentRunner:
         self,
         task: DevelopmentTask,
         *,
-        mr_iid: int | None = None,
-        mr_url: str | None = None,
         plane_project_id: str | None = None,
         plane_work_item_id: str | None = None,
     ) -> CodingJob:
@@ -74,7 +75,7 @@ class CodingAgentRunner:
         执行编码任务的核心流程。
         """
         job = self._create_job(
-            task, mr_iid=mr_iid, mr_url=mr_url,
+            task,
             plane_project_id=plane_project_id,
             plane_work_item_id=plane_work_item_id,
         )
@@ -152,6 +153,18 @@ class CodingAgentRunner:
                     changed_files=changed_files,
                 )
 
+            # commit 成功后创建 MR（MR 天然包含 commit）
+            if commit_sha:
+                mr_result = await self._create_mr_safe(
+                    task=task,
+                    plane_project_id=plane_project_id,
+                    plane_work_item_id=plane_work_item_id,
+                )
+                if mr_result:
+                    job.mr_iid = mr_result.mr_id
+                    job.mr_url = mr_result.url
+                    await self._post_mr_creation_hooks(job)
+
             status = (
                 ResultStatus.SUCCESS if validation.all_passed
                 else ResultStatus.VALIDATION_FAILED
@@ -200,8 +213,6 @@ class CodingAgentRunner:
         self,
         task: DevelopmentTask,
         *,
-        mr_iid: int | None = None,
-        mr_url: str | None = None,
         plane_project_id: str | None = None,
         plane_work_item_id: str | None = None,
     ) -> CodingJob:
@@ -210,8 +221,6 @@ class CodingAgentRunner:
             job_id=f"job-{uuid.uuid4().hex[:12]}",
             task_id=task.metadata.task_id,
             branch=task.repository.work_branch,
-            mr_iid=mr_iid,
-            mr_url=mr_url,
             plane_project_id=plane_project_id,
             plane_work_item_id=plane_work_item_id,
         )
@@ -434,3 +443,74 @@ class CodingAgentRunner:
                 ))
         except Exception:
             logger.warning("日志记录失败: job=%s", job_id)
+
+    async def _create_mr_safe(
+        self,
+        *,
+        task: DevelopmentTask,
+        plane_project_id: str | None = None,
+        plane_work_item_id: str | None = None,
+    ) -> Any:
+        """commit+push 后创建 MR，失败不阻塞主流程。返回 MergeRequestResult 或 None。"""
+        branch = task.repository.work_branch
+        mr_spec = task.repository.merge_request
+        description = mr_spec.description or ""
+        if plane_project_id and plane_work_item_id:
+            description += (
+                f"\n\n<!-- devflow:plane_project_id={plane_project_id} "
+                f"plane_work_item_id={plane_work_item_id} -->\n"
+            )
+        try:
+            return await self.gitlab.create_merge_request(
+                project_id=self.gitlab_project_id,
+                source_branch=branch,
+                target_branch=task.repository.default_branch,
+                title=mr_spec.title,
+                description=description,
+                labels=mr_spec.labels,
+            )
+        except ScmError as exc:
+            if exc.status_code != 409:
+                logger.warning("MR 创建失败: %s", exc)
+                return None
+            finder = getattr(self.gitlab, "find_open_merge_request", None)
+            if finder:
+                try:
+                    existing = await finder(self.gitlab_project_id, branch)
+                    if existing:
+                        logger.info("复用已有 MR for %s: !%s", branch, existing.mr_id)
+                        return existing
+                except Exception:
+                    pass
+            logger.warning("MR 409 但无法复用: %s", branch)
+            return None
+        except Exception:
+            logger.warning("MR 创建异常: branch=%s", branch, exc_info=True)
+            return None
+
+    async def _post_mr_creation_hooks(self, job: CodingJob) -> None:
+        """MR 创建成功后：通知 Plane 并更新 custom properties。"""
+        if not job.mr_iid or not job.mr_url:
+            return
+        if self.plane and job.plane_project_id and job.plane_work_item_id:
+            safe_mr_url = html.escape(job.mr_url)
+            safe_branch = html.escape(job.branch)
+            try:
+                await self.plane.add_comment(
+                    job.plane_project_id,
+                    job.plane_work_item_id,
+                    f"<p>DevFlow: MR created — <a href='{safe_mr_url}'>{safe_branch}</a></p>",
+                )
+            except Exception:
+                logger.warning("Plane MR 评论失败: %s", job.plane_work_item_id)
+            try:
+                await self.plane.update_custom_properties(
+                    job.plane_project_id,
+                    job.plane_work_item_id,
+                    {
+                        "gitlab_mr_url": job.mr_url,
+                        "gitlab_mr_iid": str(job.mr_iid),
+                    },
+                )
+            except Exception:
+                logger.warning("Plane MR 属性更新失败: %s", job.plane_work_item_id)

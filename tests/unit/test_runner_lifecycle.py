@@ -9,9 +9,11 @@ from agent_platform.devflow.runner.models import (
     CodingJob,
     JobState,
     ResultStatus,
+    RunnerResult,
     ValidationResult,
 )
 from agent_platform.devflow.runner.protocol import RunnerAdapterResult
+from agent_platform.integrations.scm.protocol import MergeRequestResult
 from agent_platform.devflow.runner.runner import CodingAgentRunner
 from agent_platform.devflow.runner.workspace import WorkspaceManager
 from agent_platform.devflow.task_pack import (
@@ -270,3 +272,64 @@ class TestPlaneComment:
         job = CodingJob(job_id="j-2", task_id="t-2")
         comment = runner._build_plane_comment(job)
         assert "unknown" in comment
+
+
+class TestMrCreationTiming:
+    """验证 MR 在 commit+push 成功后由 Runner 创建。"""
+
+    @pytest.mark.asyncio
+    async def test_mr_created_after_commit(self):
+        """commit 成功后 Runner 应创建 MR。"""
+        gitlab = AsyncMock()
+        gitlab.comment_merge_request = AsyncMock()
+        gitlab.create_merge_request = AsyncMock(
+            return_value=MergeRequestResult(
+                mr_id=42, url="https://gitlab.test/mr/42",
+                source_branch="feat/t-1", target_branch="main",
+            )
+        )
+
+        runner = _make_runner()
+        runner.gitlab = gitlab
+        runner.plane = None
+
+        job = await runner.run(_make_task())
+
+        assert job.state == JobState.SUCCEEDED
+        assert job.mr_iid == 42
+        assert job.mr_url == "https://gitlab.test/mr/42"
+        gitlab.create_merge_request.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_no_mr_on_commit_failure(self):
+        """commit 失败（返回 None）时不创建 MR。"""
+        gitlab = AsyncMock()
+        gitlab.create_merge_request = AsyncMock()
+
+        runner = _make_runner()
+        runner.gitlab = gitlab
+        runner.workspace_manager.commit_and_push = AsyncMock(return_value=None)
+        runner.plane = None
+
+        job = await runner.run(_make_task())
+
+        assert job.mr_iid is None
+        gitlab.create_merge_request.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_mr_creation_failure_non_blocking(self):
+        """MR 创建失败不阻塞 job 成功状态。"""
+        gitlab = AsyncMock()
+        gitlab.comment_merge_request = AsyncMock()
+        gitlab.create_merge_request = AsyncMock(
+            side_effect=RuntimeError("MR service down")
+        )
+
+        runner = _make_runner()
+        runner.gitlab = gitlab
+        runner.plane = None
+
+        job = await runner.run(_make_task())
+
+        assert job.state == JobState.SUCCEEDED
+        assert job.mr_iid is None

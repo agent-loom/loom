@@ -2,7 +2,7 @@
 """DevFlow 端到端集成验证脚本。
 
 使用 MockTransport + MockRunnerAdapter + StubWorkspaceManager 验证完整
-DevFlow 流水线：Webhook → Orchestrator → TaskPack → Branch → MR → Runner → Job。
+DevFlow 流水线：Webhook → Orchestrator → TaskPack → Branch → Runner → Commit → MR → Job。
 无需任何外部基础设施（Plane / GitLab）。
 """
 
@@ -197,8 +197,8 @@ async def test_happy_path() -> None:
 
     _check("返回 DevFlowResult", isinstance(result, DevFlowResult))
     _check("分支名正确", result.branch == "feat/wi-e2e-001", f"got {result.branch}")
-    _check("MR IID 正确", result.mr_iid == MR_IID, f"got {result.mr_iid}")
-    _check("MR URL 包含 gitlab", result.mr_url and "gitlab.mock" in result.mr_url)
+    _check("Orchestrator 不创建 MR（mr_iid 为 None）", result.mr_iid is None)
+    _check("Orchestrator 不创建 MR（mr_url 为 None）", result.mr_url is None)
     _check("task_pack.metadata.task_id 正确", result.task_pack.metadata.task_id == WORK_ITEM_ID)
     _check("task_pack.metadata.title 正确", "用户注册" in result.task_pack.metadata.title)
 

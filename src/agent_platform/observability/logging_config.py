@@ -63,7 +63,7 @@ class JSONFormatter(logging.Formatter):
             }:
                 log_entry[key] = value
 
-        serialized = json.dumps(log_entry, default=str)
+        serialized = json.dumps(log_entry, default=str, ensure_ascii=False)
         return LogSanitizer.sanitize(serialized)
 
 
