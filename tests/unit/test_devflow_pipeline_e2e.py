@@ -101,15 +101,14 @@ def _ready_payload(work_item_id: str = "wi-100"):
 
 class TestFullPipeline:
     @pytest.mark.asyncio
-    async def test_webhook_creates_branch_mr_and_returns_result(self):
+    async def test_webhook_creates_branch_and_returns_result(self):
         orch = _make_orchestrator()
         result = await orch.handle_webhook_event("work_item.updated", _ready_payload())
 
         assert result is not None
         assert isinstance(result, DevFlowResult)
         assert result.branch == "feat/wi-100"
-        assert result.mr_iid == 42
-        assert "gitlab.example.com" in result.mr_url
+        assert result.mr_iid is None  # Orchestrator 不再创建 MR，由 Runner 在 commit 后创建
         assert result.task_pack.metadata.task_id == "wi-100"
         assert result.task_pack.metadata.title == "Implement user auth"
 
@@ -163,7 +162,7 @@ class TestPipelineWithRunner:
 
         assert result.coding_job is None
         assert result.job_submitted is False
-        assert result.mr_iid == 42
+        assert result.mr_iid is None  # Runner 失败时无 MR，Orchestrator 也不创建 MR
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +202,7 @@ class TestPipelineWithJobQueue:
 
         assert result.job_submitted is False
         assert result.coding_job is None
-        assert result.mr_iid == 42
+        assert result.mr_iid is None  # Orchestrator 不创建 MR
 
     @pytest.mark.asyncio
     async def test_queue_stats_available(self):
@@ -333,7 +332,8 @@ class TestStateTransitions:
 
 class TestEdgeCases:
     @pytest.mark.asyncio
-    async def test_missing_work_item_detail_still_creates_mr(self):
+    async def test_missing_work_item_detail_returns_none_when_ownership_unresolvable(self):
+        """当 Plane 查询失败且 work_item 本身也无法解析 ownership 时，Orchestrator 安全返回 None。"""
         def failing_plane_handler(request: httpx.Request) -> httpx.Response:
             path = request.url.path
             if "/work-items/" in path and request.method == "GET":
@@ -355,9 +355,9 @@ class TestEdgeCases:
             plane=plane, gitlab=gitlab, gitlab_project_id="proj-1",
         )
 
+        # work_item 没有 agent_id，也没有项目映射 → ownership 无法解析 → 返回 None
         result = await orch.handle_webhook_event("work_item.updated", _ready_payload())
-        assert result is not None
-        assert result.mr_iid == 42
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_no_runner_skips_dispatch(self):

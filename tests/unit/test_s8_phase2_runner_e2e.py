@@ -117,10 +117,10 @@ class TestExecutionLogWiring:
 
 
 class TestMRMetadataEmbed:
-    """验证 Orchestrator 在 MR 描述中嵌入 Plane 元数据。"""
+    """验证 Orchestrator 创建分支后写入 Plane 评论（MR 由 Runner 创建，不在此测试）。"""
 
     @pytest.mark.asyncio
-    async def test_mr_description_includes_plane_ids(self):
+    async def test_branch_comment_written_after_branch_creation(self):
         mock_plane = AsyncMock()
         mock_plane.get_work_item = AsyncMock(return_value={
             "name": "测试需求",
@@ -132,9 +132,6 @@ class TestMRMetadataEmbed:
 
         mock_gitlab = AsyncMock()
         mock_gitlab.create_branch = AsyncMock()
-        mock_gitlab.create_merge_request = AsyncMock(return_value=MagicMock(
-            url="https://gitlab.com/mr/1", mr_id=1,
-        ))
 
         orch = DevFlowOrchestrator(
             plane=mock_plane,
@@ -149,14 +146,14 @@ class TestMRMetadataEmbed:
                 "project": "pp-1",
                 "name": "测试需求",
                 "state_detail": {"name": "Ready for AI Dev"},
+                "properties": {"agent_id": "test-agent", "task_type": "agent:change"},
             },
         })
 
         assert result is not None
-        call_args = mock_gitlab.create_merge_request.call_args
-        description = call_args.kwargs.get("description", "")
-        assert "plane_project_id=pp-1" in description
-        assert "plane_work_item_id=wi-99" in description
+        # 分支已创建，评论写入 Plane（MR 将由 Runner 创建，不在此处断言）
+        mock_gitlab.create_branch.assert_awaited_once()
+        mock_plane.add_comment.assert_awaited()
 
 
 class TestOrchestratorStateSyncWiring:
@@ -177,9 +174,6 @@ class TestOrchestratorStateSyncWiring:
 
         mock_gitlab = AsyncMock()
         mock_gitlab.create_branch = AsyncMock()
-        mock_gitlab.create_merge_request = AsyncMock(return_value=MagicMock(
-            url="https://gitlab.com/mr/2", mr_id=2,
-        ))
 
         orch = DevFlowOrchestrator(
             plane=mock_plane,
@@ -194,6 +188,7 @@ class TestOrchestratorStateSyncWiring:
                 "project": "pp-2",
                 "name": "任务",
                 "state_detail": {"name": "Ready for AI Dev"},
+                "properties": {"agent_id": "test-agent", "task_type": "agent:change"},
             },
         })
 
