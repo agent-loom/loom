@@ -188,6 +188,29 @@ class DismissProposalRequest(BaseModel):
     reason: str = ""
 
 
+class CreateMemoryRequest(BaseModel):
+    agent_id: str
+    tenant_id: str = "default"
+    type: str  # pattern | constraint | preference | fix_recipe | knowledge
+    content: str
+    confidence: float = Field(default=0.7, ge=0.0, le=1.0)
+    tags: list[str] = Field(default_factory=list)
+    source_proposal_id: str | None = None
+
+
+class MemoryFeedbackRequest(BaseModel):
+    helpful: bool
+
+
+class CreateSkillRequest(BaseModel):
+    agent_id: str
+    name: str
+    description: str = ""
+    path: str
+    provenance: str = "user_created"
+    tags: list[str] = Field(default_factory=list)
+
+
 class RequestContextMiddleware(BaseHTTPMiddleware):
     """请求上下文中间件。
     
@@ -1116,6 +1139,17 @@ def create_app() -> FastAPI:
     else:
         evolution_engine = EvolutionEngine(repo=_evo_repo)
     app.state.evolution_engine = evolution_engine
+
+    # ── Memory / Skills ──
+    from agent_platform.evolution.memory_repository import (
+        InMemoryEvolutionMemoryRepository,
+        InMemorySkillRepository,
+    )
+
+    _memory_repo = InMemoryEvolutionMemoryRepository()
+    _skill_repo = InMemorySkillRepository()
+    app.state.memory_repo = _memory_repo
+    app.state.skill_repo = _skill_repo
 
     # DevFlow 后台调度器
     from agent_platform.devflow.scheduler import DevFlowScheduler
@@ -2081,6 +2115,154 @@ def create_app() -> FastAPI:
     ) -> dict:
         await evolution_engine.dismiss(proposal_id, body.reason)
         return {"status": "dismissed", "proposal_id": proposal_id}
+
+    # ── Evolution Memory API ──
+
+    @app.post("/api/v1/evolution/memories")
+    async def create_memory(
+        body: CreateMemoryRequest,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ) -> dict:
+        from agent_platform.evolution.memory_models import EvolutionMemory, MemoryType
+
+        memory = EvolutionMemory(
+            agent_id=body.agent_id,
+            tenant_id=body.tenant_id,
+            type=MemoryType(body.type),
+            content=body.content,
+            confidence=body.confidence,
+            tags=body.tags,
+            source_proposal_id=body.source_proposal_id,
+        )
+        await _memory_repo.create(memory)
+        return memory.model_dump(mode="json")
+
+    @app.get("/api/v1/evolution/memories")
+    async def list_memories(
+        agent_id: str | None = None,
+        tenant_id: str | None = None,
+        memory_type: str | None = None,
+        status: str | None = None,
+        limit: int = Query(default=50, ge=1, le=500),
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> list[dict]:
+        from agent_platform.evolution.memory_models import MemoryStatus as MS
+        from agent_platform.evolution.memory_models import MemoryType
+
+        type_filter = MemoryType(memory_type) if memory_type else None
+        status_filter = MS(status) if status else None
+        if agent_id:
+            memories = await _memory_repo.list_by_agent(
+                agent_id, memory_type=type_filter, status=status_filter, limit=limit,
+            )
+        elif tenant_id:
+            memories = await _memory_repo.list_by_tenant(
+                tenant_id, memory_type=type_filter, status=status_filter, limit=limit,
+            )
+        else:
+            memories = await _memory_repo.list_by_tenant(
+                "default", memory_type=type_filter, status=status_filter, limit=limit,
+            )
+        return [m.model_dump(mode="json") for m in memories]
+
+    @app.get("/api/v1/evolution/memories/{memory_id}")
+    async def get_memory(
+        memory_id: str,
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> dict:
+        memory = await _memory_repo.get(memory_id)
+        if memory is None:
+            raise HTTPException(status_code=404, detail=f"memory not found: {memory_id}")
+        return memory.model_dump(mode="json")
+
+    @app.post("/api/v1/evolution/memories/{memory_id}/feedback")
+    async def memory_feedback(
+        memory_id: str,
+        body: MemoryFeedbackRequest,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ) -> dict:
+        memory = await _memory_repo.get(memory_id)
+        if memory is None:
+            raise HTTPException(status_code=404, detail=f"memory not found: {memory_id}")
+        memory.record_feedback(body.helpful)
+        await _memory_repo.update(memory)
+        return {"memory_id": memory_id, "trust_score": memory.trust_score}
+
+    @app.delete("/api/v1/evolution/memories/{memory_id}")
+    async def delete_memory(
+        memory_id: str,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ) -> dict:
+        deleted = await _memory_repo.delete(memory_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail=f"memory not found: {memory_id}")
+        return {"status": "deleted", "memory_id": memory_id}
+
+    # ── Skill Registry API ──
+
+    @app.post("/api/v1/evolution/skills")
+    async def create_skill(
+        body: CreateSkillRequest,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ) -> dict:
+        from agent_platform.evolution.memory_models import SkillEntry, SkillProvenance
+
+        skill = SkillEntry(
+            agent_id=body.agent_id,
+            name=body.name,
+            description=body.description,
+            path=body.path,
+            provenance=SkillProvenance(body.provenance),
+            tags=body.tags,
+        )
+        await _skill_repo.create(skill)
+        return skill.model_dump(mode="json")
+
+    @app.get("/api/v1/evolution/skills")
+    async def list_skills(
+        agent_id: str | None = None,
+        status: str | None = None,
+        limit: int = Query(default=50, ge=1, le=500),
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> list[dict]:
+        from agent_platform.evolution.memory_models import MemoryStatus as MS
+
+        status_filter = MS(status) if status else None
+        if agent_id:
+            skills = await _skill_repo.list_by_agent(agent_id, status=status_filter, limit=limit)
+        else:
+            skills = await _skill_repo.list_all(status=status_filter, limit=limit)
+        return [s.model_dump(mode="json") for s in skills]
+
+    @app.get("/api/v1/evolution/skills/{skill_id}")
+    async def get_skill(
+        skill_id: str,
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> dict:
+        skill = await _skill_repo.get(skill_id)
+        if skill is None:
+            raise HTTPException(status_code=404, detail=f"skill not found: {skill_id}")
+        return skill.model_dump(mode="json")
+
+    @app.post("/api/v1/evolution/skills/scan")
+    async def scan_skills(
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ) -> dict:
+        from agent_platform.evolution.skill_scanner import sync_skills_to_repo
+
+        agents_dir = Path(__file__).resolve().parents[2] / "agents"
+        result = await sync_skills_to_repo(agents_dir, _skill_repo)
+        return result
+
+    @app.delete("/api/v1/evolution/skills/{skill_id}")
+    async def delete_skill(
+        skill_id: str,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ) -> dict:
+        deleted = await _skill_repo.delete(skill_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail=f"skill not found: {skill_id}")
+        return {"status": "deleted", "skill_id": skill_id}
 
     # ── OpenTelemetry FastAPI Instrumentation ──
     # 在所有路由注册完成后挂载，如未安装 opentelemetry-instrumentation-fastapi 则静默跳过

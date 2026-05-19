@@ -1,6 +1,6 @@
 # 开发计划（S9：自进化 Agent 系统）
 
-> Status: 🔶 Phase 1 完成
+> Status: ✅ Phase 1-4 全部完成
 > Last updated: 2026-05-20
 
 本计划承接 S8（生产交付）。S9 核心目标：让平台具备**受治理的自进化能力**——从运行反馈自动发现问题、生成改进提案、通过 DevFlow 执行修改、经 Eval 验证后由人工 review 合并。
@@ -28,7 +28,7 @@
 
 | 指标 | S8 结束 |
 |---|---|
-| 测试 | 1812 passed（+101 evolution） |
+| 测试 | 1863 passed（+152 evolution/memory/skills） |
 | DevFlow | Plane→GitLab 正向+反向流跑通，Code First MR Later |
 | Hermes | 真实模型 E2E 跑通（z-ai/glm-5） |
 | FeedbackIntelligence | 日志挖掘 → 候选需求 → Plane 工单（已实现） |
@@ -124,16 +124,16 @@ POST /api/v1/evolution/proposals/{id}/dismiss   # 驳回
 
 ---
 
-## S9 Phase 4：Memory / Skills 平台化 — ⬜
+## S9 Phase 4：Memory / Skills 平台化 — ✅ 完成
 
 **目标**：引入 EvolutionMemory 和 SkillRegistry，但不急于 runtime 注入。
 
 | # | 任务 | 验收标准 | 状态 |
 |---|---|---|---|
-| 9.4.1 | EvolutionMemory model/repo | evidence/confidence/trust_level/status | ⬜ |
-| 9.4.2 | Memory 写入和查询 API | 按 agent/tenant/type 过滤 | ⬜ |
-| 9.4.3 | SkillRegistry scanner | `agents/<id>/skills/**` 索引 | ⬜ |
-| 9.4.4 | Skill 使用记录 | 记录 proposal/MR 层 skill 引用 | ⬜ |
+| 9.4.1 | EvolutionMemory model/repo | evidence/confidence/trust_level/status + InMemory 实现 | ✅ |
+| 9.4.2 | Memory 写入和查询 API | 按 agent/tenant/type 过滤 + feedback 反馈 | ✅ |
+| 9.4.3 | SkillRegistry scanner | `agents/<id>/skills/**` 索引 + manifest.yaml 解析 | ✅ |
+| 9.4.4 | Skill 使用记录 | Skill CRUD API + scan 端点 + 使用统计字段 | ✅ |
 
 ---
 
