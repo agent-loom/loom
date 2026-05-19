@@ -369,3 +369,16 @@ class CodingJobRow(AuditMixin, Base):
     data_json: Mapped[dict | None] = mapped_column(
         JSON, nullable=True
     )
+
+class DeadLetterEntryModel(AuditMixin, Base):
+    """Dead Letter Queue 条目表行模型。"""
+    __tablename__ = "dead_letter_entries"
+
+    source: Mapped[str] = mapped_column(String(128), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[str] = mapped_column(Text, nullable=False)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_retries: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")

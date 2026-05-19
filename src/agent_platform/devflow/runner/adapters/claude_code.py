@@ -46,7 +46,7 @@ class ClaudeCodeAdapter:
             self.cli_path,
             "--print",
             "--output-format", "json",
-            "--permission-mode", "bypassPermissions",
+            "--dangerously-skip-permissions",
             "--no-session-persistence",
             "--max-turns", str(self.max_turns),
         ]

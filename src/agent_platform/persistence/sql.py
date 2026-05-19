@@ -33,8 +33,10 @@ from agent_platform.persistence.tables import (
     EvalRunRow,
     RoutingDecisionRow,
     WebhookDeliveryRow,
+    DeadLetterEntryModel,
 )
 from agent_platform.registry.deployment import DeploymentEvent
+from agent_platform.webhooks.dead_letter import DeadLetterEntry, DeadLetterQueue
 
 
 def _fill_audit(row: Any) -> None:
@@ -1182,3 +1184,172 @@ class SqlCodingJobRepository:
             result = await session.execute(stmt)
             rows = result.scalars().all()
             return [r.data_json or {} for r in rows]
+
+
+# ------------------------------------------------------------------
+# DeadLetterQueue
+# ------------------------------------------------------------------
+
+
+class SqlDeadLetterQueue:
+    """基于 SQLAlchemy 的 Dead Letter Queue 实现。"""
+
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._sf = session_factory
+
+    async def enqueue(self, entry: DeadLetterEntry) -> None:
+        """将失败条目入队。"""
+        row = DeadLetterEntryModel(
+            id=entry.id,
+            source=entry.source,
+            event_type=entry.event_type,
+            payload=entry.payload,
+            error_message=entry.error_message,
+            retry_count=entry.retry_count,
+            max_retries=entry.max_retries,
+            next_retry_at=entry.next_retry_at,
+            status=entry.status,
+            created_at=entry.created_at,
+            updated_at=entry.updated_at,
+        )
+        _fill_audit(row)
+        async with self._sf() as session:
+            session.add(row)
+            await session.commit()
+
+    async def dequeue_ready(self) -> list[DeadLetterEntry]:
+        """获取已到达重试时间的条目。"""
+        now = datetime.now(UTC)
+        async with self._sf() as session:
+            stmt = select(DeadLetterEntryModel).where(
+                DeadLetterEntryModel.status.in_(("pending", "retrying")),
+                DeadLetterEntryModel.next_retry_at <= now,
+            )
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+
+            entries = []
+            for row in rows:
+                entries.append(
+                    DeadLetterEntry(
+                        id=row.id,
+                        source=row.source,
+                        event_type=row.event_type,
+                        payload=row.payload or {},
+                        error_message=row.error_message,
+                        retry_count=row.retry_count,
+                        max_retries=row.max_retries,
+                        next_retry_at=row.next_retry_at,
+                        status=row.status,
+                        created_at=row.created_at,
+                        updated_at=row.updated_at,
+                    )
+                )
+            return entries
+
+    async def mark_resolved(self, entry_id: str) -> None:
+        """标记条目为已解决。"""
+        async with self._sf() as session:
+            stmt = select(DeadLetterEntryModel).where(DeadLetterEntryModel.id == entry_id)
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row:
+                row.status = "resolved"
+                row.updated_at = datetime.now(UTC)
+                await session.commit()
+
+    async def mark_exhausted(self, entry_id: str) -> None:
+        """标记条目为已耗尽重试次数。"""
+        async with self._sf() as session:
+            stmt = select(DeadLetterEntryModel).where(DeadLetterEntryModel.id == entry_id)
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row:
+                row.status = "exhausted"
+                row.updated_at = datetime.now(UTC)
+                await session.commit()
+
+    async def update_retry(
+        self, entry_id: str, next_retry_at: datetime, retry_count: int
+    ) -> None:
+        """更新条目的重试信息。"""
+        async with self._sf() as session:
+            stmt = select(DeadLetterEntryModel).where(DeadLetterEntryModel.id == entry_id)
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row:
+                row.next_retry_at = next_retry_at
+                row.retry_count = retry_count
+                row.status = "retrying"
+                row.updated_at = datetime.now(UTC)
+                await session.commit()
+
+    async def list_entries(
+        self, status: str | None = None, limit: int = 100
+    ) -> list[DeadLetterEntry]:
+        """列出条目，可按状态过滤。"""
+        async with self._sf() as session:
+            stmt = select(DeadLetterEntryModel)
+            if status:
+                stmt = stmt.where(DeadLetterEntryModel.status == status)
+            stmt = stmt.order_by(DeadLetterEntryModel.created_at.desc()).limit(limit)
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+
+            entries = []
+            for row in rows:
+                entries.append(
+                    DeadLetterEntry(
+                        id=row.id,
+                        source=row.source,
+                        event_type=row.event_type,
+                        payload=row.payload or {},
+                        error_message=row.error_message,
+                        retry_count=row.retry_count,
+                        max_retries=row.max_retries,
+                        next_retry_at=row.next_retry_at,
+                        status=row.status,
+                        created_at=row.created_at,
+                        updated_at=row.updated_at,
+                    )
+                )
+            return entries
+
+    async def purge_resolved(self, older_than_days: int = 7) -> int:
+        """清除已解决的旧条目，返回清除数量。"""
+        from datetime import timedelta
+        cutoff = datetime.now(UTC) - timedelta(days=older_than_days)
+        
+        async with self._sf() as session:
+            # We select first to count, then delete, or use delete with returning, but sqlite support varies.
+            # Using select and delete for simplicity and compatibility
+            from sqlalchemy import delete
+            stmt = delete(DeadLetterEntryModel).where(
+                DeadLetterEntryModel.status == "resolved",
+                DeadLetterEntryModel.updated_at < cutoff
+            )
+            result = await session.execute(stmt)
+            await session.commit()
+            return result.rowcount
+
+    async def get_entry(self, entry_id: str) -> DeadLetterEntry | None:
+        """按 ID 获取单条条目。"""
+        async with self._sf() as session:
+            stmt = select(DeadLetterEntryModel).where(DeadLetterEntryModel.id == entry_id)
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if not row:
+                return None
+            return DeadLetterEntry(
+                id=row.id,
+                source=row.source,
+                event_type=row.event_type,
+                payload=row.payload or {},
+                error_message=row.error_message,
+                retry_count=row.retry_count,
+                max_retries=row.max_retries,
+                next_retry_at=row.next_retry_at,
+                status=row.status,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )

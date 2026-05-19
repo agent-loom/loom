@@ -273,8 +273,7 @@ class TestClaudeCodeExecution:
             call_args = mock_exec.call_args[0]
             assert "--model" in call_args
             assert "claude-sonnet-4-6" in call_args
-            assert "--permission-mode" in call_args
-            assert "bypassPermissions" in call_args
+            assert "--dangerously-skip-permissions" in call_args
             assert "--no-session-persistence" in call_args
 
     @pytest.mark.asyncio

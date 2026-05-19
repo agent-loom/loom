@@ -482,6 +482,20 @@ async def _app_lifespan(app: FastAPI):
         await _knowledge_scheduler.start()
         logger.info("KnowledgeSyncScheduler 已启动")
 
+    # ── SemanticRouter: 从 Registry 批量加载 routing.rules ──
+    _registry = getattr(app.state, "registry", None)
+    _sem_router = getattr(app.state, "semantic_router", None)
+    if _registry is not None and _sem_router is not None:
+        try:
+            _loaded_rules = await _sem_router.load_from_registry(_registry)
+            if _loaded_rules:
+                logger.info(
+                    "SemanticRouter 已从 registry 加载 %d 条 routing.rules",
+                    _loaded_rules,
+                )
+        except Exception:
+            logger.warning("SemanticRouter 从 registry 加载规则失败", exc_info=True)
+
     yield
 
     if _knowledge_scheduler is not None:
@@ -603,6 +617,7 @@ def create_app() -> FastAPI:
             SqlAgentDeploymentRepository,
             SqlAgentRunRepository,
             SqlAgentSessionRepository,
+    SqlDeadLetterQueue,
             SqlCodingJobRepository,
             SqlDeploymentAuditRepository,
             SqlEvalRunRepository,
@@ -676,7 +691,12 @@ def create_app() -> FastAPI:
         InMemoryDeadLetterQueue,
         WebhookRetryService,
     )
-    dlq = InMemoryDeadLetterQueue()
+    db_url = get_settings().database_url
+    if db_url and db_session_factory:
+        dlq = SqlDeadLetterQueue(session_factory=db_session_factory)
+    else:
+        dlq = InMemoryDeadLetterQueue()
+
     webhook_retry_service = WebhookRetryService(dlq=dlq)
 
     key_store = None
@@ -712,6 +732,7 @@ def create_app() -> FastAPI:
     app.state.langfuse = langfuse_tracer
     app.state.hook_registry = app_hook_registry
     app.state.semantic_router = app_semantic_router
+    app.state.registry = registry
     app.state.metrics = app_metrics
     app.state.webhook_repo = webhook_repo
     app.state.audit_repo = audit_repo
@@ -1831,6 +1852,16 @@ def create_app() -> FastAPI:
             "status": status_str,
             "actor": body.actor,
         }
+
+    # ── OpenTelemetry FastAPI Instrumentation ──
+    # 在所有路由注册完成后挂载，如未安装 opentelemetry-instrumentation-fastapi 则静默跳过
+    from agent_platform.observability.fastapi_instrumentation import instrument_app as _instrument_app
+    _otel_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") or getattr(settings, "otel_endpoint", None)
+    _instrument_app(
+        app,
+        service_name=getattr(settings, "otel_service_name", "agent-platform"),
+        otlp_endpoint=_otel_endpoint,
+    )
 
     return app
 
