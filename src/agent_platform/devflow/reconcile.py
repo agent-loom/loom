@@ -111,7 +111,69 @@ class DevFlowReconciler:
     async def run_reconciliation(self, project_id: str) -> None:
         """全量对账指定项目下的 DevFlow 工作项。
 
-        注意：这需要 PlaneAdapter 提供一个 list_work_items 接口来过滤状态。
+        从 Plane 拉取所有工作项，过滤出 DevFlow 关心的中间状态项，
+        每批最多 5 个并发调用 reconcile_item()，并汇总日志。
         """
-        # TODO: 从 Plane 拉取处于特定状态（如 Testing / In Progress）的 work items
-        pass
+        # 1. 从 Plane 拉取所有工作项
+        try:
+            response = await self.plane.list_work_items(project_id)
+        except Exception:
+            logger.error("对账失败：无法从 Plane 拉取项目 %s 的工作项", project_id, exc_info=True)
+            return
+
+        results = response.get("results", [])
+        logger.info("对账开始：项目 %s 共获取到 %d 个工作项", project_id, len(results))
+
+        # 2. 过滤出 DevFlow 关心的中间状态（from_plane_state 不抛 ValueError 的状态）
+        candidates: list[dict[str, Any]] = []
+        for item in results:
+            state_name = item.get("state", "")
+            try:
+                self.state_sync.from_plane_state(state_name)
+            except ValueError:
+                # 不在映射表中，无需对账
+                continue
+            candidates.append(item)
+
+        logger.info(
+            "对账过滤：项目 %s 共 %d 个工作项需要对账",
+            project_id,
+            len(candidates),
+        )
+
+        # 3. 批量并发执行，每批最多 5 个
+        batch_size = 5
+        total = len(candidates)
+        corrected = 0
+
+        for batch_start in range(0, total, batch_size):
+            batch = candidates[batch_start : batch_start + batch_size]
+
+            async def _reconcile_one(item: dict[str, Any]) -> bool:
+                """对账单个工作项，返回是否执行了纠正（未抛异常即视为成功）。"""
+                try:
+                    await self.reconcile_item(
+                        project_id=project_id,
+                        work_item_id=item["id"],
+                        current_state=item.get("state", ""),
+                        custom_properties=item.get("custom_properties", {}),
+                    )
+                    return True
+                except Exception:
+                    logger.warning(
+                        "对账单项失败：工作项 %s，跳过继续",
+                        item.get("id"),
+                        exc_info=True,
+                    )
+                    return False
+
+            outcomes = await asyncio.gather(*[_reconcile_one(item) for item in batch])
+            corrected += sum(outcomes)
+
+        # 4. 记录汇总日志
+        logger.info(
+            "对账完成：项目 %s，候选 %d 项，成功处理 %d 项",
+            project_id,
+            total,
+            corrected,
+        )
