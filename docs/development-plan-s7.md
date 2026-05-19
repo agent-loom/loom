@@ -1,17 +1,17 @@
 # 开发计划（S7：多维评测与运营深化 / S8：生产交付）
 
-> Status: S7 ✅ Completed / S8 ✅ Completed
-> Last updated: 2026-05-18
+> Status: S7 ✅ Completed / S8 🔶 收尾中（3 项 remaining）
+> Last updated: 2026-05-19
 
-本计划承接 S5（平台生产化）和 S6（生产运营加固）的成果，将 S7 和 S8 阶段拆为可执行的 Phase。
+本计划承接
 
 ## 当前基线
 
-| 指标 | S6 结束 | S7 结束 |
-|---|---|---|
-| 测试 | 988 passed | 1075 passed, 1 skipped, ruff clean |
-| 新增测试 | — | +87 tests (S7), +525 tests (S8 Phase 1+安全修复), +24 tests (S8 Phase 5-6) |
-| 成熟度均值 | ~75% | ~83% → ~88% → ~92% |
+| 指标 | S6 结束 | S7 结束 | S8 当前 |
+|---|---|---|---|
+| 测试 | 988 passed | 1075 passed | 1711 passed, ruff clean |
+| 新增测试 | — | +87 (S7) | +636 (S8 全阶段) |
+| 成熟度均值 | ~75% | ~83% | ~92% → ~95% |
 
 ---
 
@@ -63,7 +63,7 @@
 
 ---
 
-## S8：生产交付 — 🔶 进行中
+## S8：生产交付 — 🔶 收尾中
 
 ### S8 Phase 1：可观测性与持久化增强 — ✅ 完成
 
@@ -87,11 +87,11 @@
 | # | 任务 | 设计来源 | 验收标准 | 状态 |
 |---|---|---|---|---|
 | 8.2.1 | Claude Code CLI 端到端 | devflow-runner-workspace §验收 | 从 task pack 创建 workspace → Claude Code 执行 → diff 验证 → commit → push → MR 创建 | ⬜ |
-| 8.2.2 | Codex CLI 端到端 | devflow-runner-workspace §验收 | 同上，使用 Codex adapter | ✅ 已跑通：MR !11，commit `3d7d6a99dac657bc4987b8891ab839d5cac8f650` |
-| 8.2.3 | Runner 执行日志持久化 | implementation-gap §4.3 | runner stdout/stderr 写入 DB 或文件；Admin 可回放查看 | ⬜ |
-| 8.2.4 | 安全沙箱 PoC | implementation-gap §4.3 | Docker 容器隔离执行环境原型；PathGuard 在容器内 enforce | ⬜ |
+| 8.2.2 | Codex CLI 端到端 | devflow-runner-workspace §验收 | 同上，使用 Codex adapter | ✅ 已跑通：MR !11，commit `3d7d6a99` |
+| 8.2.3 | Runner 执行日志持久化 | implementation-gap §4.3 | runner stdout/stderr 写入 DB 或文件；Admin 可回放查看 | 🔶 File/SQL 双实现 + API 端点已就绪，Runner 尚未默认接入 |
+| 8.2.4 | 安全沙箱 PoC | implementation-gap §4.3 | Docker 容器隔离执行环境原型；PathGuard 在容器内 enforce | ⬜ 降级为 S9 |
 
-### S8 Phase 3：Plane + GitLab 端到端联调 — 🔶 正向链路已跑通
+### S8 Phase 3：Plane + GitLab 端到端联调 — ✅ 完成
 
 **目标**：使用真实 Plane/GitLab 环境验证完整 DevFlow 管线。
 
@@ -99,15 +99,15 @@
 
 | # | 任务 | 设计来源 | 验收标准 | 状态 |
 |---|---|---|---|---|
-| 8.3.1 | Plane bootstrap 脚本 | next-stage-design-plan §P0-5 | 创建标准 states (8 个)、labels、custom properties；可重复执行 | ⬜ |
-| 8.3.2 | Plane→GitLab 正向流 | devflow-state-sync | Work Item 状态变更 → webhook → parse requirement → generate issues → create branch/MR → assign runner | ✅ 已跑通：`scripts/devflow_real_e2e.py` 13/13 |
-| 8.3.3 | GitLab→Plane 反向流 | devflow-state-sync | pipeline pass/fail → Plane state 更新 + comment；MR merged → Done 状态 | ⬜ |
-| 8.3.4 | Dead Letter Queue | implementation-gap §3.3 | webhook 投递失败进入 DB-backed retry queue；可查询/重试/清理 | ⬜ |
-| 8.3.5 | Plane 强状态机 | next-stage-design-plan §P0-5 | 8 状态严格流转；非法跳转拒绝并告警 | ⬜ |
+| 8.3.1 | Plane bootstrap 脚本 | next-stage-design-plan §P0-5 | 创建标准 states (8 个)、labels、custom properties；可重复执行 | ⬜ 降级为 S9（当前通过 .env 手动配置状态 ID） |
+| 8.3.2 | Plane→GitLab 正向流 | devflow-state-sync | Work Item 状态变更 → webhook → owner 解析 → create branch → assign runner → commit → 创建 MR | ✅ 已跑通 + Code First MR Later 重构（`94ff442`） |
+| 8.3.3 | GitLab→Plane 反向流 | devflow-state-sync | pipeline pass/fail → Plane state 更新 + comment；MR merged → Staging 状态 | ✅ `GitLabEventHandler` 完整实现（pipeline/MR 事件处理 + 幂等去重） |
+| 8.3.4 | Dead Letter Queue | implementation-gap §3.3 | webhook 投递失败进入 DB-backed retry queue；可查询/重试/清理 | ✅ `SqlDeadLetterQueue` + 60s 定时重试 + Admin API |
+| 8.3.5 | Plane 强状态机 | next-stage-design-plan §P0-5 | 8 状态严格流转；非法跳转拒绝并告警 | ✅ `DevFlowStateMachine` 8 状态 + transition 校验 + rollback |
 
-### S8 Phase 4：Hermes 深度集成
+### S8 Phase 4：Hermes 深度集成 — ✅ 完成
 
-**目标**：Hermes memory 持久化 + 错误/重试/中断事件映射。
+**目标**：Hermes memory 持久化 + 错误/重试/中断事件映射 + 真实模型 E2E。
 
 | # | 任务 | 设计来源 | 验收标准 | 状态 |
 |---|---|---|---|---|
@@ -115,6 +115,7 @@
 | 8.4.2 | Hermes 错误/重试映射 | implementation-gap §2.4 | Hermes 超时/限流/中断事件映射为 AgentStreamEvent.ERROR + 自动重试策略 | ✅ |
 | 8.4.3 | Hermes HITL 事件映射 | implementation-gap §2.4 | Hermes human-in-the-loop 回调映射为平台 ApprovalGate 审批流 | ✅ |
 | 8.4.4 | Hermes 集成测试 | hermes-backend-spike | manifest → Hermes config → tool call → memory recall → trace 全链路 | ✅ |
+| 8.4.5 | Hermes 真实模型 E2E | — | hermes_echo agent 接通真实 z-ai/glm-5 模型（via OpenAI 兼容路径），单轮+多轮验证通过 | ✅ `0d2de19` |
 
 ### S8 Phase 5：Admin UI + 运维工具
 
@@ -159,9 +160,37 @@ S8 Phase 4（Hermes 深度集成）    S8 Phase 5（Admin UI）
 
 ## 里程碑
 
-| 里程碑 | 目标 | 验收 |
+| 里程碑 | 目标 | 验收 | 状态 |
+|---|---|---|---|
+| M1: 可观测性就绪 | Phase 1 完成 | Prometheus /metrics 可抓取；session 持久化；eval 增强端点可用 | ✅ |
+| M2: DevFlow E2E | Phase 2-3 完成 | 从 Plane 工单到 MR 合并的全自动闭环 | ✅ 正向流 + 反向流均就绪 |
+| M3: Runtime 成熟 | Phase 4 完成 | Hermes memory 跨 run 连续；错误映射完整；真实模型 E2E | ✅ |
+| M4: 可交付 | Phase 5-6 完成 | Admin UI 可操作；SLO 门禁 + 签名验证 + 压力测试通过 | ✅ |
+
+---
+
+## S8 收尾：遗留项与 S9 展望
+
+### S8 Remaining（3 项）
+
+| # | 任务 | 现状 | 建议 |
+|---|---|---|---|
+| 8.2.1 | Claude Code CLI 端到端 | adapter 代码已实现，真实 E2E 未验证 | S9 优先项 |
+| 8.2.3 | Runner 日志持久化接入 | File/SQL 双实现 + API 就绪，Runner 未默认接入 | S9 优先项 |
+| 8.3.1 | Plane bootstrap 脚本 | 当前通过 .env 手动配置 8 个状态 ID | S9 P1 |
+
+### S8 降级项
+
+| # | 任务 | 原因 |
 |---|---|---|
-| M1: 可观测性就绪 | Phase 1 完成 | Prometheus /metrics 可抓取；session 持久化；eval 增强端点可用 |
-| M2: DevFlow E2E | Phase 2-3 完成 | 从 Plane 工单到 MR 合并的全自动闭环 |
-| M3: Runtime 成熟 | Phase 4 完成 | Hermes memory 跨 run 连续；错误映射完整 |
-| M4: 可交付 | Phase 5-6 完成 | Admin UI 可操作；SLO 门禁 + 签名验证 + 压力测试通过 |
+| 8.2.4 | 安全沙箱 PoC | 当前 PathGuard 目录级隔离已满足 dev 环境需求，容器化为生产化需求 |
+
+### S8 新增成果（计划外）
+
+| 成果 | 说明 | Commit |
+|---|---|---|
+| Code First MR Later | MR 从 Orchestrator 下沉到 Runner，commit 后才创建 MR | `94ff442` |
+| AgentOwnershipResolver | 4 策略 Plane item→Agent 解析（explicit/project/label/keyword） | `d733b28` |
+| Ownership P2 bug 修复 | `_properties()` 支持列表格式，`_labels()` 合并双字段 | `652f72f` |
+| Hermes 真实模型 E2E | hermes_echo → z-ai/glm-5 via OpenAI 兼容路径 | `0d2de19` |
+| Execution Log API | `GET /api/v1/devflow/jobs/{job_id}/logs` 端点 | `ed25fe9` |

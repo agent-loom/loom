@@ -25,6 +25,8 @@
 - [14. WebSocket 对话](#14-websocket-对话)
 - [15. SSE 流式输出](#15-sse-流式输出)
 - [16. Swagger UI](#16-swagger-ui)
+- [17. DevFlow 真实 Coding Runner E2E](#17-devflow-真实-coding-runner-e2e)
+- [18. DevFlow Webhook 驱动真实环境验证](#18-devflow-webhook-驱动真实环境验证)
 - [附录 A：环境变量速查](#附录-a环境变量速查)
 - [附录 B：已注册 Agent 速查](#附录-b已注册-agent-速查)
 - [附录 C：验证检查清单](#附录-c验证检查清单)
@@ -734,6 +736,317 @@ curl -N -X POST http://localhost:8000/api/v1/agent/chat \
 
 ---
 
+## 18. DevFlow Webhook 驱动真实环境验证
+
+用途：通过 Plane 改变工单状态触发真实 webhook，逐步确认每个环节正常工作。与第 17 节不同，此节是**手动逐步验证**，适合排查问题或首次接入新环境。
+
+**总时长约 15-30 分钟。**
+
+### 18.0 前置检查
+
+```bash
+# 确认平台已启动
+curl -s http://localhost:8000/health | python3 -m json.tool
+
+# 确认环境变量完整（以下全部应有值）
+grep -E "PLANE_BASE_URL|PLANE_API_KEY|PLANE_PROJECT_ID|PLANE_WEBHOOK_SECRET|\
+GITLAB_BASE_URL|GITLAB_TOKEN|GITLAB_PROJECT_ID|GITLAB_WEBHOOK_SECRET|\
+DEVFLOW_REPO_URL|DEVFLOW_RUNNER_ADAPTER|DEVFLOW_DEFAULT_BRANCH|\
+PLANE_READY_FOR_AI_DEV_STATE_ID|PLANE_AI_DEVELOPING_STATE_ID" .env
+```
+
+验证点：
+- [ ] `curl /health` 返回 `{"status": "ok"}`
+- [ ] 所有必要环境变量均有值（非空）
+- [ ] `DEVFLOW_RUNNER_ADAPTER` 已设置（`mock` / `codex` / `claude_code`）
+
+### 18.1 确认平台接收 Plane Webhook
+
+**步骤：**
+
+1. 在 Plane 创建一个新 Work Item（任何标题均可，如「测试 DevFlow 18.1」）
+2. 把 Work Item 状态改为 **Ready for AI Dev**
+3. 观察平台日志：
+
+```bash
+# 实时跟踪平台日志（另一个终端）
+tail -f server.log | grep -E "webhook|devflow|owner|branch"
+```
+
+验证点：
+- [ ] 日志出现 `Plane webhook received` 或类似记录
+- [ ] 日志中能看到 work_item_id（GUID 格式）
+- [ ] 无 `401 Unauthorized`（说明 webhook secret 正确）
+- [ ] 无 `422 Unprocessable`（说明 payload 解析正常）
+
+**常见失败：**
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| 无日志、Plane 回调超时 | 平台未暴露到公网，Plane 无法回调 | 用 `ngrok http 8000` 并更新 Plane webhook URL |
+| `401 Unauthorized` | `PLANE_WEBHOOK_SECRET` 与 Plane 配置不匹配 | 重新在 Plane webhook 设置页面获取 secret |
+| Plane 状态改变但无 webhook | Plane webhook 未配置或未启用 | 检查 Plane 项目设置 → Webhooks，确认已启用 Work Item 事件 |
+
+### 18.2 确认 Agent Owner 解析
+
+Owner 解析是决定哪个 agent 负责工单的核心步骤，4 种策略按优先级依次尝试。
+
+**验证方式：**
+
+```bash
+# 观察日志中的 owner 解析结果
+tail -f server.log | grep -E "owner|agent_id|resolve"
+```
+
+期望看到类似：
+```
+DevFlowOrchestrator: owner resolved agent_id=echo strategy=project_mapping work_item=<id>
+```
+
+**4 种 Owner 解析策略：**
+
+| 优先级 | 策略 | 触发条件 | 示例 |
+|---|---|---|---|
+| 1 | explicit | Work Item `custom_properties.agent_id` 有值 | 直接指定 agent |
+| 2 | project_mapping | `agent_ownership.yaml` 中 `project_id` 匹配 | 按 Plane 项目归属 |
+| 3 | label_mapping | Work Item 标签与 `agent_ownership.yaml` 中 `labels` 匹配 | 按标签分派 |
+| 4 | keyword_mapping | Work Item 标题中含配置的关键词 | 按关键词匹配 |
+
+**配置示例（`config/agent_ownership.yaml`）：**
+
+```yaml
+agents:
+  echo:
+    project_mappings:
+      - project_id: "ab49f9f8-be43-4923-8a6b-0f49f682719d"
+    label_mappings:
+      - label: "agent:echo"
+    keyword_mappings:
+      - keyword: "echo"
+        case_sensitive: false
+```
+
+验证点：
+- [ ] 日志中能看到 `owner resolved agent_id=<your_agent>`
+- [ ] 日志中显示使用的 strategy（explicit/project/label/keyword）
+- [ ] 无 `no owner found` 日志（否则工单将被跳过）
+
+**若 owner 未解析成功：**
+
+```bash
+# 临时验证：直接调用 owner 解析（需启动平台，通过 API 触发）
+# 或在 Work Item custom_properties 中手动设置 agent_id=echo
+```
+
+### 18.3 确认分支创建
+
+Owner 解析成功后，Orchestrator 应立即在 GitLab 创建 feature branch。
+
+**验证：**
+
+```bash
+# 查看 GitLab API 确认分支已创建
+curl -s -H "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+  "$GITLAB_BASE_URL/api/v4/projects/$GITLAB_PROJECT_ID/repository/branches" \
+  | python3 -m json.tool | grep '"name"' | head -10
+```
+
+期望：看到形如 `devflow/<work_item_id>-<slug>` 的新分支。
+
+同时确认 Plane Work Item 状态已变为 **AI Developing**：
+
+```bash
+# 查看 Plane work item 当前状态（需 Plane API）
+curl -s -H "X-API-Key: $PLANE_API_KEY" \
+  "$PLANE_BASE_URL/api/v1/workspaces/$PLANE_WORKSPACE_SLUG/projects/$PLANE_PROJECT_ID/issues/<work_item_id>/" \
+  | python3 -m json.tool | grep '"state"'
+```
+
+验证点：
+- [ ] GitLab 分支已创建（格式 `devflow/...`）
+- [ ] Plane Work Item 状态变为 AI Developing
+- [ ] Plane 有评论「分支已创建 — `<branch_name>`」
+
+**常见失败：**
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| `Branch already exists` | 同一 work item 重复触发 | 正常，平台会复用已有分支 |
+| `GITLAB_PROJECT_ID` 相关错误 | Project ID 不正确 | 在 GitLab 项目首页获取数字 ID（如 `12556`） |
+| 分支创建成功但 Plane 未变状态 | `PLANE_AI_DEVELOPING_STATE_ID` 配置错误 | 从 Plane 状态列表 API 获取正确 ID |
+
+### 18.4 确认 Runner 执行
+
+分支创建后，Runner 会被异步派发执行编码任务。
+
+**查看 Job 状态：**
+
+```bash
+# 列出所有 DevFlow jobs
+curl -s -H "Authorization: Bearer $AGENT_PLATFORM_API_KEY" \
+  http://localhost:8000/api/v1/devflow/jobs | python3 -m json.tool
+
+# 查看特定 job 详情（替换 <job_id>）
+curl -s -H "Authorization: Bearer $AGENT_PLATFORM_API_KEY" \
+  http://localhost:8000/api/v1/devflow/jobs/<job_id> | python3 -m json.tool
+```
+
+**查看 Runner 执行日志：**
+
+```bash
+# 查看 job stdout/stderr（替换 <job_id>）
+curl -s -H "Authorization: Bearer $AGENT_PLATFORM_API_KEY" \
+  "http://localhost:8000/api/v1/devflow/jobs/<job_id>/logs" | python3 -m json.tool
+
+# 只看 stderr（错误输出）
+curl -s -H "Authorization: Bearer $AGENT_PLATFORM_API_KEY" \
+  "http://localhost:8000/api/v1/devflow/jobs/<job_id>/logs?stream=stderr" \
+  | python3 -m json.tool
+```
+
+**Job 状态流转：**
+
+```
+PENDING → WORKSPACE_CREATING → RUNNING → VALIDATING → COMMITTING → SUCCEEDED
+                                                                  ↓ (失败时)
+                                                               FAILED / TIMED_OUT
+```
+
+验证点：
+- [ ] Job 状态最终为 `SUCCEEDED`（mock adapter 约 3s；真实 runner 约 2-5min）
+- [ ] `job.result.commit_sha` 非空
+- [ ] `job.result.status == "success"`
+
+**常见失败：**
+
+| Job 状态 | 原因 | 处理 |
+|---|---|---|
+| `FAILED` + `path_violation` | 编码结果修改了 PathGuard 禁止的文件 | 检查 `devflow-runner-workspace-design.md` PathGuard 配置 |
+| `FAILED` + `validation_failed` | `pytest` 或 `ruff` 验证未通过 | 查看 job logs stderr |
+| `TIMED_OUT` | Runner 超出 600s 限制 | `claude_code` 大任务正常，考虑拆分需求 |
+| 无 Job 记录 | runner 派发未触发 | 查看平台日志中 `_dispatch_runner` 相关输出 |
+
+### 18.5 确认 Commit 和 MR 创建
+
+Runner 成功提交代码（`COMMITTING` 状态）后，会自动创建 GitLab MR。
+
+**验证 Commit：**
+
+```bash
+# 查看分支最新 commit
+curl -s -H "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+  "$GITLAB_BASE_URL/api/v4/projects/$GITLAB_PROJECT_ID/repository/branches/<branch_name>" \
+  | python3 -m json.tool | grep -A5 '"commit"'
+```
+
+**验证 MR：**
+
+```bash
+# 查看该分支的 Open MR
+curl -s -H "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+  "$GITLAB_BASE_URL/api/v4/projects/$GITLAB_PROJECT_ID/merge_requests?state=opened&source_branch=<branch_name>" \
+  | python3 -m json.tool | grep -E '"iid"|"title"|"web_url"'
+```
+
+验证点：
+- [ ] GitLab 分支有新 commit（commit message 含 `DevFlow`）
+- [ ] MR 已创建（非空 Draft 状态，含真实 commit）
+- [ ] MR description 含 `<!-- devflow:plane_project_id=... -->` 元数据注释
+- [ ] GitLab MR 有平台自动添加的 Runner 结果评论
+
+### 18.6 确认 Plane 回写
+
+MR 创建后，平台应回写 Plane Work Item。
+
+**验证 Plane 评论：**
+
+在 Plane 打开对应 Work Item，应看到：
+1. 「分支已创建」评论（Orchestrator 阶段）
+2. Runner 执行结果评论（含 commit SHA、diff 统计）
+3. MR 链接评论（含 GitLab MR URL）
+
+验证点：
+- [ ] Work Item 有 3 条或以上平台自动评论
+- [ ] `custom_properties.gitlab_branch` 已更新
+- [ ] `custom_properties.gitlab_mr_url` 已更新（由 Runner 在 MR 创建后写入）
+
+### 18.7 GitLab → Plane 反向同步验证
+
+GitLab CI Pipeline 和 MR 状态变化会反向同步到 Plane。
+
+**触发条件：** GitLab 收到 Pipeline 事件或 MR 合并/关闭事件后，通过 webhook 回调平台。
+
+**确认 GitLab webhook 已配置：**
+
+在 GitLab 项目 Settings → Webhooks，应有：
+- URL: `http://<平台地址>/api/v1/integrations/gitlab/webhook`
+- Secret Token: 与 `GITLAB_WEBHOOK_SECRET` 一致
+- 事件勾选: `Pipeline events`、`Merge request events`
+
+**状态映射：**
+
+| GitLab 事件 | Plane 状态变化 |
+|---|---|
+| Pipeline running | → Testing |
+| Pipeline success | → Human Review |
+| Pipeline failed | → AI Developing（触发重试逻辑） |
+| MR merged | → Staging |
+| MR closed | → AI Developing |
+
+验证点：
+- [ ] GitLab Pipeline 执行时 Plane 状态变为 Testing
+- [ ] Pipeline 成功后 Plane 状态变为 Human Review
+- [ ] MR 合并后 Plane 状态变为 Staging
+
+**手动测试反向 webhook（模拟 Pipeline 成功）：**
+
+```bash
+# 模拟 GitLab Pipeline success 事件（替换 project_id 和 work_item_id）
+curl -s -X POST http://localhost:8000/api/v1/integrations/gitlab/webhook \
+  -H "Content-Type: application/json" \
+  -H "X-Gitlab-Token: $GITLAB_WEBHOOK_SECRET" \
+  -H "X-Gitlab-Event: Pipeline Hook" \
+  -d '{
+    "object_kind": "pipeline",
+    "object_attributes": {"status": "success", "ref": "devflow/test-branch", "id": 999},
+    "variables": [
+      {"key": "PLANE_PROJECT_ID", "value": "<your_plane_project_id>"},
+      {"key": "PLANE_WORK_ITEM_ID", "value": "<your_work_item_id>"}
+    ]
+  }'
+```
+
+期望响应：`{"status": "accepted", "event": "pipeline", "sync": "queued"}`
+
+### 18.8 查看日志排查问题
+
+```bash
+# 平台完整日志
+tail -100 server.log
+
+# 只看 DevFlow 相关
+grep -E "devflow|DevFlow|orchestrator|runner|owner|branch|mr_iid" server.log | tail -50
+
+# 只看错误
+grep -E "ERROR|CRITICAL|Exception|Traceback" server.log | tail -20
+
+# 查看 webhook 投递记录（需平台 API）
+curl -s -H "Authorization: Bearer $AGENT_PLATFORM_API_KEY" \
+  http://localhost:8000/api/v1/admin/status | python3 -m json.tool
+```
+
+**常见全局失败原因：**
+
+| 现象 | 可能原因 | 排查命令 |
+|---|---|---|
+| Plane webhook 触发但无日志 | 平台 DevFlow 功能未启用 | 检查 `PLANE_BASE_URL` 是否在 `.env` 中设置 |
+| Owner 解析失败（跳过工单） | `config/agent_ownership.yaml` 未配置，或 Plane project_id 不匹配 | 对比 `.env` 中 `PLANE_PROJECT_ID` 和 yaml 中的 `project_id` |
+| Runner 未执行 | 工单 owner 未解析 / Job queue 满 / Runner adapter 异常 | 看日志 `_dispatch_runner` 输出，检查 job 列表 |
+| MR 创建后无 Plane 评论 | `PLANE_PROJECT_ID` / `PLANE_WORK_ITEM_ID` 在 task pack 中丢失 | 检查 orchestrator 日志中 task_pack 内容 |
+| GitLab→Plane 反向同步无效 | GitLab webhook 未配置，或 `GITLAB_WEBHOOK_SECRET` 不匹配 | 查 GitLab webhook 投递历史（Settings → Webhooks → Recent Deliveries） |
+
+---
+
 ## 附录 A：环境变量速查
 
 | 环境变量 | 默认值 | 用途 |
@@ -796,6 +1109,7 @@ curl -N -X POST http://localhost:8000/api/v1/agent/chat \
 | 17 | WebSocket | wscat / Python 脚本 | wscat 或 websockets | 2 min |
 | 18 | HITL 审批 | 设置 HITL_ENABLED + 修改 risk_level | 无 | 5 min |
 | 19 | DevFlow 真实 Runner E2E | `scripts/devflow_real_e2e.py` | Plane + GitLab + Codex/Claude CLI | 5-15 min |
-| | **合计** | | | **~40 min** |
+| 20 | DevFlow Webhook 手动验证 | 第 18 节逐步操作 | Plane + GitLab + ngrok（可选） | 15-30 min |
+| | **合计** | | | **~55 min** |
 
 全部通过即可确认平台核心功能模块正常工作。
