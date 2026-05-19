@@ -10,10 +10,12 @@
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import logging
 import os
 import sys
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -46,8 +48,85 @@ def _check(label: str, condition: bool, detail: str = "") -> None:
         print(msg)
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="DevFlow 直连真实 Plane/GitLab/Runner 的 E2E 集成验证"
+    )
+    parser.add_argument(
+        "--require-real-runner",
+        action="store_true",
+        help="要求 DEVFLOW_RUNNER_ADAPTER 不是 mock。",
+    )
+    parser.add_argument(
+        "--require-commit",
+        action="store_true",
+        help="要求 Runner 成功后产生 commit_sha。",
+    )
+    parser.add_argument(
+        "--require-state-sync",
+        action="store_true",
+        help="要求配置 Plane AI Developing / Testing 状态 ID，并验证状态推进。",
+    )
+    return parser.parse_args()
+
+
+async def _get_gitlab_mr_notes(
+    *,
+    base_url: str,
+    token: str,
+    project_id: str,
+    mr_iid: int,
+) -> list[dict[str, Any]]:
+    import httpx
+
+    async with httpx.AsyncClient(headers={"PRIVATE-TOKEN": token}, timeout=10) as client:
+        response = await client.get(
+            f"{base_url}/api/v4/projects/{project_id}/merge_requests/{mr_iid}/notes"
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data if isinstance(data, list) else []
+
+
+async def _get_plane_comments(
+    *,
+    base_url: str,
+    api_key: str,
+    workspace_slug: str,
+    project_id: str,
+    work_item_id: str,
+) -> list[dict[str, Any]]:
+    import httpx
+
+    async with httpx.AsyncClient(headers={"X-API-Key": api_key}, timeout=10) as client:
+        response = await client.get(
+            f"{base_url}/api/v1/workspaces/{workspace_slug}/projects/{project_id}"
+            f"/work-items/{work_item_id}/comments/"
+        )
+        response.raise_for_status()
+        data = response.json()
+    if isinstance(data, dict):
+        results = data.get("results")
+        if isinstance(results, list):
+            return results
+        comments = data.get("comments")
+        if isinstance(comments, list):
+            return comments
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _comment_text(comment: dict[str, Any]) -> str:
+    for key in ("body", "comment_html", "comment_stripped", "comment"):
+        value = comment.get(key)
+        if isinstance(value, str):
+            return value
+    return str(comment)
+
+
 async def main() -> None:
     load_dotenv(override=True)
+    args = _parse_args()
 
     print("=" * 60)
     print("DevFlow 真实 E2E 集成验证")
@@ -61,18 +140,38 @@ async def main() -> None:
     gitlab_base = os.environ["GITLAB_BASE_URL"]
     gitlab_token = os.environ["GITLAB_TOKEN"]
     gitlab_project_id = os.environ["GITLAB_PROJECT_ID"]
-    default_branch = os.environ.get("GITLAB_DEFAULT_BRANCH", "master")
+    default_branch = (
+        os.environ.get("DEVFLOW_DEFAULT_BRANCH")
+        or os.environ.get("GITLAB_DEFAULT_BRANCH")
+        or "master"
+    )
     runner_adapter = os.environ.get("DEVFLOW_RUNNER_ADAPTER", "mock")
     codex_profile = os.environ.get("DEVFLOW_CODEX_PROFILE")
     repo_url = os.environ["DEVFLOW_REPO_URL"]
     workspace_base = os.environ.get("DEVFLOW_WORKSPACE_BASE_DIR")
     cleanup_success = os.environ.get("DEVFLOW_CLEANUP_ON_SUCCESS", "false").lower() == "true"
+    ai_developing_state_id = os.environ.get("PLANE_AI_DEVELOPING_STATE_ID")
+    testing_state_id = os.environ.get("PLANE_TESTING_STATE_ID")
 
     print("\n配置:")
     print(f"  Plane:  {plane_base} / {plane_slug} / {plane_project_id}")
     print(f"  GitLab: {gitlab_base} / project {gitlab_project_id} (default: {default_branch})")
     print(f"  Runner: {runner_adapter} (profile: {codex_profile or 'default'})")
     print(f"  Workspace cleanup on success: {cleanup_success}")
+    print(
+        "  Plane states: "
+        f"AI Developing={bool(ai_developing_state_id)}, "
+        f"Testing={bool(testing_state_id)}"
+    )
+
+    if args.require_real_runner and runner_adapter == "mock":
+        _check("真实 Runner 已启用", False, "DEVFLOW_RUNNER_ADAPTER=mock")
+        sys.exit(1)
+    if args.require_state_sync:
+        _check("PLANE_AI_DEVELOPING_STATE_ID 已配置", bool(ai_developing_state_id))
+        _check("PLANE_TESTING_STATE_ID 已配置", bool(testing_state_id))
+        if not (ai_developing_state_id and testing_state_id):
+            sys.exit(1)
 
     # 构建真实适配器
     plane = PlaneAdapter(
@@ -157,6 +256,8 @@ async def main() -> None:
         plane=plane,
         gitlab_project_id=gitlab_project_id,
         repo_url=repo_url,
+        testing_state_id=testing_state_id,
+        ai_developing_state_id=ai_developing_state_id,
         log_repo=InMemoryExecutionLogRepository(),
     )
     orch = DevFlowOrchestrator(
@@ -203,6 +304,13 @@ async def main() -> None:
             if job.result:
                 print(f"  job.result.status: {job.result.status}")
                 print(f"  job.result.commit_sha: {job.result.commit_sha}")
+                _check(
+                    "job.result.status 为 success",
+                    getattr(job.result.status, "value", job.result.status) == "success",
+                    f"got {job.result.status}",
+                )
+                if args.require_commit or runner_adapter != "mock":
+                    _check("Runner commit_sha 非空", bool(job.result.commit_sha))
 
     # 步骤 5：验证 GitLab 上分支和 MR 存在
     if result and result.mr_iid:
@@ -210,25 +318,63 @@ async def main() -> None:
         try:
             mr = await gitlab.get_merge_request(gitlab_project_id, result.mr_iid)
             _check("GitLab MR 存在", bool(mr.get("id") or mr.get("iid")))
+            _check("MR source branch 匹配", mr.get("source_branch") == result.branch)
+            _check("MR target branch 匹配", mr.get("target_branch") == default_branch)
             print(f"  MR title: {mr.get('title')}")
             print(f"  MR state: {mr.get('state')}")
+            has_runner_commit = (
+                result.coding_job
+                and result.coding_job.result
+                and result.coding_job.result.commit_sha
+            )
+            if has_runner_commit:
+                _check(
+                    "MR head sha 匹配 Runner commit",
+                    mr.get("sha") == result.coding_job.result.commit_sha,
+                    f"mr.sha={mr.get('sha')}, commit={result.coding_job.result.commit_sha}",
+                )
+
+            notes = await _get_gitlab_mr_notes(
+                base_url=gitlab_base,
+                token=gitlab_token,
+                project_id=gitlab_project_id,
+                mr_iid=result.mr_iid,
+            )
+            note_bodies = "\n".join(_comment_text(note) for note in notes)
+            _check("GitLab MR 有 Runner 报告评论", "DevFlow Runner" in note_bodies)
         except Exception as e:
             _check("GitLab MR 可查询", False, str(e))
 
     # 步骤 6：验证 Plane 工作项有评论
     print("\n--- 步骤 6：验证 Plane 评论 ---")
     try:
-        import httpx
-        async with httpx.AsyncClient(headers={"X-API-Key": plane_key}, timeout=10) as c:
-            r = await c.get(
-                f"{plane_base}/api/v1/workspaces/{plane_slug}/projects/{plane_project_id}"
-                f"/work-items/{work_item_id}/comments/"
-            )
-            comments = r.json()
-            count = comments.get("total_count", 0) if isinstance(comments, dict) else len(comments)
-            _check("Plane 工作项有评论（DevFlow 回写）", count > 0, f"comments={count}")
+        comments = await _get_plane_comments(
+            base_url=plane_base,
+            api_key=plane_key,
+            workspace_slug=plane_slug,
+            project_id=plane_project_id,
+            work_item_id=work_item_id,
+        )
+        comment_text = "\n".join(_comment_text(comment) for comment in comments)
+        _check("Plane 工作项有评论（DevFlow 回写）", len(comments) > 0, f"comments={len(comments)}")
+        _check("Plane 评论包含 MR created", "MR created" in comment_text or "MR" in comment_text)
+        _check("Plane 评论包含 Runner 报告", "DevFlow Runner" in comment_text)
     except Exception as e:
         _check("Plane 评论可查询", False, str(e))
+
+    if args.require_state_sync and work_item_id:
+        print("\n--- 步骤 7：验证 Plane 状态 ---")
+        try:
+            detail = await plane.get_work_item(plane_project_id, work_item_id)
+            state = detail.get("state")
+            state_id = state.get("id") if isinstance(state, dict) else state
+            _check(
+                "Plane 状态已推进到 Testing",
+                state_id == testing_state_id,
+                f"state={state}",
+            )
+        except Exception as e:
+            _check("Plane 状态可查询", False, str(e))
 
     # 关闭连接
     await plane.close()

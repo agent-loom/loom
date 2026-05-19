@@ -204,7 +204,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
     _ALL_SCOPES = ["chat", "deploy", "admin", "eval", "register", "rollback", "read"]
     _SERVICE_SCOPES = ["chat", "deploy", "eval", "read"]
-    _SKIP_PATHS = {"/health", "/health/ready", "/metrics", "/docs", "/openapi.json", "/redoc"}
+    _SKIP_PATHS = {
+        "/health",
+        "/health/ready",
+        "/metrics",
+        "/docs",
+        "/openapi.json",
+        "/redoc",
+        # 外部 webhook 平台通常不能附加平台 API Key。
+        # 这些入口由各自 endpoint 内部的 webhook secret/signature 认证。
+        "/api/v1/integrations/plane/webhook",
+        "/api/v1/integrations/gitlab/webhook",
+    }
 
     def __init__(
         self,
@@ -625,8 +636,8 @@ def create_app() -> FastAPI:
             SqlAgentDeploymentRepository,
             SqlAgentRunRepository,
             SqlAgentSessionRepository,
-    SqlDeadLetterQueue,
             SqlCodingJobRepository,
+            SqlDeadLetterQueue,
             SqlDeploymentAuditRepository,
             SqlEvalRunRepository,
             SqlRoutingDecisionRepository,
@@ -1045,7 +1056,7 @@ def create_app() -> FastAPI:
         app.state.admin_deps.reconciler = reconciler
 
     # Feedback Intelligence Service
-    if db_session_factory is not None:
+    if db_session_factory is not None and devflow is not None:
         from agent_platform.feedback.collector import FeedbackCollector
         from agent_platform.feedback.gate import ProposalGate
         from agent_platform.feedback.miner import FeedbackMiner
@@ -1935,8 +1946,14 @@ def create_app() -> FastAPI:
 
     # ── OpenTelemetry FastAPI Instrumentation ──
     # 在所有路由注册完成后挂载，如未安装 opentelemetry-instrumentation-fastapi 则静默跳过
-    from agent_platform.observability.fastapi_instrumentation import instrument_app as _instrument_app
-    _otel_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") or getattr(settings, "otel_endpoint", None)
+    from agent_platform.observability.fastapi_instrumentation import (
+        instrument_app as _instrument_app,
+    )
+    _otel_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") or getattr(
+        settings,
+        "otel_endpoint",
+        None,
+    )
     _instrument_app(
         app,
         service_name=getattr(settings, "otel_service_name", "agent-platform"),

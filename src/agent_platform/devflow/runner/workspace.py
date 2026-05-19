@@ -116,10 +116,10 @@ class WorkspaceManager:
             raise RuntimeError(f"git fetch timed out for branch {branch}") from None
 
         if fetch_proc.returncode == 0:
-            # 远程分支存在，切到它
+            # 远程分支存在，切到它（fetch 只更新 FETCH_HEAD，不创建 origin/<branch> tracking ref）
             await self._run_git(
                 workspace_dir,
-                ["git", "checkout", "-b", branch, f"origin/{branch}"],
+                ["git", "checkout", "-b", branch, "FETCH_HEAD"],
             )
         else:
             # 远程分支不存在（罕见，防御性处理），本地新建
