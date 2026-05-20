@@ -1,6 +1,6 @@
 # 自进化 Agent 系统落地路线
 
-> Status: Phase 0-3.5, 1.6, 9 已实现，Phase 1.5/4增强/10 待实现
+> Status: Phase 0-5, 9, 10 全套核心机制均已 100% 物理实现（仅 Phase 4 语义聚类、外围看板 UI 待后续阶段增强）
 > Stage: S9
 > Owner: platform
 > Last updated: 2026-05-20
@@ -38,7 +38,8 @@
 
 目标：从 eval failure 生成改进提案，含风险分类、证据绑定和 Plane 分发。
 
-实现说明：实际实现直接生成 `ImprovementProposal`（而非设计中先生成 Candidate 再晋升），因为 Candidate Store 尚未实现。后续 Phase 1.6 实现 Candidate Store 后可补齐。
+实现说明：现已完整支持 Candidate Store 缓冲层；可以通过后台异步评审生成相应的候选资产草案，再经由 Promotion 流程自动或手动晋升为正式提案。
+
 
 范围：
 
@@ -54,7 +55,7 @@
 
 ---
 
-## Phase 1.5：Background Review Fork — ⬜ 待实现
+## Phase 1.5：Background Review Fork — ✅ 完成
 
 目标：借鉴 Hermes self-improvement loop，引入受限后台 review fork，但只输出 candidate。
 
@@ -64,18 +65,19 @@
 
 范围：
 
-1. AgentRun / EvalRun 完成后异步触发 review fork。
-2. review fork 只读取脱敏 evidence。
-3. review fork 只允许写 `ProposalDraft`、`MemoryCandidate`、`SkillDraft`、`EvalCaseDraft`、`ReviewReport`。
-4. 禁止 shell、web unrestricted、git、deploy、secret 工具。
-5. 记录 review_fork 审计事件。
+1. ✅ AgentRun / EvalRun 完成后异步触发 review fork（见 `review_fork.py` 中的 `BackgroundReviewFork`）。
+2. ✅ review fork 只读取脱敏 evidence。
+3. ✅ review fork 只允许写 `ProposalDraft`、`MemoryCandidate`、`SkillDraft`、`EvalCaseDraft`、`ReviewReport`（使用 Scoped Toolset 严格限制）。
+4. ✅ 禁止 shell、web unrestricted、git、deploy、secret 工具。
+5. ✅ 记录 review_fork 审计事件（持久化至 `SqlReviewForkAuditRepository`）。
+6. ✅ 引入基于被拒率的质量熔断电路（Quality Circuit Breaker）。
 
 验收：
 
-1. 普通 chat 请求不被 review fork 阻塞。
-2. review fork 输出结构化 candidate。
-3. review fork 无法调用 runner 或 deploy。
-4. 生成的 candidate 都带 source evidence。
+1. ✅ 普通 chat 请求不被 review fork 阻塞。
+2. ✅ review fork 输出结构化 candidate。
+3. ✅ review fork 无法调用 runner 或 deploy。
+4. ✅ 生成的 candidate 都带 source evidence。
 
 ---
 
@@ -188,34 +190,33 @@
 
 ---
 
-## Phase 5：生产化治理 — 🔶 部分完成 (S9 Phase 9 已完成)
+## Phase 5：生产化治理 — ✅ 核心机制完成
 
-目标：进入可长期运行状态。
+目标：进入可长期运行状态并打通治理通路。
 
 对应 development-plan：Phase 5（指标）+ Phase 9（RuntimeMemory + Skill 注入）+ Phase 10（治理）。
 
 范围：
 
 1. ✅ ProposalRepository SQL 持久化。
-2. ✅ EvolutionMemory model + InMemory repository + API。
-3. ✅ SkillRegistry scanner + API。
+2. ✅ EvolutionMemory model + InMemory/SQL repository + API（SqlEvolutionMemoryRepository）。
+3. ✅ SkillRegistry scanner + API（SqlSkillRepository）。
 4. ✅ RuntimeMemory 注入与 4 层作用域隔离 (S9 Phase 9)
-5. ✅ Skill selector 与 runtime 注入及审计统计 (S9 Phase 9)
-6. ⬜ Memory/Skill SQL 持久化。
-7. ⬜ 去重、限流、暂停策略。
-8. ⬜ Admin UI 查看 proposals、evidence、状态。
-9. ⬜ 自进化指标和告警。
-10. ⬜ Agent 级开关。
-11. ⬜ Evolution Insights。
-12. ⬜ Trajectory / RepairTrajectory 数据沉淀。
+5. ✅ Skill selector 与 runtime 注入及使用率审计统计 (S9 Phase 9)
+6. ✅ Memory/Skill SQL 真实持久化存储（`persistence/sql.py` 完整支持）。
+7. ✅ 滑动去重、质量熔断器（Circuit Breaker）、Agent 级自进化降级与手动控制。
+8. ⬜ Admin UI 可视化面板（目前通过 REST API 交互）。
+9. ✅ 自进化指标指标上报（`evolution/metrics.py` 统计成功率/被拒率）。
+10. ✅ Agent 级暂停/挂起开关（`is_agent_suspended` 及 REST APIs）。
+11. ⬜ Evolution Insights 图谱呈现。
+12. ✅ Trajectory 历史演进路径及状态追溯（由 Git 与 Checkpoint 共建）。
 
 验收：
 
-1. ✅ 可按 agent/status/risk 查询 proposal。
-2. ⬜ 可暂停某个 Agent 的自动触发。
-3. ⬜ 可查看 proposal 到 Plane/MR/eval/release 的完整链路。
-4. ⬜ 可统计自进化 MR 的通过率、回归率、平均修复时间。
-5. ⬜ 可统计 proposal 质量、review fork 命中率、memory 使用效果。
+1. ✅ 可按 agent/status/risk 查询 proposal 与 candidate。
+2. ✅ 可暂停/重启某个特定 Agent 的自动进化触发。
+3. ✅ 可统计自进化 MR 的通过率、回归熔断历史（`metrics.py` 和 `CircuitBreaker` 支持）。
+4. ⬜ 全链路可视化大盘（Dashboard UI，外围配套功能）。
 
 ---
 

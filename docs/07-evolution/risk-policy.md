@@ -1,6 +1,6 @@
 # 自进化风险策略
 
-> Status: Partially Implemented（Risk Classifier + PathGuard + Command Guard + Workspace Checkpoint 已实现；Toolset 分层待实现）
+> Status: Fully Implemented（Risk Classifier + PathGuard + Command Guard + Workspace Checkpoint 均已完全实现；Toolset 分层过滤已在 Python 运行时层实现隔离）
 > Stage: S9
 > Owner: platform
 > Last updated: 2026-05-20

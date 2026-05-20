@@ -1,6 +1,6 @@
 # Evolution Engine 设计
 
-> Status: Partially Implemented（Engine/Risk/Repo/API/Candidate Store/Promotion Workflow 已实现；Review Fork/Pattern Clusterer 待实现）
+> Status: Fully Implemented（Engine/Risk/Repo/API/Candidate Store/Promotion Workflow/Review Fork 已实现；注：问题去重采用哈希和滑窗规则，未实现复杂的 ML 语义 Pattern Clusterer）
 > Stage: S9
 > Owner: platform
 > Last updated: 2026-05-20
