@@ -1542,7 +1542,7 @@ class SqlProposalRepository:
                 pwi = kwargs.get("plane_work_item_id")
                 if pwi:
                     row.plane_work_item_id = str(pwi)
-            elif str(status) == "closed":
+            elif str(status) in ("closed", "dismissed"):
                 row.closed_at = datetime.now(UTC)
                 outcome = kwargs.get("outcome")
                 if outcome:

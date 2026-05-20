@@ -379,3 +379,39 @@ class TestReviewForkRESTAPI:
             # 再次查状态，已恢复
             resp = await client.get("/api/v1/evolution/review-fork/status/api_agent")
             assert resp.json()["suspended"] is False
+
+    @pytest.mark.asyncio
+    async def test_evolution_engine_endpoints(self):
+        """测试 evolution engine 自进化触发挂起/恢复的 FastAPI 暴露端点。"""
+        from agent_platform.api.app import app
+
+        agent_id = "api_engine_agent"
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            # 1. GET /api/v1/evolution/engine/status/{agent_id}
+            resp = await client.get(f"/api/v1/evolution/engine/status/{agent_id}")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["agent_id"] == agent_id
+            assert data["suspended"] is False
+            assert data["manually_suspended"] is False
+
+            # 2. POST /api/v1/evolution/engine/suspend/{agent_id}
+            resp = await client.post(f"/api/v1/evolution/engine/suspend/{agent_id}")
+            assert resp.status_code == 200
+            assert resp.json() == {"status": "suspended", "agent_id": agent_id}
+
+            # 再次查状态，应该是挂起
+            resp = await client.get(f"/api/v1/evolution/engine/status/{agent_id}")
+            assert resp.json()["suspended"] is True
+            assert resp.json()["manually_suspended"] is True
+
+            # 3. POST /api/v1/evolution/engine/resume/{agent_id}
+            resp = await client.post(f"/api/v1/evolution/engine/resume/{agent_id}")
+            assert resp.status_code == 200
+            assert resp.json() == {"status": "resumed", "agent_id": agent_id}
+
+            # 再次查状态，已恢复
+            resp = await client.get(f"/api/v1/evolution/engine/status/{agent_id}")
+            assert resp.json()["suspended"] is False
+            assert resp.json()["manually_suspended"] is False

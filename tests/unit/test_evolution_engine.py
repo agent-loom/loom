@@ -377,3 +377,68 @@ class TestMemoryRepoListAll:
         result = await repo.list_all(memory_type=MemoryType.PATTERN)
         assert len(result) == 1
         assert result[0].type == MemoryType.PATTERN
+
+
+class TestEvolutionCircuitBreakers:
+    """验证 Phase 10 自进化引擎熔断与降级策略。"""
+
+    @pytest.mark.asyncio
+    async def test_manual_suspension_isolation(self, engine, repo):
+        agent_id = "test_suspend_agent"
+
+        # 1. 正常运行
+        p1 = await engine.process_event(_event(agent_id=agent_id, summary="测试手动挂起1"))
+        assert p1 is not None
+
+        # 2. 手动挂起
+        engine.suspend_agent(agent_id)
+        assert await engine.is_agent_suspended(agent_id) is True
+
+        p2 = await engine.process_event(_event(agent_id=agent_id, summary="测试手动挂起2"))
+        assert p2 is None
+
+        # 3. 手动恢复
+        engine.resume_agent(agent_id)
+        assert await engine.is_agent_suspended(agent_id) is False
+
+        p3 = await engine.process_event(_event(agent_id=agent_id, summary="测试手动挂起3"))
+        assert p3 is not None
+
+    @pytest.mark.asyncio
+    async def test_regression_auto_circuit_breaker(self, engine, repo):
+        agent_id = "regression_agent"
+
+        # 注入两次回归 outcome
+        p1 = await engine.process_event(_event(agent_id=agent_id, summary="测试连续回归熔断1"))
+        assert p1 is not None
+        await repo.update_status(p1.proposal_id, ProposalStatus.CLOSED, outcome="introduced regression: latency spike")
+
+        p2 = await engine.process_event(_event(agent_id=agent_id, summary="测试连续回归熔断2"))
+        assert p2 is not None
+        await repo.update_status(p2.proposal_id, ProposalStatus.CLOSED, outcome="introduced regression: bad accuracy")
+
+        # 验证自动熔断
+        assert await engine.is_agent_suspended(agent_id) is True
+
+        # 下一次触发应该直接跳过并返回 None
+        p3 = await engine.process_event(_event(agent_id=agent_id, summary="测试连续回归熔断3"))
+        assert p3 is None
+
+    @pytest.mark.asyncio
+    async def test_consecutive_rejection_degradation(self, engine, repo):
+        agent_id = "rejection_agent"
+
+        # 连续两次被人类拒绝（dismissed）
+        p1 = await engine.process_event(_event(agent_id=agent_id, summary="测试连续被拒降级1"))
+        assert p1 is not None
+        await repo.update_status(p1.proposal_id, ProposalStatus.DISMISSED, outcome="rejected by human reviewer")
+
+        # 此时再来一次
+        p2 = await engine.process_event(_event(agent_id=agent_id, summary="测试连续被拒降级2"))
+        assert p2 is not None
+        await repo.update_status(p2.proposal_id, ProposalStatus.DISMISSED, outcome="dismissed by product owner")
+
+        # 第三次生成时，应该自动降级为需要人工确认
+        p3 = await engine.process_event(_event(agent_id=agent_id, summary="测试连续被拒降级3"))
+        assert p3 is not None
+        assert p3.risk.requires_human_confirmation_before_devflow is True

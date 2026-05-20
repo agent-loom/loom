@@ -2598,6 +2598,40 @@ def create_app() -> FastAPI:
         await review_fork.suspend_manually(agent_id)
         return {"status": "suspended", "agent_id": agent_id}
 
+    # ── Evolution Engine Auto Trigger / Suspension APIs ──
+
+    @app.get("/api/v1/evolution/engine/status/{agent_id}")
+    async def get_evolution_engine_status(
+        agent_id: str,
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> dict:
+        engine = app.state.evolution_engine
+        suspended = await engine.is_agent_suspended(agent_id)
+        manually_suspended = agent_id in engine._manually_suspended
+        return {
+            "agent_id": agent_id,
+            "suspended": suspended,
+            "manually_suspended": manually_suspended,
+        }
+
+    @app.post("/api/v1/evolution/engine/resume/{agent_id}")
+    async def resume_evolution_engine(
+        agent_id: str,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ) -> dict:
+        engine = app.state.evolution_engine
+        engine.resume_agent(agent_id)
+        return {"status": "resumed", "agent_id": agent_id}
+
+    @app.post("/api/v1/evolution/engine/suspend/{agent_id}")
+    async def suspend_evolution_engine(
+        agent_id: str,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ) -> dict:
+        engine = app.state.evolution_engine
+        engine.suspend_agent(agent_id)
+        return {"status": "suspended", "agent_id": agent_id}
+
     # ── Candidate Store & Promotion APIs ──
 
     @app.post("/api/v1/evolution/candidates")

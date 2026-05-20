@@ -64,6 +64,7 @@ class EvolutionEngine:
         self._plane_project_id = plane_project_id
         self._ai_developing_state_id = ai_developing_state_id
         self._seen_keys: dict[str, datetime] = {}
+        self._manually_suspended: set[str] = set()
 
     def _is_duplicate(self, event: EvolutionEvent) -> bool:
         key = _dedup_key(event)
@@ -80,13 +81,73 @@ class EvolutionEngine:
         for k in expired:
             del self._seen_keys[k]
 
+    async def is_agent_suspended(self, agent_id: str) -> bool:
+        """检查 Agent 是否被挂起/暂停自进化触发。"""
+        if agent_id in self._manually_suspended:
+            return True
+
+        # 检查是否连续引入回归
+        proposals = await self._repo.list_by_agent(agent_id, limit=5)
+        closed_proposals = [
+            p for p in proposals
+            if p.status in (ProposalStatus.CLOSED, ProposalStatus.DISMISSED)
+        ]
+
+        regression_count = 0
+        for p in closed_proposals:
+            outcome = (p.outcome or "").lower()
+            if "regression" in outcome:
+                regression_count += 1
+                if regression_count >= 2:
+                    logger.warning("Agent %s 连续两次引入回归，自动熔断自进化触发", agent_id)
+                    return True
+            else:
+                break
+        return False
+
+    async def _should_require_human_confirmation(self, agent_id: str) -> bool:
+        """检查同类提案最近是否连续两次被人类拒绝，如果是则降级为人工确认。"""
+        proposals = await self._repo.list_by_agent(agent_id, limit=5)
+        dismissed_proposals = [p for p in proposals if p.status == ProposalStatus.DISMISSED]
+
+        reject_count = 0
+        for p in dismissed_proposals:
+            outcome = (p.outcome or "").lower()
+            if "rejected" in outcome or "dismissed" in outcome:
+                reject_count += 1
+                if reject_count >= 2:
+                    return True
+            else:
+                break
+        return False
+
+    def suspend_agent(self, agent_id: str) -> None:
+        """手动挂起/暂停指定 Agent 的自进化触发。"""
+        self._manually_suspended.add(agent_id)
+        logger.info("已手动挂起 Agent %s 的自进化触发", agent_id)
+
+    def resume_agent(self, agent_id: str) -> None:
+        """手动恢复被挂起/暂停的 Agent 自进化触发。"""
+        if agent_id in self._manually_suspended:
+            self._manually_suspended.remove(agent_id)
+        logger.info("已手动恢复 Agent %s 的自进化触发", agent_id)
+
     async def process_event(self, event: EvolutionEvent) -> ImprovementProposal | None:
+        if await self.is_agent_suspended(event.agent_id):
+            logger.warning("Agent %s 自进化触发已熔断/挂起，跳过本次执行", event.agent_id)
+            return None
+
         if self._is_duplicate(event):
             logger.debug("去重跳过: %s", event.summary[:80])
             return None
 
         proposal = self._event_to_proposal(event)
         proposal = populate_risk_and_paths(proposal)
+
+        # 连续被拒降级策略
+        if await self._should_require_human_confirmation(event.agent_id):
+            logger.info("Agent %s 提案连续被驳回，自动降级为需要人工确认", event.agent_id)
+            proposal.risk.requires_human_confirmation_before_devflow = True
 
         await self._repo.create(proposal)
         logger.info(

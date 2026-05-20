@@ -86,7 +86,7 @@ class InMemoryProposalRepository:
             plane_work_item_id = kwargs.get("plane_work_item_id")
             if plane_work_item_id:
                 proposal.plane_work_item_id = str(plane_work_item_id)
-        elif status == ProposalStatus.CLOSED:
+        elif status in (ProposalStatus.CLOSED, ProposalStatus.DISMISSED):
             proposal.closed_at = datetime.now(UTC)
             outcome = kwargs.get("outcome")
             if outcome:
