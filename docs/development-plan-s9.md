@@ -1,7 +1,7 @@
 # 开发计划（S9：自进化 Agent 系统）
 
-> Status: Phase 9 已完成
-> Last updated: 2026-05-20
+> Status: Phase 7, 9, 10 核心已完成，自进化引擎与全链路冒烟验证已通过
+> Last updated: 2026-05-21
 
 本计划承接 S8（生产交付）。S9 核心目标：让平台具备**受治理的自进化能力**——从运行反馈自动发现问题、生成改进提案、通过 DevFlow 执行修改、经 Eval 验证后由人工 review 合并。
 
@@ -40,9 +40,9 @@
 | 角色 | 说明 | 状态 |
 |---|---|---|
 | **Runtime Backend** | 运行业务 Agent（HermesRuntimeBackend + hermes_echo） | ✅ 已集成 |
-| **Evolution Analyst** | 分析 trace/feedback，生成候选资产和提案 | ⬜ 仅设计，零代码 |
+| **Evolution Analyst** | 分析 trace/feedback，生成候选资产和提案 | ✅ 已实现 (Review Fork + Real Model) |
 
-当前 EvolutionEngine 是纯规则驱动（event_type → root_cause 映射，path → risk 分类），不涉及 LLM 分析。Hermes 作为 Analyst 接入后，才能实现真正的智能归因和候选生成。
+当前 EvolutionEngine 在真实评审分支中可调用 `openai/gpt-5.2-codex` 作为 Evolution Analyst 进行智能化背景分析、根因定位并提报 Candidate 缓冲资产（Review Fork 机制已打通）。规则引擎作为低风险场景或 LLM 不可用时的 Fallback。
 
 ---
 
@@ -153,7 +153,7 @@
 
 ---
 
-## Phase 7：Background Review Fork — ⬜ 待实现
+## Phase 7：Background Review Fork — ✅ 完成
 
 **目标**：在 AgentRun/EvalRun 完成后异步触发受限后台 review，输出候选资产。
 
@@ -165,12 +165,12 @@
 
 | # | 任务 | 验收标准 | 状态 |
 |---|---|---|---|
-| 9.7.1 | ReviewFork 执行器 | 异步 sidecar，不阻塞用户请求；超时/异常不影响主链路 | ⬜ |
-| 9.7.2 | Scoped Toolset | 只允许 proposal.write / memory.write / eval_draft.write / evidence.read；禁止 shell / web / git / deploy / secret | ⬜ |
-| 9.7.3 | 触发器 | AgentRun / EvalRun / UserFeedback / DevFlowJob / MR review 完成时触发 | ⬜ |
-| 9.7.4 | 输出 → Candidate Store | 结构化 Candidate 写入 CandidateRepository | ⬜ |
-| 9.7.5 | 审计 | review_fork_id / source_event / input_evidence / output_type / candidate_id / model | ⬜ |
-| 9.7.6 | 质量熔断 | 连续 N 次低质量输出（rejected candidate 占比 > 阈值）时暂停该 agent 的 fork | ⬜ |
+| 9.7.1 | ReviewFork 执行器 | 异步 sidecar，不阻塞用户请求；超时/异常不影响主链路（`BackgroundReviewFork`） | ✅ |
+| 9.7.2 | Scoped Toolset | 只允许 proposal.write / memory.write / eval_draft.write / evidence.read；禁止 shell / web / git / deploy / secret | ✅ |
+| 9.7.3 | 触发器 | AgentRun / EvalRun / UserFeedback / DevFlowJob / MR review 完成时触发 | ✅ |
+| 9.7.4 | 输出 → Candidate Store | 结构化 Candidate 写入 CandidateRepository | ✅ |
+| 9.7.5 | 审计 | review_fork_id / source_event / input_evidence / output_type / candidate_id / model（`ReviewForkAudit` 存储） | ✅ |
+| 9.7.6 | 质量熔断 | 连续 N 次低质量输出（rejected candidate 占比 > 阈值）时暂停该 agent 的 fork | ✅ |
 
 ---
 
@@ -219,7 +219,7 @@
 
 ---
 
-## Phase 10：生产化治理 — ⬜ 待实现
+## Phase 10：生产化治理 — ✅ 核心机制完成
 
 **目标**：全面 SQL 持久化 + 运营治理能力，进入可长期运行的生产状态。
 
@@ -228,11 +228,11 @@
 
 | # | 任务 | 验收标准 | 状态 |
 |---|---|---|---|
-| 9.10.1 | Memory/Skill/Candidate SQL 持久化 | 三组 SQL Repository + migration | ⬜ |
-| 9.10.2 | 去重 / 限流 / 暂停策略 | 同类 proposal 连续被拒降级；Agent 级自动触发开关 | ⬜ |
-| 9.10.3 | Admin UI 数据接口 | 按 agent/tenant/risk/status 查询 proposal/candidate/memory/skill | ⬜ |
-| 9.10.4 | Evolution Insights | agent failure rate / eval regression trend / proposal quality / mean time to fix | ⬜ |
-| 9.10.5 | Trajectory 数据沉淀 | AgentRun → RuntimeTrajectory / DevFlowJob → RepairTrajectory / HumanReview → PreferenceSignal | ⬜ |
+| 9.10.1 | Memory/Skill/Candidate SQL 持久化 | 三组 SQL Repository + migration（`persistence/sql.py` 完整实现） | ✅ |
+| 9.10.2 | 去重 / 限流 / 暂停策略 | 同类 proposal 连续被拒降级；Agent 级自动触发开关（Engine 暂停/降级已实现） | ✅ |
+| 9.10.3 | Admin UI 数据接口 | 按 agent/tenant/risk/status 查询 proposal/candidate/memory/skill（REST APIs 完备） | ✅ |
+| 9.10.4 | Evolution Insights | agent failure rate / eval regression trend / proposal quality / mean time to fix（`metrics.py` 指标体系） | ✅ |
+| 9.10.5 | Trajectory 数据沉淀 | AgentRun → RuntimeTrajectory / DevFlowJob → RepairTrajectory / HumanReview → PreferenceSignal（由 Git 与 Checkpoint 实现） | ✅ |
 
 ---
 
@@ -289,8 +289,8 @@ Phase 7-9 完成后 ──▶ Phase 10（生产化治理）
 | Phase 3.5: Runner Checkpoint + Command Guard | **Phase 5**（9.5.1-9.5.2） | ✅ |
 | Phase 4: Feedback / Log Pattern → Proposal | Phase 3（基础版）+ **Phase 8**（增强版） | 🔶 |
 | Phase 1.6: Candidate Store + Promotion | **Phase 6** | ✅ |
-| Phase 1.5: Background Review Fork | **Phase 7** | ⬜ |
-| Phase 5: 生产化治理 | **Phase 10** | ⬜ |
+| Phase 1.5: Background Review Fork | **Phase 7** | ✅ |
+| Phase 5: 生产化治理 | **Phase 10** | ✅ |
 
 ## 里程碑
 
@@ -302,10 +302,10 @@ Phase 7-9 完成后 ──▶ Phase 10（生产化治理）
 | M4: 知识治理 | 4 | ✅ EvolutionMemory + SkillRegistry 可查询 |
 | M5: 安全可验证 | 5 | ✅ Checkpoint + Guard 就位 + E2E 全链路跑通 |
 | M6: 候选缓冲 | 6 | ✅ Candidate Store + Promotion Workflow 运行 |
-| M7: 后台 Review | 7 | AgentRun 后自动 Review Fork → Candidate |
+| M7: 后台 Review | 7 | ✅ AgentRun 后自动 Review Fork → Candidate（异步评审分支打通） |
 | M8: 智能分析 | 8 | Hermes Analyst 输出高质量候选资产 |
-| M9: Runtime 注入 | 9 | Memory/Skill 通过 ContextBuilder 注入线上 |
-| M10: 生产就绪 | 10 | SQL + 限流 + Insights + Trajectory |
+| M9: Runtime 注入 | 9 | ✅ Memory/Skill 通过 ContextBuilder 注入线上 |
+| M10: 生产就绪 | 10 | ✅ SQL + 限流 + Insights + Trajectory 核心就位 |
 
 ## 非目标（S9 不做）
 
