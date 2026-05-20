@@ -1,6 +1,6 @@
 # Evolution Engine 设计
 
-> Status: Implemented (Engine + Risk + Repo + API)
+> Status: Partially Implemented（Engine/Risk/Repo/API 已实现；Candidate Store/Review Fork/Pattern Clusterer/Promotion Workflow 待实现）
 > Stage: S9
 > Owner: platform
 > Last updated: 2026-05-20
