@@ -1,6 +1,6 @@
 # 自进化 Agent 系统总体设计
 
-> Status: Partially Implemented（Engine/Risk/Repo/API/Memory/Skills 已实现；Candidate Store/Review Fork/Hermes Analyst/RuntimeMemory 待实现）
+> Status: Partially Implemented（Engine/Risk/Repo/API/Memory/Skills/Candidate Store 已实现；Review Fork/Hermes Analyst/RuntimeMemory 待实现）
 > Stage: S9
 > Owner: platform
 > Last updated: 2026-05-20

@@ -1140,16 +1140,19 @@ def create_app() -> FastAPI:
         evolution_engine = EvolutionEngine(repo=_evo_repo)
     app.state.evolution_engine = evolution_engine
 
-    # ── Memory / Skills ──
+    # ── Memory / Skills / Candidate ──
     from agent_platform.evolution.memory_repository import (
         InMemoryEvolutionMemoryRepository,
         InMemorySkillRepository,
     )
+    from agent_platform.evolution.repository import InMemoryCandidateRepository
 
     _memory_repo = InMemoryEvolutionMemoryRepository()
     _skill_repo = InMemorySkillRepository()
+    _candidate_repo = InMemoryCandidateRepository()
     app.state.memory_repo = _memory_repo
     app.state.skill_repo = _skill_repo
+    app.state.candidate_repo = _candidate_repo
 
     # DevFlow 后台调度器
     from agent_platform.devflow.scheduler import DevFlowScheduler
@@ -2288,6 +2291,209 @@ def create_app() -> FastAPI:
             "avg_time_to_dispatch_hours": metrics.avg_time_to_dispatch_hours,
             "avg_time_to_close_hours": metrics.avg_time_to_close_hours,
         }
+
+    # ── Candidate Store & Promotion APIs ──
+
+    @app.post("/api/v1/evolution/candidates")
+    async def create_candidate(
+        payload: dict,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ) -> dict:
+        from agent_platform.evolution.models import Candidate, CandidateType, CandidateStatus, PromotionTarget, RiskLevel
+
+        try:
+            cand = Candidate(
+                candidate_type=CandidateType(payload["candidate_type"]),
+                agent_id=payload["agent_id"],
+                tenant_id=payload.get("tenant_id", "default"),
+                environment=payload.get("environment", "prod"),
+                generated_by=payload.get("generated_by", "hermes"),
+                generator_role=payload.get("generator_role"),
+                source_event_ids=payload.get("source_event_ids", []),
+                evidence_ids=payload.get("evidence_ids", []),
+                payload=payload.get("payload", {}),
+                risk_level=RiskLevel(payload.get("risk_level", "low")),
+                promotion_target=PromotionTarget(payload.get("promotion_target", "none")),
+                status=CandidateStatus(payload.get("status", "draft")),
+            )
+            await _candidate_repo.create(cand)
+            return cand.model_dump(mode="json")
+        except KeyError as e:
+            raise HTTPException(status_code=400, detail=f"Missing required field: {e}")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid field value: {e}")
+
+    @app.get("/api/v1/evolution/candidates")
+    async def list_candidates(
+        candidate_type: str | None = None,
+        agent_id: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> list[dict]:
+        from agent_platform.evolution.models import CandidateType, CandidateStatus
+
+        c_type = None
+        if candidate_type:
+            try:
+                c_type = CandidateType(candidate_type)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid candidate_type: {candidate_type}")
+
+        c_status = None
+        if status:
+            try:
+                c_status = CandidateStatus(status)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+
+        candidates = await _candidate_repo.list_all(
+            candidate_type=c_type,
+            agent_id=agent_id,
+            status=c_status,
+            limit=limit,
+        )
+        return [c.model_dump(mode="json") for c in candidates]
+
+    @app.get("/api/v1/evolution/candidates/{candidate_id}")
+    async def get_candidate(
+        candidate_id: str,
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> dict:
+        cand = await _candidate_repo.get(candidate_id)
+        if cand is None:
+            raise HTTPException(status_code=404, detail="Candidate not found")
+        return cand.model_dump(mode="json")
+
+    @app.post("/api/v1/evolution/candidates/{candidate_id}/validate")
+    async def validate_candidate(
+        candidate_id: str,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ) -> dict:
+        from agent_platform.evolution.candidate_validator import CandidateValidator
+        from agent_platform.evolution.models import CandidateStatus
+
+        cand = await _candidate_repo.get(candidate_id)
+        if cand is None:
+            raise HTTPException(status_code=404, detail="Candidate not found")
+
+        validator = CandidateValidator()
+        errors = validator.validate(cand)
+
+        if errors:
+            await _candidate_repo.update_status(
+                candidate_id,
+                CandidateStatus.REJECTED,
+                validation_errors=errors,
+            )
+            return {
+                "status": "rejected",
+                "validation_passed": False,
+                "errors": errors,
+            }
+
+        await _candidate_repo.update_status(
+            candidate_id,
+            CandidateStatus.VALIDATED,
+            validation_errors=[],
+        )
+        return {
+            "status": "validated",
+            "validation_passed": True,
+            "errors": [],
+        }
+
+    @app.post("/api/v1/evolution/candidates/{candidate_id}/approve")
+    async def approve_candidate(
+        candidate_id: str,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ) -> dict:
+        from agent_platform.evolution.models import CandidateStatus
+
+        cand = await _candidate_repo.get(candidate_id)
+        if cand is None:
+            raise HTTPException(status_code=404, detail="Candidate not found")
+
+        if cand.status not in (CandidateStatus.DRAFT, CandidateStatus.VALIDATED):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Only DRAFT or VALIDATED candidates can be approved, current: {cand.status}",
+            )
+
+        # 流转到 APPROVED 状态
+        await _candidate_repo.update_status(candidate_id, CandidateStatus.APPROVED)
+        return {"status": "approved"}
+
+    @app.post("/api/v1/evolution/candidates/{candidate_id}/promote")
+    async def promote_candidate(
+        candidate_id: str,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ) -> dict:
+        from agent_platform.evolution.models import CandidateStatus, RiskLevel
+        from agent_platform.evolution.promotion import PromotionExecutor, PromotionError
+
+        cand = await _candidate_repo.get(candidate_id)
+        if cand is None:
+            raise HTTPException(status_code=404, detail="Candidate not found")
+
+        # 策略自动审批：如果是 LOW 风险且状态是 VALIDATED，我们可以在此处直接晋升为 APPROVED
+        if cand.status == CandidateStatus.VALIDATED and cand.risk_level == RiskLevel.LOW:
+            await _candidate_repo.update_status(candidate_id, CandidateStatus.APPROVED)
+            cand.status = CandidateStatus.APPROVED
+
+        if cand.status != CandidateStatus.APPROVED:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Only APPROVED candidates can be promoted, current: {cand.status}. "
+                       f"Please call /approve API first.",
+            )
+
+        executor = PromotionExecutor(
+            proposal_repo=_evo_repo,
+            memory_repo=_memory_repo,
+            evolution_engine=evolution_engine,
+        )
+
+        try:
+            result = await executor.promote(cand)
+            # 在 repo 中更新状态（promote 内部已将 cand.status 设为 PROMOTED，这里更新持久层）
+            await _candidate_repo.update_status(candidate_id, CandidateStatus.PROMOTED)
+            return result
+        except PromotionError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @app.post("/api/v1/evolution/candidates/{candidate_id}/reject")
+    async def reject_candidate(
+        candidate_id: str,
+        reason: dict | None = None,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ) -> dict:
+        from agent_platform.evolution.models import CandidateStatus
+
+        cand = await _candidate_repo.get(candidate_id)
+        if cand is None:
+            raise HTTPException(status_code=404, detail="Candidate not found")
+
+        errors = [reason.get("reason", "rejected by user")] if reason else ["rejected by user"]
+        await _candidate_repo.update_status(
+            candidate_id,
+            CandidateStatus.REJECTED,
+            validation_errors=errors,
+        )
+        return {"status": "rejected", "errors": errors}
+
+    @app.delete("/api/v1/evolution/candidates/{candidate_id}")
+    async def delete_candidate(
+        candidate_id: str,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ) -> dict:
+        cand = await _candidate_repo.get(candidate_id)
+        if cand is None:
+            raise HTTPException(status_code=404, detail="Candidate not found")
+
+        await _candidate_repo.delete(candidate_id)
+        return {"status": "deleted", "candidate_id": candidate_id}
+
 
     # ── OpenTelemetry FastAPI Instrumentation ──
     # 在所有路由注册完成后挂载，如未安装 opentelemetry-instrumentation-fastapi 则静默跳过

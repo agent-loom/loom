@@ -167,3 +167,67 @@ class EvolutionEvent(BaseModel):
     summary: str
     details: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=_utc_now)
+
+
+# ---------------------------------------------------------------------------
+# Candidate 候选资产相关
+# ---------------------------------------------------------------------------
+
+
+class CandidateType(StrEnum):
+    MEMORY_CANDIDATE = "memory_candidate"
+    SKILL_DRAFT = "skill_draft"
+    EVAL_CASE_DRAFT = "eval_case_draft"
+    PROPOSAL_DRAFT = "proposal_draft"
+    REVIEW_REPORT = "review_report"
+    RELEASE_RISK_REPORT = "release_risk_report"
+    TASK_PACK_DRAFT = "task_pack_draft"
+
+
+class CandidateStatus(StrEnum):
+    DRAFT = "draft"
+    VALIDATED = "validated"
+    APPROVED = "approved"
+    PROMOTED = "promoted"
+    REJECTED = "rejected"
+    SUPERSEDED = "superseded"
+
+
+class PromotionTarget(StrEnum):
+    EVOLUTION_MEMORY = "evolution_memory"
+    RUNTIME_MEMORY = "runtime_memory"
+    AGENT_SKILL = "agent_skill"
+    EVAL_CASE = "eval_case"
+    IMPROVEMENT_PROPOSAL = "improvement_proposal"
+    PLANE_WORK_ITEM = "plane_work_item"
+    NONE = "none"
+
+
+def _candidate_id() -> str:
+    return f"cand_{datetime.now(UTC).strftime('%Y%m%d')}_{uuid4().hex[:8]}"
+
+
+class Candidate(BaseModel):
+    candidate_id: str = Field(default_factory=_candidate_id)
+    candidate_type: CandidateType
+    generated_by: str = "hermes"
+    generator_role: str | None = None
+
+    tenant_id: str = "default"
+    agent_id: str
+    environment: str = "prod"
+
+    source_event_ids: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+
+    payload: dict[str, Any] = Field(default_factory=dict)
+    risk_level: RiskLevel = RiskLevel.LOW
+    status: CandidateStatus = CandidateStatus.DRAFT
+    promotion_target: PromotionTarget = PromotionTarget.NONE
+
+    validation_errors: list[str] = Field(default_factory=list)
+
+    created_at: datetime = Field(default_factory=_utc_now)
+    updated_at: datetime = Field(default_factory=_utc_now)
+    promoted_at: datetime | None = None
+

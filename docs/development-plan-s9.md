@@ -1,6 +1,6 @@
 # 开发计划（S9：自进化 Agent 系统）
 
-> Status: Phase 6 待开始
+> Status: Phase 7 待开始
 > Last updated: 2026-05-20
 
 本计划承接 S8（生产交付）。S9 核心目标：让平台具备**受治理的自进化能力**——从运行反馈自动发现问题、生成改进提案、通过 DevFlow 执行修改、经 Eval 验证后由人工 review 合并。
@@ -128,7 +128,7 @@
 
 ---
 
-## Phase 6：Candidate Store + Promotion Workflow — ⬜ 待实现
+## Phase 6：Candidate Store + Promotion Workflow — ✅ 完成
 
 **目标**：实现 Hermes-Platform 之间的结构化缓冲层。这是 Phase 7-8 的基础。
 
@@ -139,12 +139,12 @@
 
 | # | 任务 | 验收标准 | 状态 |
 |---|---|---|---|
-| 9.6.1 | Candidate 数据模型 | 7 种候选类型（MemoryCandidate / SkillDraft / EvalCaseDraft / ProposalDraft / ReviewReport / ReleaseRiskReport / TaskPackDraft）；统一 base 模型 + payload 扩展 | ⬜ |
-| 9.6.2 | CandidateRepository Protocol + InMemory | create / get / list（按 type/agent/status 过滤）/ update_status | ⬜ |
-| 9.6.3 | Promotion 状态机 | draft → validated → approved → promoted / rejected / superseded | ⬜ |
-| 9.6.4 | Candidate 验证管道 | schema 校验 + evidence 校验 + scope 校验 + PII/injection scan + 去重 | ⬜ |
-| 9.6.5 | Candidate API 端点 | GET list / GET detail / POST validate / POST promote / POST reject | ⬜ |
-| 9.6.6 | 晋升执行器 | MemoryCandidate → EvolutionMemory；ProposalDraft → ImprovementProposal；SkillDraft/EvalCaseDraft → DevFlow MR | ⬜ |
+| 9.6.1 | Candidate 数据模型 | 7 种候选类型（MemoryCandidate / SkillDraft / EvalCaseDraft / ProposalDraft / ReviewReport / ReleaseRiskReport / TaskPackDraft）；统一 base 模型 + payload 扩展 | ✅ |
+| 9.6.2 | CandidateRepository Protocol + InMemory | create / get / list（按 type/agent/status 过滤）/ update_status | ✅ |
+| 9.6.3 | Promotion 状态机 | draft → validated → approved → promoted / rejected / superseded | ✅ |
+| 9.6.4 | Candidate 验证管道 | schema 校验 + evidence 校验 + scope 校验 + PII/injection scan + 去重 | ✅ |
+| 9.6.5 | Candidate API 端点 | GET list / GET detail / POST validate / POST promote / POST reject | ✅ |
+| 9.6.6 | 晋升执行器 | MemoryCandidate → EvolutionMemory；ProposalDraft → ImprovementProposal；SkillDraft/EvalCaseDraft → DevFlow MR | ✅ |
 
 **核心约束**：
 - Candidate 不是事实源，不直接影响 runtime
@@ -288,7 +288,7 @@ Phase 7-9 完成后 ──▶ Phase 10（生产化治理）
 | Phase 3: Low Risk 自动 DevFlow | Phase 2 | ✅ |
 | Phase 3.5: Runner Checkpoint + Command Guard | **Phase 5**（9.5.1-9.5.2） | ✅ |
 | Phase 4: Feedback / Log Pattern → Proposal | Phase 3（基础版）+ **Phase 8**（增强版） | 🔶 |
-| Phase 1.6: Candidate Store + Promotion | **Phase 6** | ⬜ |
+| Phase 1.6: Candidate Store + Promotion | **Phase 6** | ✅ |
 | Phase 1.5: Background Review Fork | **Phase 7** | ⬜ |
 | Phase 5: 生产化治理 | **Phase 10** | ⬜ |
 
@@ -301,7 +301,7 @@ Phase 7-9 完成后 ──▶ Phase 10（生产化治理）
 | M3: 统一闭环 | 3 | ✅ FeedbackIntelligence + EvolutionEngine + SQL |
 | M4: 知识治理 | 4 | ✅ EvolutionMemory + SkillRegistry 可查询 |
 | M5: 安全可验证 | 5 | ✅ Checkpoint + Guard 就位 + E2E 全链路跑通 |
-| M6: 候选缓冲 | 6 | Candidate Store + Promotion Workflow 运行 |
+| M6: 候选缓冲 | 6 | ✅ Candidate Store + Promotion Workflow 运行 |
 | M7: 后台 Review | 7 | AgentRun 后自动 Review Fork → Candidate |
 | M8: 智能分析 | 8 | Hermes Analyst 输出高质量候选资产 |
 | M9: Runtime 注入 | 9 | Memory/Skill 通过 ContextBuilder 注入线上 |

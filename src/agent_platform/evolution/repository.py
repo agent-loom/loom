@@ -5,7 +5,13 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Protocol, runtime_checkable
 
-from .models import ImprovementProposal, ProposalStatus
+from .models import (
+    Candidate,
+    CandidateStatus,
+    CandidateType,
+    ImprovementProposal,
+    ProposalStatus,
+)
 
 
 @runtime_checkable
@@ -85,3 +91,80 @@ class InMemoryProposalRepository:
             outcome = kwargs.get("outcome")
             if outcome:
                 proposal.outcome = str(outcome)
+
+
+# ---------------------------------------------------------------------------
+# Candidate 持久化仓储
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class CandidateRepository(Protocol):
+    async def create(self, candidate: Candidate) -> None: ...
+    async def get(self, candidate_id: str) -> Candidate | None: ...
+    async def list_all(
+        self,
+        *,
+        candidate_type: CandidateType | None = None,
+        agent_id: str | None = None,
+        status: CandidateStatus | None = None,
+        limit: int = 100,
+    ) -> list[Candidate]: ...
+    async def update_status(
+        self,
+        candidate_id: str,
+        status: CandidateStatus,
+        *,
+        validation_errors: list[str] | None = None,
+    ) -> None: ...
+    async def delete(self, candidate_id: str) -> None: ...
+
+
+class InMemoryCandidateRepository:
+    def __init__(self) -> None:
+        self._store: dict[str, Candidate] = {}
+
+    async def create(self, candidate: Candidate) -> None:
+        self._store[candidate.candidate_id] = candidate
+
+    async def get(self, candidate_id: str) -> Candidate | None:
+        return self._store.get(candidate_id)
+
+    async def list_all(
+        self,
+        *,
+        candidate_type: CandidateType | None = None,
+        agent_id: str | None = None,
+        status: CandidateStatus | None = None,
+        limit: int = 100,
+    ) -> list[Candidate]:
+        result = list(self._store.values())
+        if candidate_type is not None:
+            result = [c for c in result if c.candidate_type == candidate_type]
+        if agent_id is not None:
+            result = [c for c in result if c.agent_id == agent_id]
+        if status is not None:
+            result = [c for c in result if c.status == status]
+        return sorted(result, key=lambda c: c.created_at, reverse=True)[:limit]
+
+    async def update_status(
+        self,
+        candidate_id: str,
+        status: CandidateStatus,
+        *,
+        validation_errors: list[str] | None = None,
+    ) -> None:
+        candidate = self._store.get(candidate_id)
+        if candidate is None:
+            return
+        candidate.status = status
+        candidate.updated_at = datetime.now(UTC)
+        if status == CandidateStatus.PROMOTED:
+            candidate.promoted_at = datetime.now(UTC)
+        if validation_errors is not None:
+            candidate.validation_errors = validation_errors
+
+    async def delete(self, candidate_id: str) -> None:
+        if candidate_id in self._store:
+            del self._store[candidate_id]
+

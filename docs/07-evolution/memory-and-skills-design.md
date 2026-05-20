@@ -1,6 +1,6 @@
 # Platform Memory 与 Agent Skills 设计
 
-> Status: Partially Implemented（EvolutionMemory + SkillRegistry 已实现；Candidate Store/RuntimeMemory/Skill Runtime 注入/Promotion Workflow 待实现）
+> Status: Partially Implemented（EvolutionMemory + SkillRegistry + Candidate Store + Promotion Workflow 已实现；RuntimeMemory/Skill Runtime 注入待实现）
 > Stage: S9
 > Owner: platform
 > Last updated: 2026-05-20

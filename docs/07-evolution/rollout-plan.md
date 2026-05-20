@@ -1,6 +1,6 @@
 # 自进化 Agent 系统落地路线
 
-> Status: Phase 0-3 已实现（基础版），Phase 3.5（安全加固）已完成，Phase 1.5/1.6/4增强/5 待实现
+> Status: Phase 0-3.5, 1.6 已实现，Phase 1.5/4增强/5 待实现
 > Stage: S9
 > Owner: platform
 > Last updated: 2026-05-20
@@ -79,7 +79,7 @@
 
 ---
 
-## Phase 1.6：Candidate Store + Promotion Workflow — ⬜ 待实现
+## Phase 1.6：Candidate Store + Promotion Workflow — ✅ 完成
 
 目标：让 Hermes 能充分输出候选资产，同时确保 Platform 保留最终治理权。
 
@@ -87,18 +87,18 @@
 
 范围：
 
-1. 实现 Candidate schema（7 种候选类型）。
-2. 支持 candidate validate/promote/reject。
-3. 支持 `MemoryCandidate -> EvolutionMemory`。
-4. 支持 `ProposalDraft -> ImprovementProposal`。
-5. 记录 promotion audit event。
+1. ✅ 实现 Candidate schema（7 种候选类型）。
+2. ✅ 支持 candidate validate/promote/reject。
+3. ✅ 支持 `MemoryCandidate -> EvolutionMemory`。
+4. ✅ 支持 `ProposalDraft -> ImprovementProposal`。
+5. ✅ 记录 promotion audit event。
 
 验收：
 
-1. Hermes 可以写 candidate。
-2. candidate 不会直接影响 runtime。
-3. candidate 晋升必须通过 Platform validation。
-4. rejected candidate 能记录原因，用于 Hermes 自我改进。
+1. ✅ Hermes 可以写 candidate。
+2. ✅ candidate 不会直接影响 runtime。
+3. ✅ candidate 晋升必须通过 Platform validation。
+4. ✅ rejected candidate 能记录原因，用于 Hermes 自我改进。
 
 ---
 
@@ -227,27 +227,26 @@ Phase 1-3 基础版已完成。建议按以下顺序推进：
   -> 同时验证全链路 E2E 跑通，建立质量基线（已完成）
   -> 对应 development-plan Phase 5
 
-🔴 最高优先：Phase 1.6 Candidate Store + Promotion
-  -> Hermes-Platform 结构化缓冲层
-  -> 后续 Review Fork / Analyst / RuntimeMemory 的前置条件
+🔴 已完成：Phase 1.6 Candidate Store + Promotion
+  -> Hermes-Platform 结构化缓冲层，为 Review Fork / Analyst 提供了基础层（已完成）
   -> 对应 development-plan Phase 6
 
-🟠 第二优先：Phase 1.5 Background Review Fork
+🔴 最高优先：Phase 1.5 Background Review Fork
   -> 异步后台分析 + 候选资产自动生成
   -> 依赖 Candidate Store
   -> 对应 development-plan Phase 7
 
-🟠 第二优先（可并行）：RuntimeMemory + Skill 注入
+🔴 最高优先（可并行）：RuntimeMemory + Skill 注入
   -> 让 Memory/Skill 产生实际 runtime 价值
   -> 依赖 Candidate Store，可与 Review Fork 并行
   -> 对应 development-plan Phase 9
 
-🟡 第三优先：Phase 4 增强 + Hermes Analyst
+🟠 第二优先：Phase 4 增强 + Hermes Analyst
   -> LLM 驱动 of 的分析替代规则
   -> 依赖 Review Fork
   -> 对应 development-plan Phase 8
 
-🟡 第三优先：Phase 5 生产化治理
+🟠 第二优先：Phase 5 生产化治理
   -> SQL 持久化 + 限流 + Insights
   -> 对应 development-plan Phase 10
 ```
@@ -256,6 +255,6 @@ Phase 1-3 基础版已完成。建议按以下顺序推进：
 
 1. 自动 DevFlow 已经通过 Checkpoint + Guard 补齐了最紧急的安全守卫，并在 E2E 测试中全链路跑通。
 2. E2E 验证证明现有自进化链路真正可用，建立了可量化的质量基线。
-3. Candidate Store 是多个后续 Phase 的基础架构组件。
+3. Candidate Store 缓冲层已经圆满建成，这为后续 Background Review Fork 和 RuntimeMemory 奠定了基础。
 4. Review Fork 和 Analyst 是设计文档的核心差异化功能。
 5. RuntimeMemory 让 Phase 4 的 Memory/Skill 投入产生实际价值。
