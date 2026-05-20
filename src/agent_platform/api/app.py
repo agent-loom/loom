@@ -819,6 +819,7 @@ def create_app() -> FastAPI:
     app.state.hook_registry = app_hook_registry
     app.state.semantic_router = app_semantic_router
     app.state.registry = registry
+    app.state.runtime_manager = runtime_manager
     app.state.metrics = app_metrics
     app.state.webhook_repo = webhook_repo
     app.state.audit_repo = audit_repo
@@ -1234,18 +1235,30 @@ def create_app() -> FastAPI:
     async def on_post_run(ctx: HookContext) -> None:
         data = ctx.data or {}
         resp = data.get("response")
+        runtime_req = data.get("request")
         run_id = data.get("run_id", "unknown_run")
         if not resp:
             return
 
         agent_id = getattr(resp, "agent_id", None)
         tenant_id = "default"
+
+        if runtime_req is not None:
+            agent_spec = getattr(runtime_req, "agent_spec", None)
+            agent_id = agent_id or getattr(agent_spec, "agent_id", None)
+            agent_request = getattr(runtime_req, "request", None)
+            request_context = getattr(agent_request, "context", None)
+            tenant_context = getattr(request_context, "tenant", None)
+            tenant_id = getattr(tenant_context, "tenant_id", None) or tenant_id
+
         if hasattr(resp, "response") and resp.response and hasattr(resp.response, "metadata") and resp.response.metadata:
             tenant_id = resp.response.metadata.get("tenant_id") or "default"
             agent_id = agent_id or resp.response.metadata.get("agent_id")
 
-        if not agent_id and hasattr(resp, "response") and resp.response and hasattr(resp.response, "agent_id"):
-            agent_id = resp.response.agent_id
+        if hasattr(resp, "response") and resp.response:
+            response_agent = getattr(resp.response, "agent", None)
+            agent_id = agent_id or getattr(response_agent, "agent_id", None)
+            agent_id = agent_id or getattr(resp.response, "agent_id", None)
 
         if not agent_id:
             agent_id = "unknown"

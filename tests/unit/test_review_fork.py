@@ -169,6 +169,89 @@ class TestBackgroundReviewForkCore:
         assert audits[0].candidate_id == candidates[0].candidate_id
 
     @pytest.mark.asyncio
+    async def test_real_llm_flow_evidence_then_write_only_tools(
+        self, review_fork, candidate_repo,
+    ):
+        """第一轮 evidence_read 后，第二轮应只暴露写入类工具。"""
+        review_fork._gateway._default_provider = "openai"
+
+        first_result = ChatResult(
+            content="先读取证据。",
+            tool_calls=[ToolCall(id="call_1", name="evidence_read", arguments={})],
+        )
+        second_result = ChatResult(
+            content="已完成证据分析，准备提报 proposal。",
+            tool_calls=[
+                ToolCall(
+                    id="call_2",
+                    name="proposal_write",
+                    arguments={
+                        "summary": "根据证据建议优化 prompt 边界处理",
+                        "root_cause": "prompt_gap",
+                        "risk_level": "low",
+                    },
+                )
+            ],
+        )
+        third_result = ChatResult(
+            content="候选已写入。",
+            tool_calls=[],
+        )
+
+        chat_mock = AsyncMock(side_effect=[first_result, second_result, third_result])
+        review_fork._gateway.chat = chat_mock
+
+        event = ReviewForkEvent(
+            event_type=ReviewForkEventType.AGENT_RUN_COMPLETED,
+            agent_id="two_step_agent",
+            evidence_summary="multi step evidence",
+            payload={"trace_id": "trace_2"},
+        )
+
+        with patch("os.getenv", return_value="mock_api_key"):
+            await review_fork._run_fork_task(event)
+
+        second_call_tools = chat_mock.call_args_list[1][1]["tools"]
+        assert all(tool["name"] != "evidence_read" for tool in second_call_tools)
+
+        candidates = await candidate_repo.list_all(agent_id="two_step_agent")
+        assert len(candidates) == 1
+        assert candidates[0].candidate_type == CandidateType.PROPOSAL_DRAFT
+
+    @pytest.mark.asyncio
+    async def test_real_llm_flow_uses_hermes_openai_compatible_env(self, review_fork):
+        """当平台复用 Hermes 的 OpenAI-compatible 网关配置时，不应回退到 Stub。"""
+        review_fork._gateway._default_provider = "openai"
+        review_fork._gateway.chat = AsyncMock(
+            return_value=ChatResult(
+                content="分析完成，但本轮不生成候选资产。",
+                tool_calls=[],
+            )
+        )
+
+        stub_runner = AsyncMock()
+        review_fork._run_stub_scoped_tools = stub_runner  # type: ignore[method-assign]
+
+        event = ReviewForkEvent(
+            event_type=ReviewForkEventType.AGENT_RUN_COMPLETED,
+            agent_id="compat_agent",
+            evidence_summary="compat env summary",
+        )
+
+        with patch.dict(
+            "os.environ",
+            {
+                "HERMES_OPENAI_BASE_URL": "https://api.qnaigc.com/v1",
+                "ANTHROPIC_API_KEY": "shared-gateway-secret",
+            },
+            clear=True,
+        ):
+            await review_fork._run_fork_task(event)
+
+        stub_runner.assert_not_awaited()
+        review_fork._gateway.chat.assert_awaited()
+
+    @pytest.mark.asyncio
     async def test_restricted_toolset_interception(self, review_fork, candidate_repo, audit_repo):
         """验证除了允许的 4 个 Scoped Tools 外，若 LLM 试图调用其他危险工具将被安全拦截或返回错误。"""
         review_fork._gateway._default_provider = "openai"
@@ -328,6 +411,79 @@ class TestQualityCircuitBreaker:
 
 
 class TestReviewForkRESTAPI:
+    @pytest.mark.asyncio
+    async def test_post_run_hook_preserves_agent_id_for_candidates(self):
+        """回归测试：post_run 触发的 Candidate 应可按真实 agent_id 查询到。"""
+        from agent_platform.api.app import app
+
+        candidate_repo = app.state.candidate_repo
+        review_fork = app.state.review_fork
+        # 仅清理 echo 相关候选，避免受全局 app 状态中旧数据影响
+        existing = await candidate_repo.list_all(agent_id="echo", limit=100)
+        for candidate in existing:
+            await candidate_repo.delete(candidate.candidate_id)
+
+        chat_mock = AsyncMock(side_effect=[
+            ChatResult(
+                content="先读取证据。",
+                tool_calls=[ToolCall(id="tc_1", name="evidence_read", arguments={})],
+            ),
+            ChatResult(
+                content="生成一个 memory candidate。",
+                tool_calls=[
+                    ToolCall(
+                        id="tc_2",
+                        name="memory_write",
+                        arguments={
+                            "summary": "echo agent 的运行模式可沉淀为记忆",
+                            "memory_type": "pattern",
+                            "confidence": 0.8,
+                        },
+                    )
+                ],
+            ),
+            ChatResult(
+                content="完成。",
+                tool_calls=[],
+            ),
+        ])
+        review_fork._gateway._default_provider = "openai"
+        review_fork._gateway.chat = chat_mock
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+        ) as client:
+            chat = await client.post(
+                "/api/v1/agent/chat",
+                json={
+                    "agent_id": "echo",
+                    "request_id": "rf-agent-id-regression",
+                    "session_id": "rf-agent-id-session",
+                    "input": {"query": "trigger review fork"},
+                    "context": {
+                        "tenant": {"tenant_id": "default"},
+                        "user": {"user_id": "u1"},
+                        "channel": {"channel_id": "web"},
+                    },
+                },
+            )
+            assert chat.status_code == 200
+
+            for _ in range(20):
+                resp = await client.get("/api/v1/evolution/candidates?agent_id=echo")
+                assert resp.status_code == 200
+                data = resp.json()
+                if data:
+                    break
+                await asyncio.sleep(0.01)
+
+            resp = await client.get("/api/v1/evolution/candidates?agent_id=echo")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data
+            assert all(item["agent_id"] == "echo" for item in data)
+
     @pytest.mark.asyncio
     async def test_review_fork_endpoints(self):
         """测试 review fork 的 FastAPI 暴露端点。"""

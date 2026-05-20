@@ -11,7 +11,8 @@
 5. [Candidate 契约](candidate-contract.md)
 6. [Improvement Proposal 契约](improvement-proposal-contract.md)
 7. [自进化风险策略](risk-policy.md)
-8. [自进化 Agent 系统落地路线](rollout-plan.md)
+8. [自进化能力验证指南](evolution-verification-guide.md)
+9. [自进化 Agent 系统落地路线](rollout-plan.md)
 
 ## S9 总览图
 
@@ -46,6 +47,7 @@ flowchart TD
 | `memory-and-skills-design.md` | RuntimeMemory、EvolutionMemory、Agent Skills、SkillRegistry |
 | `improvement-proposal-contract.md` | 正式改进提案到 Plane/TaskPack/MR 的映射 |
 | `risk-policy.md` | 风险等级、toolset、command guard、checkpoint |
+| `evolution-verification-guide.md` | 自进化最小闭环验证：RuntimeMemory、Skill、Candidate、Promotion、DevFlow |
 | `rollout-plan.md` | 自进化能力阶段推进 |
 
 ## 核心边界

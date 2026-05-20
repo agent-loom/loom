@@ -24,12 +24,48 @@ class TestModelGatewayAutoRegister:
         assert "openai" in gw._providers
         assert gw._default_provider == "openai"
 
+    def test_registers_openai_from_hermes_compatible_env(self):
+        env = {
+            "HERMES_OPENAI_BASE_URL": "https://api.qnaigc.com/v1",
+            "ANTHROPIC_API_KEY": "shared-gateway-secret",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            gw = ModelGateway.create_default()
+        assert "openai" in gw._providers
+        assert gw._default_provider == "openai"
+        provider = gw._providers["openai"]
+        assert "api.qnaigc.com" in str(provider._client.base_url)
+        assert provider._default_model == "openai/gpt-5.2-codex"
+
+    def test_openai_default_model_can_be_overridden(self):
+        env = {
+            "HERMES_OPENAI_BASE_URL": "https://api.qnaigc.com/v1",
+            "ANTHROPIC_API_KEY": "shared-gateway-secret",
+            "OPENAI_DEFAULT_MODEL": "z-ai/glm-5",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            gw = ModelGateway.create_default()
+        provider = gw._providers["openai"]
+        assert provider._default_model == "z-ai/glm-5"
+
     def test_registers_anthropic_when_key_set(self):
         env = {"ANTHROPIC_API_KEY": "sk-ant-test"}
         with patch.dict(os.environ, env, clear=True):
             gw = ModelGateway.create_default()
         assert "anthropic" in gw._providers
         assert gw._default_provider == "anthropic"
+
+    def test_registers_anthropic_when_auth_token_set(self):
+        env = {
+            "ANTHROPIC_AUTH_TOKEN": "auth-token-test",
+            "ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/anthropic",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            gw = ModelGateway.create_default()
+        assert "anthropic" in gw._providers
+        assert gw._default_provider == "anthropic"
+        provider = gw._providers["anthropic"]
+        assert "open.bigmodel.cn" in str(provider._client.base_url)
 
     def test_openai_takes_priority_over_anthropic(self):
         env = {
@@ -40,6 +76,17 @@ class TestModelGatewayAutoRegister:
             gw = ModelGateway.create_default()
         assert gw._default_provider == "openai"
         assert "anthropic" in gw._providers
+
+    def test_default_provider_can_be_overridden(self):
+        env = {
+            "OPENAI_API_KEY": "sk-test",
+            "ANTHROPIC_AUTH_TOKEN": "auth-token-test",
+            "ANTHROPIC_BASE_URL": "https://api.qnaigc.com",
+            "MODEL_GATEWAY_DEFAULT_PROVIDER": "anthropic",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            gw = ModelGateway.create_default()
+        assert gw._default_provider == "anthropic"
 
     def test_openai_custom_base_url(self):
         env = {

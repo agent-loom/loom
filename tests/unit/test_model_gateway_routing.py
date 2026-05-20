@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+
+import httpx
 import pytest
 
 from agent_platform.runtime.model_gateway import (
@@ -14,6 +17,7 @@ from agent_platform.runtime.model_gateway import (
     ModelResponse,
     OpenAICompatibleProvider,
     StubModelProvider,
+    ToolCall,
     estimate_cost,
 )
 
@@ -172,10 +176,9 @@ async def test_gateway_skips_open_circuit():
 
 @pytest.mark.asyncio
 async def test_gateway_stub_provider():
-    gw = ModelGateway.create_default()
-    result = await gw.chat(
-        messages=[ModelMessage(role="user", content="hello")],
-    )
+    gw = ModelGateway(default_provider="stub")
+    gw.register(StubModelProvider())
+    result = await gw.chat(messages=[ModelMessage(role="user", content="hello")])
     assert "Stub LLM" in result.content
 
 
@@ -201,6 +204,103 @@ def test_openai_provider_custom_name():
         provider_name="my-openai",
     )
     assert p.name == "my-openai"
+
+
+@pytest.mark.asyncio
+async def test_openai_gpt5_request_shape(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content.decode())
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{
+                    "message": {"content": "ok"},
+                    "finish_reason": "stop",
+                }],
+                "model": "openai/gpt-5",
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                    "prompt_tokens_details": {},
+                    "completion_tokens_details": {"reasoning_tokens": 5},
+                },
+            },
+        )
+
+    monkeypatch.setenv("OPENAI_REASONING_EFFORT", "high")
+    provider = OpenAICompatibleProvider("https://api.qnaigc.com/v1", "key")
+    provider._client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://api.qnaigc.com/v1",
+        headers={"Authorization": "Bearer key"},
+    )
+
+    result = await provider.chat(
+        [ModelMessage(role="user", content="什么是太阳")],
+        model="openai/gpt-5",
+    )
+
+    body = captured["body"]
+    assert captured["url"] == "https://api.qnaigc.com/v1/chat/completions"
+    assert body["reasoning_effort"] == "high"
+    assert body["messages"][0]["content"] == [{"type": "text", "text": "什么是太阳"}]
+    assert result.usage["completion_tokens_details"] == {"reasoning_tokens": 5}
+
+
+@pytest.mark.asyncio
+async def test_openai_provider_serializes_tool_call_history():
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content.decode())
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{
+                    "message": {"content": "ok"},
+                    "finish_reason": "stop",
+                }],
+                "model": "openai/gpt-5",
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            },
+        )
+
+    provider = OpenAICompatibleProvider("https://api.qnaigc.com/v1", "key")
+    provider._client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://api.qnaigc.com/v1",
+        headers={"Authorization": "Bearer key"},
+    )
+
+    await provider.chat(
+        [
+            ModelMessage(role="user", content="先读证据"),
+            ModelMessage(
+                role="assistant",
+                content="",
+                tool_calls=[
+                    {
+                        "id": "tc_1",
+                        "type": "function",
+                        "function": {"name": "evidence_read", "arguments": "{}"},
+                    },
+                    ToolCall(id="tc_2", name="memory_write", arguments={"summary": "x"}),
+                ],
+            ),
+            ModelMessage(role="tool", content="证据内容", tool_call_id="tc_1"),
+        ],
+        model="openai/gpt-5",
+    )
+
+    body = captured["body"]
+    assistant_message = body["messages"][1]
+    assert assistant_message["tool_calls"][0]["function"]["name"] == "evidence_read"
+    assert assistant_message["tool_calls"][1]["function"]["name"] == "memory_write"
+    assert assistant_message["tool_calls"][1]["function"]["arguments"] == '{"summary": "x"}'
 
 
 def test_anthropic_provider_custom_name():

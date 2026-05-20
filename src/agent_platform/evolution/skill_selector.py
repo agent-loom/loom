@@ -53,6 +53,13 @@ class SkillSelector:
                 # 解析失败时，作为兜底默认放行
                 matched_skills.append(skill)
                 continue
+            if not isinstance(manifest_data, dict):
+                logger.warning(
+                    "技能清单文件不是 YAML object，跳过 scope 校验并默认放行: %s",
+                    manifest_path,
+                )
+                matched_skills.append(skill)
+                continue
 
             # 校验 scope (租户与渠道过滤)
             scope = manifest_data.get("scope", {})

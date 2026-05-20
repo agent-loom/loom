@@ -398,6 +398,10 @@ class BackgroundReviewFork:
                 },
             },
         ]
+        write_tools_schemas = [
+            tool for tool in tools_schemas
+            if tool["name"] != "evidence_read"
+        ]
 
         # 检查 Gateway 中是否注册了可用的真实 LLM provider（非 Stub 且环境变量存在）
         # 如果是 Stub 或者是测试环境，为了保证测试的 100% 成功，我们优先内置 Stub 执行规则
@@ -406,9 +410,17 @@ class BackgroundReviewFork:
         if default_provider and default_provider != "stub":
             # 确实有真实提供商，但我们需要确保对应的 API key 环境变量在当前系统可用
             import os
-            if default_provider == "openai" and os.getenv("OPENAI_API_KEY"):
+            if default_provider == "openai" and (
+                os.getenv("OPENAI_API_KEY")
+                or (
+                    os.getenv("HERMES_OPENAI_BASE_URL")
+                    and os.getenv("ANTHROPIC_API_KEY")
+                )
+            ):
                 has_real_provider = True
-            elif default_provider == "anthropic" and os.getenv("ANTHROPIC_API_KEY"):
+            elif default_provider == "anthropic" and (
+                os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN")
+            ):
                 has_real_provider = True
 
         if not has_real_provider:
@@ -435,13 +447,24 @@ class BackgroundReviewFork:
             ModelMessage(role="system", content=system_prompt),
             ModelMessage(role="user", content=f"触发事件类型: {event.event_type}\n证据简述: {event.evidence_summary}\n请进行深度分析与资产提报。"),
         ]
+        evidence_read_done = False
+        candidate_generated = False
 
         # 分析对话最多迭代 5 步，防止陷入死循环或死工具链
         for step in range(5):
+            active_tools = write_tools_schemas if evidence_read_done else tools_schemas
             chat_result: ChatResult = await self._gateway.chat(
                 messages=messages,
-                tools=tools_schemas,
+                tools=active_tools,
                 temperature=0.1,
+            )
+            logger.info(
+                "Review Fork step=%d provider=%s finish_reason=%s tool_calls=%s content=%s",
+                step + 1,
+                chat_result.provider_name or default_provider or "unknown",
+                chat_result.finish_reason,
+                [call.name for call in chat_result.tool_calls],
+                (chat_result.content or "")[:200],
             )
 
             # 把模型本次回复加入上下文
@@ -452,6 +475,13 @@ class BackgroundReviewFork:
             ))
 
             if not chat_result.tool_calls:
+                if evidence_read_done and not candidate_generated:
+                    logger.warning(
+                        "Review Fork ended without write tool after evidence_read: fork_id=%s step=%d content=%s",
+                        review_fork_id,
+                        step + 1,
+                        (chat_result.content or "")[:300],
+                    )
                 # LLM 没有要调用的工具，本次对话分析完成
                 break
 
@@ -471,7 +501,13 @@ class BackgroundReviewFork:
 
                 try:
                     if tool_name == "evidence_read":
+                        evidence_read_done = True
                         tool_output = f"【触发事件详情】\n类型: {event.event_type}\n背景: {event.evidence_summary}\n完整 Payload: {event.payload}"
+                        tool_output += (
+                            "\n\n【下一步强约束】\n"
+                            "你已经完成证据读取。下一轮禁止再次调用 evidence_read，"
+                            "必须在 memory_write、proposal_write、eval_draft_write 中至少选择一个执行写入。"
+                        )
                     elif tool_name == "memory_write":
                         cand = Candidate(
                             candidate_type=CandidateType.MEMORY_CANDIDATE,
@@ -488,6 +524,7 @@ class BackgroundReviewFork:
                         await self._candidate_repo.create(cand)
                         output_type = "memory_candidate"
                         candidate_id = cand.candidate_id
+                        candidate_generated = True
                         tool_output = f"成功写入 MemoryCandidate, ID 为 {cand.candidate_id}。"
                     elif tool_name == "proposal_write":
                         risk_level_str = tool_args.get("risk_level", "low")
@@ -512,6 +549,7 @@ class BackgroundReviewFork:
                         await self._candidate_repo.create(cand)
                         output_type = "proposal_draft"
                         candidate_id = cand.candidate_id
+                        candidate_generated = True
                         risk_level = risk_val.value
                         tool_output = f"成功写入 ProposalDraft, ID 为 {cand.candidate_id}。"
                     elif tool_name == "eval_draft_write":
@@ -530,6 +568,7 @@ class BackgroundReviewFork:
                         await self._candidate_repo.create(cand)
                         output_type = "eval_case_draft"
                         candidate_id = cand.candidate_id
+                        candidate_generated = True
                         tool_output = f"成功写入 EvalCaseDraft, ID 为 {cand.candidate_id}。"
                     else:
                         tool_output = f"错误: 拦截越权或未知的工具调用 '{tool_name}'，后台评审仅支持 Scoped Toolset。"

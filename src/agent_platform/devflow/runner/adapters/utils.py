@@ -17,6 +17,7 @@ _ALLOWED_ENV_KEYS = frozenset([
     "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
     "http_proxy", "https_proxy", "no_proxy",
     "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
 ])
 
 

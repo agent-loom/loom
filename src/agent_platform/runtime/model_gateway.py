@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
+import os
 import time
+import asyncio
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -42,7 +43,7 @@ class ModelResponse(BaseModel):
     tool_calls: list[ToolCall] = Field(default_factory=list)
     finish_reason: str = "stop"
     model: str = ""
-    usage: dict[str, int] = Field(default_factory=dict)
+    usage: dict[str, Any] = Field(default_factory=dict)
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
@@ -263,9 +264,13 @@ class OpenAICompatibleProvider:
         tools: list[dict[str, Any]] | None = None,
         stop: list[str] | None = None,
     ) -> ModelResponse:
+        effective_model = model or self._default_model
         body: dict[str, Any] = {
-            "model": model or self._default_model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "model": effective_model,
+            "messages": [
+                self._format_message_payload(m, effective_model)
+                for m in messages
+            ],
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
@@ -273,14 +278,30 @@ class OpenAICompatibleProvider:
             body["tools"] = [{"type": "function", "function": t} for t in tools]
         if stop:
             body["stop"] = stop
+        if effective_model.startswith("openai/gpt-5"):
+            body["reasoning_effort"] = os.getenv(
+                "OPENAI_REASONING_EFFORT",
+                "medium",
+            )
+        logger.info(
+            "LLM request: provider=%s model=%s url=%s tools=%d stop=%d",
+            self.name,
+            effective_model,
+            str(self._client.base_url.join(self._chat_completions_path())),
+            len(body.get("tools", [])),
+            len(stop or []),
+        )
 
         try:
-            resp = await self._client.post("/v1/chat/completions", json=body)
+            resp = await self._client.post(self._chat_completions_path(), json=body)
             resp.raise_for_status()
         except httpx.HTTPStatusError as exc:
+            response_snippet = exc.response.text[:500]
             logger.warning(
-                "LLM API 错误: status=%d, provider=%s",
+                "LLM API 错误: status=%d, provider=%s, url=%s, response=%s",
                 exc.response.status_code, self.name,
+                exc.request.url,
+                response_snippet,
             )
             return ModelResponse(
                 content=f"[LLM API error] {exc.response.status_code}",
@@ -342,6 +363,63 @@ class OpenAICompatibleProvider:
     async def close(self) -> None:
         await self._client.aclose()
 
+    @staticmethod
+    def _dump_tool_call(tool_call: Any) -> dict[str, Any]:
+        if isinstance(tool_call, ToolCall):
+            return {
+                "id": tool_call.id,
+                "type": "function",
+                "function": {
+                    "name": tool_call.name,
+                    "arguments": json.dumps(tool_call.arguments, ensure_ascii=False),
+                },
+            }
+        if isinstance(tool_call, BaseModel):
+            return tool_call.model_dump(mode="json")
+        if isinstance(tool_call, dict):
+            return tool_call
+        return {
+            "id": getattr(tool_call, "id", ""),
+            "type": "function",
+            "function": {
+                "name": getattr(tool_call, "name", ""),
+                "arguments": json.dumps(
+                    getattr(tool_call, "arguments", {}) or {},
+                    ensure_ascii=False,
+                ),
+            },
+        }
+
+    @staticmethod
+    def _format_message_payload(
+        message: ModelMessage,
+        model: str,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "role": message.role,
+            "content": message.content,
+        }
+        if (
+            model.startswith("openai/gpt-5")
+            and message.role in {"system", "user", "assistant"}
+            and isinstance(message.content, str)
+        ):
+            payload["content"] = [{"type": "text", "text": message.content}]
+        if message.tool_call_id:
+            payload["tool_call_id"] = message.tool_call_id
+        if message.tool_calls:
+            payload["tool_calls"] = [
+                OpenAICompatibleProvider._dump_tool_call(tc)
+                for tc in message.tool_calls
+            ]
+        return payload
+
+    def _chat_completions_path(self) -> str:
+        base_path = self._client.base_url.path.rstrip("/")
+        if base_path.endswith("/v1"):
+            return "chat/completions"
+        return "/v1/chat/completions"
+
 
 class AnthropicProvider:
     """Provider that calls the Anthropic Messages API directly."""
@@ -350,20 +428,30 @@ class AnthropicProvider:
 
     def __init__(
         self,
-        api_key: str,
+        api_key: str = "",
         default_model: str = "claude-sonnet-4-6",
         timeout: float = 60.0,
         *,
+        auth_token: str = "",
+        base_url: str = "https://api.anthropic.com",
         provider_name: str | None = None,
     ):
+        if not api_key and not auth_token:
+            raise ValueError("AnthropicProvider requires api_key or auth_token")
+
+        headers = {
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+        if api_key:
+            headers["x-api-key"] = api_key
+        else:
+            headers["authorization"] = f"Bearer {auth_token}"
+
         self.name = provider_name or "anthropic"
         self._client = httpx.AsyncClient(
-            base_url="https://api.anthropic.com",
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
+            base_url=base_url,
+            headers=headers,
             timeout=timeout,
         )
         self._default_model = default_model
@@ -408,6 +496,14 @@ class AnthropicProvider:
             ]
         if stop:
             body["stop_sequences"] = stop
+        logger.info(
+            "LLM request: provider=%s model=%s url=%s tools=%d stop=%d",
+            self.name,
+            body["model"],
+            str(self._client.base_url.join("/v1/messages")),
+            len(body.get("tools", [])),
+            len(stop or []),
+        )
 
         try:
             resp = await self._client.post("/v1/messages", json=body)
@@ -516,24 +612,73 @@ class ModelGateway:
         gateway.register(StubModelProvider())
 
         openai_key = os.getenv("OPENAI_API_KEY")
-        if openai_key:
-            openai_base = os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1")
+        hermes_openai_base = os.getenv("HERMES_OPENAI_BASE_URL")
+        anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+        openai_default_model = (
+            os.getenv("OPENAI_DEFAULT_MODEL")
+            or os.getenv("OPENAI_MODEL")
+            or (
+                "openai/gpt-5.2-codex"
+                if hermes_openai_base and anthropic_key and not openai_key
+                else "gpt-4o-mini"
+            )
+        )
+        openai_base = (
+            os.getenv("OPENAI_API_BASE")
+            or hermes_openai_base
+            or "https://api.openai.com/v1"
+        )
+        # Hermes runtime commonly uses an OpenAI-compatible gateway with
+        # HERMES_OPENAI_BASE_URL + ANTHROPIC_API_KEY. Reuse that pair for the
+        # platform ModelGateway so Review Fork and other internal flows can
+        # reach the same gateway without duplicating env vars.
+        openai_compat_key = openai_key or (
+            anthropic_key if hermes_openai_base else None
+        )
+        if openai_compat_key:
             provider = OpenAICompatibleProvider(
                 base_url=openai_base,
-                api_key=openai_key,
+                api_key=openai_compat_key,
+                default_model=openai_default_model,
                 provider_name="openai",
             )
             gateway.register(provider)
             gateway._default_provider = "openai"
-            logger.info("已注册 OpenAI provider 为默认 LLM 提供商")
+            if openai_key:
+                logger.info("已注册 OpenAI provider 为默认 LLM 提供商")
+            else:
+                logger.info(
+                    "已注册 OpenAI-compatible provider 为默认 LLM 提供商 "
+                    "(source=HERMES_OPENAI_BASE_URL+ANTHROPIC_API_KEY)"
+                )
 
-        anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-        if anthropic_key:
-            provider = AnthropicProvider(api_key=anthropic_key)
+        anthropic_auth_token = os.getenv("ANTHROPIC_AUTH_TOKEN")
+        anthropic_base_url = os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+        if anthropic_key or anthropic_auth_token:
+            provider = AnthropicProvider(
+                api_key=anthropic_key or "",
+                auth_token=anthropic_auth_token or "",
+                base_url=anthropic_base_url,
+            )
             gateway.register(provider)
-            if not openai_key:
+            if not openai_compat_key:
                 gateway._default_provider = "anthropic"
             logger.info("已注册 Anthropic provider")
+
+        configured_default = os.getenv("MODEL_GATEWAY_DEFAULT_PROVIDER")
+        if configured_default:
+            if configured_default not in gateway._providers:
+                logger.warning(
+                    "MODEL_GATEWAY_DEFAULT_PROVIDER=%s 未注册，保持当前默认 provider=%s",
+                    configured_default,
+                    gateway._default_provider,
+                )
+            else:
+                gateway._default_provider = configured_default
+                logger.info(
+                    "ModelGateway 默认 provider 已由环境变量覆盖: %s",
+                    configured_default,
+                )
 
         return gateway
 

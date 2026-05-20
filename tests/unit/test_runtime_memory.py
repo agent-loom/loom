@@ -1,9 +1,9 @@
 """S9 Phase 9: RuntimeMemory 与 Skill 注入单元测试。"""
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
 import pytest
 import yaml
 
@@ -19,7 +19,6 @@ from agent_platform.domain.models import (
     ManifestTools,
     ManifestVersion,
     RequestContext,
-    SessionMessage,
     StoreContext,
     TenantContext,
     UserContext,
@@ -30,7 +29,6 @@ from agent_platform.evolution.memory_models import (
     RuntimeMemoryScope,
     RuntimeMemoryType,
     SkillEntry,
-    SkillProvenance,
 )
 from agent_platform.evolution.memory_repository import (
     InMemoryRuntimeMemoryRepository,
@@ -221,6 +219,29 @@ class TestSkillSelectorScope:
         results = selector.select(spec, req3, [skill_entry1, skill_entry2])
         assert len(results) == 1
         assert results[0].name == "skill2"
+
+    def test_skill_selector_handles_non_mapping_yaml(self, tmp_path: Path):
+        """Skill path 指向普通 markdown/yaml 标量时不能打断 runtime context 构建。"""
+        selector = SkillSelector(project_root=tmp_path)
+
+        skill_file = tmp_path / "agents" / "myj" / "skills" / "bad" / "manifest.yaml"
+        skill_file.parent.mkdir(parents=True, exist_ok=True)
+        skill_file.write_text("plain markdown-like content", encoding="utf-8")
+
+        skill_entry = SkillEntry(
+            agent_id="myj",
+            name="bad-skill",
+            path="agents/myj/skills/bad/manifest.yaml",
+            status=MemoryStatus.ACTIVE,
+        )
+
+        results = selector.select(
+            _make_spec(agent_id="myj"),
+            _make_request(tenant_id="t1", channel_id="web"),
+            [skill_entry],
+        )
+
+        assert results == [skill_entry]
 
 
 class TestContextBuilderInjection:

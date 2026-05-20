@@ -328,7 +328,12 @@ class RuntimeManager:
             if self.hook_registry:
                 try:
                     await self.hook_registry.emit(
-                        "post_run", {"response": response, "run_id": run_id},
+                        "post_run",
+                        {
+                            "response": response,
+                            "run_id": run_id,
+                            "request": request,
+                        },
                     )
                 except Exception:
                     logger.exception("hook post_run failed")

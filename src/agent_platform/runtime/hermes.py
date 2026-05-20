@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 from agent_platform.domain.models import (
@@ -491,6 +493,46 @@ class HermesRuntimeBackend:
 
     # P1-5: fallback dispatch --------------------------------------------------
 
+    @staticmethod
+    def _resolve_hermes_home() -> Path:
+        configured = (
+            os.getenv("AGENT_PLATFORM_HERMES_HOME", "").strip()
+            or os.getenv("HERMES_HOME", "").strip()
+        )
+        if configured:
+            return Path(configured).expanduser()
+        return (Path.cwd() / ".agent-platform" / "hermes-home").resolve()
+
+    @classmethod
+    def _ensure_hermes_home(cls) -> Path:
+        home = cls._resolve_hermes_home()
+        for subdir in ("logs", "sessions", "memories", "skills", "cron"):
+            (home / subdir).mkdir(parents=True, exist_ok=True)
+        os.environ["HERMES_HOME"] = str(home)
+        return home
+
+    @staticmethod
+    def _effective_system_prompt(
+        request: RuntimeRequest,
+        hermes_config: dict[str, Any],
+    ) -> str:
+        """Return the platform-built prompt when ContextBuilder injected one.
+
+        RuntimeMemory, Skill and other platform-governed context are assembled
+        by ContextBuilder before the backend runs. Hermes must consume that
+        prompt instead of reloading the package prompt from the manifest.
+        """
+        runtime_context = getattr(request, "runtime_context", None)
+        context_prompt = getattr(runtime_context, "system_prompt", None)
+        system_prompt = context_prompt or hermes_config.get("system_prompt", "")
+
+        knowledge_snippets = getattr(runtime_context, "knowledge_snippets", None)
+        if knowledge_snippets:
+            knowledge_block = "\n\n".join(knowledge_snippets)
+            system_prompt += f"\n\n[Knowledge Context]\n{knowledge_block}"
+
+        return system_prompt
+
     def _build_memory_bridge(
         self, agent_id: str, session_id: str, *, tenant_id: str | None = None,
     ) -> HermesMemoryBridge | None:
@@ -614,10 +656,10 @@ class HermesRuntimeBackend:
         if self.tool_executor:
             tools = self.tool_bridge.wrap_platform_tools(
                 hermes_config.get("tools", []), self.tool_executor
-            )
+        )
 
         hermes_result = await self.conversation_engine.converse(
-            system_prompt=hermes_config.get("system_prompt", ""),
+            system_prompt=self._effective_system_prompt(request, hermes_config),
             user_query=request.request.input.query,
             model_config=hermes_config.get("model", {}),
             tools=tools,
@@ -657,6 +699,9 @@ class HermesRuntimeBackend:
     ) -> RuntimeResponse:
         import anyio
 
+        hermes_home = self._ensure_hermes_home()
+        logger.info("Hermes runtime using HERMES_HOME=%s", hermes_home)
+
         deregister = lambda: None  # noqa: E731
         if self.tool_executor:
             manifest = request.agent_spec.manifest
@@ -684,10 +729,7 @@ class HermesRuntimeBackend:
             raise RuntimeError("Hermes AIAgent is not available")
         agent = AIAgent(**agent_kwargs)
 
-        system_prompt = hermes_config.get("system_prompt", "")
-        if request.runtime_context and getattr(request.runtime_context, "knowledge_snippets", None):
-            knowledge_block = "\n\n".join(request.runtime_context.knowledge_snippets)
-            system_prompt += f"\n\n[Knowledge Context]\n{knowledge_block}"
+        system_prompt = self._effective_system_prompt(request, hermes_config)
 
         conversation_history: list[dict[str, str]] = []
         # 优先使用记忆桥接加载的历史消息
