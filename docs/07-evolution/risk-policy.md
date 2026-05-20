@@ -1,6 +1,6 @@
 # 自进化风险策略
 
-> Status: Implemented (Risk Classifier + PathGuard)
+> Status: Partially Implemented（Risk Classifier + PathGuard 已实现；Toolset 分层/Command Guard/Workspace Checkpoint 待实现）
 > Stage: S9
 > Owner: platform
 > Last updated: 2026-05-20
