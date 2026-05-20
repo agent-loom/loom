@@ -5,7 +5,7 @@ import logging
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Awaitable
 
 from agent_platform.devflow.runner.checkpoint import CheckpointManager
 from agent_platform.devflow.runner.execution_log import (
@@ -52,6 +52,7 @@ class CodingAgentRunner:
         gitlab_base_url: str | None = None,
         job_repo: CodingJobRepository | None = None,
         log_repo: ExecutionLogRepository | None = None,
+        review_fork_trigger: Callable[..., Awaitable[None]] | None = None,
     ):
         self.adapter = adapter
         self.workspace_manager = workspace_manager
@@ -65,6 +66,7 @@ class CodingAgentRunner:
         self._job_repo = job_repo
         self._log_repo = log_repo
         self._checkpoint_mgr = CheckpointManager()
+        self.review_fork_trigger = review_fork_trigger
 
     async def run(
         self,
@@ -212,6 +214,13 @@ class CodingAgentRunner:
                     Path(job.workspace_dir),
                     keep_on_failure=keep,
                 )
+
+            # 触发 devflow_job_completed 评审事件
+            if self.review_fork_trigger:
+                try:
+                    await self.review_fork_trigger(job, task)
+                except Exception:
+                    logger.exception("触发 devflow_job_completed 评审事件失败")
 
         return job
 

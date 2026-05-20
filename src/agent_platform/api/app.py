@@ -57,7 +57,7 @@ from agent_platform.domain.models import (
     RuntimeRequest,
 )
 from agent_platform.evals.runner import EvalReport, EvalRunner
-from agent_platform.hooks import HookRegistry
+from agent_platform.hooks import HookContext, HookRegistry
 from agent_platform.integrations.gitlab.adapter import GitLabAdapter
 from agent_platform.integrations.gitlab.webhook import (
     GitLabEventHandler,
@@ -992,6 +992,23 @@ def create_app() -> FastAPI:
             sandbox_mode=settings.devflow_sandbox_mode,
             docker_image=settings.devflow_docker_image,
         )
+        async def _review_fork_trigger_cb(job, task) -> None:
+            rf = getattr(app.state, "review_fork", None)
+            if rf:
+                from agent_platform.evolution.review_fork import ReviewForkEvent, ReviewForkEventType
+                event = ReviewForkEvent(
+                    event_type=ReviewForkEventType.DEVFLOW_JOB_COMPLETED,
+                    agent_id=task.agent_id or "unknown",
+                    tenant_id="default",
+                    evidence_summary=f"DevFlow 任务完成: 状态={job.state}",
+                    payload={
+                        "job_id": job.job_id,
+                        "state": job.state,
+                        "result": job.result.model_dump(mode="json") if hasattr(job.result, "model_dump") else str(job.result),
+                    }
+                )
+                await rf.trigger(event)
+
         coding_runner = CodingAgentRunner(
             adapter=adapter,
             workspace_manager=workspace_manager,
@@ -1004,6 +1021,7 @@ def create_app() -> FastAPI:
             gitlab_base_url=settings.gitlab_base_url,
             job_repo=coding_job_repo,
             log_repo=execution_log_repo,
+            review_fork_trigger=_review_fork_trigger_cb,
         )
         from agent_platform.devflow.runner.job_queue import AsyncJobQueue
 
@@ -1153,6 +1171,61 @@ def create_app() -> FastAPI:
     app.state.memory_repo = _memory_repo
     app.state.skill_repo = _skill_repo
     app.state.candidate_repo = _candidate_repo
+
+    # ── Background Review Fork ──
+    from agent_platform.evolution.review_fork import (
+        InMemoryReviewForkAuditRepository,
+        BackgroundReviewFork,
+        ReviewForkEvent,
+        ReviewForkEventType,
+    )
+    _review_audit_repo = InMemoryReviewForkAuditRepository()
+    review_fork = BackgroundReviewFork(
+        model_gateway=model_gateway,
+        candidate_repo=_candidate_repo,
+        audit_repo=_review_audit_repo,
+        proposal_repo=_evo_repo,
+    )
+    app.state.review_fork_audit_repo = _review_audit_repo
+    app.state.review_fork = review_fork
+
+    # 订阅 post_run 钩子
+    async def on_post_run(ctx: HookContext) -> None:
+        data = ctx.data or {}
+        resp = data.get("response")
+        run_id = data.get("run_id", "unknown_run")
+        if not resp:
+            return
+
+        agent_id = getattr(resp, "agent_id", None)
+        tenant_id = "default"
+        if hasattr(resp, "response") and resp.response and hasattr(resp.response, "metadata") and resp.response.metadata:
+            tenant_id = resp.response.metadata.get("tenant_id") or "default"
+            agent_id = agent_id or resp.response.metadata.get("agent_id")
+
+        if not agent_id and hasattr(resp, "response") and resp.response and hasattr(resp.response, "agent_id"):
+            agent_id = resp.response.agent_id
+
+        if not agent_id:
+            agent_id = "unknown"
+
+        summary = ""
+        if hasattr(resp, "response") and resp.response and hasattr(resp.response, "output") and resp.response.output:
+            summary = getattr(resp.response.output.text, "display", "") or ""
+
+        event = ReviewForkEvent(
+            event_type=ReviewForkEventType.AGENT_RUN_COMPLETED,
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            evidence_summary=summary[:200],
+            payload={
+                "run_id": run_id,
+                "response": resp.model_dump(mode="json") if hasattr(resp, "model_dump") else str(resp),
+            }
+        )
+        await review_fork.trigger(event)
+
+    app_hook_registry.register("post_run", on_post_run)
 
     # DevFlow 后台调度器
     from agent_platform.devflow.scheduler import DevFlowScheduler
@@ -2291,6 +2364,47 @@ def create_app() -> FastAPI:
             "avg_time_to_dispatch_hours": metrics.avg_time_to_dispatch_hours,
             "avg_time_to_close_hours": metrics.avg_time_to_close_hours,
         }
+
+    # ── Background Review Fork APIs ──
+
+    @app.get("/api/v1/evolution/review-fork/audits")
+    async def list_review_fork_audits(
+        agent_id: str | None = None,
+        limit: int = Query(default=50, ge=1, le=500),
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> list[dict]:
+        audits = await _review_audit_repo.list_all(agent_id=agent_id, limit=limit)
+        return [a.model_dump(mode="json") for a in audits]
+
+    @app.get("/api/v1/evolution/review-fork/status/{agent_id}")
+    async def get_review_fork_status(
+        agent_id: str,
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> dict:
+        suspended = await review_fork.is_suspended(agent_id)
+        rate, count = await review_fork.get_rejection_rate(agent_id)
+        return {
+            "agent_id": agent_id,
+            "suspended": suspended,
+            "rejection_rate": rate,
+            "total_resolved_candidates": count,
+        }
+
+    @app.post("/api/v1/evolution/review-fork/resume/{agent_id}")
+    async def resume_review_fork(
+        agent_id: str,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ) -> dict:
+        await review_fork.resume(agent_id)
+        return {"status": "resumed", "agent_id": agent_id}
+
+    @app.post("/api/v1/evolution/review-fork/suspend/{agent_id}")
+    async def suspend_review_fork(
+        agent_id: str,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ) -> dict:
+        await review_fork.suspend_manually(agent_id)
+        return {"status": "suspended", "agent_id": agent_id}
 
     # ── Candidate Store & Promotion APIs ──
 
