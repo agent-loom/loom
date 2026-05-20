@@ -45,8 +45,7 @@ _ROOT_CAUSE_MAP: dict[str, RootCauseCategory] = {
 
 def _dedup_key(event: EvolutionEvent) -> str:
     msg_hash = hashlib.md5(event.summary.encode(), usedforsecurity=False).hexdigest()[:12]
-    window = event.created_at.strftime("%Y%m%d%H")
-    return f"{event.tenant_id}:{event.agent_id}:{event.event_type}:{msg_hash}:{window}"
+    return f"{event.tenant_id}:{event.agent_id}:{event.event_type}:{msg_hash}"
 
 
 class EvolutionEngine:
@@ -174,7 +173,7 @@ class EvolutionEngine:
             and not proposal.risk.requires_human_confirmation_before_devflow
             and self._plane
         ):
-            proposal.status = ProposalStatus.READY
+            await self._repo.update_status(proposal.proposal_id, ProposalStatus.READY)
             return await self.dispatch_to_plane(proposal.proposal_id)
         return None
 

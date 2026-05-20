@@ -1,9 +1,9 @@
 # Hermes 自进化能力调研与借鉴
 
-> Status: Draft
-> Stage: S9 Proposal
+> Status: Completed
+> Stage: S9
 > Owner: platform
-> Last updated: 2026-05-19
+> Last updated: 2026-05-20
 
 本文档记录对本地 Hermes Agent 源码的调研结论，并说明哪些能力适合借鉴到 Agent Platform 的自进化体系。
 

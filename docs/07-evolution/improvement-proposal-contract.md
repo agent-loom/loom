@@ -1,9 +1,9 @@
 # Improvement Proposal 契约
 
-> Status: Draft
-> Stage: S9 Proposal
+> Status: Implemented
+> Stage: S9
 > Owner: platform
-> Last updated: 2026-05-19
+> Last updated: 2026-05-20
 
 `ImprovementProposal` 是自进化闭环里的核心契约。Hermes/分析 Agent 只能生成提案；Agent Platform 根据提案做风险判断、创建 Plane Work Item、生成 DevFlow TaskPack。
 

@@ -1,9 +1,9 @@
 # 自进化 Agent 系统总体设计
 
-> Status: Draft
-> Stage: S9 Proposal
+> Status: Implemented (Phase 1-4)
+> Stage: S9
 > Owner: platform
-> Last updated: 2026-05-19
+> Last updated: 2026-05-20
 
 本文档定义 Agent Platform 如何从“多 Agent 运行平台 + AI 研发流”演进为“可自进化的 Agent 系统”。
 

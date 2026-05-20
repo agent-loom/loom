@@ -1,9 +1,9 @@
 # 自进化 Agent 系统落地路线
 
-> Status: Draft
-> Stage: S9 Proposal
+> Status: In Progress (Phase 0-3 implemented, Phase 4-5 pending)
+> Stage: S9
 > Owner: platform
-> Last updated: 2026-05-19
+> Last updated: 2026-05-20
 
 本文档定义自进化能力的阶段推进计划。目标是先建立低风险、可验证、可审计的闭环，再逐步扩大自动化范围。
 

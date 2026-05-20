@@ -1447,7 +1447,7 @@ class SqlProposalRepository:
     ) -> None:
         self._sf = session_factory
 
-    async def create(self, proposal: Any) -> None:
+    async def create(self, proposal: "ImprovementProposal") -> None:
         row = EvolutionProposalRow(
             id=proposal.proposal_id,
             proposal_id=proposal.proposal_id,
@@ -1477,7 +1477,7 @@ class SqlProposalRepository:
             session.add(row)
             await session.commit()
 
-    async def get(self, proposal_id: str) -> Any | None:
+    async def get(self, proposal_id: str) -> "ImprovementProposal | None":
         stmt = select(EvolutionProposalRow).where(
             EvolutionProposalRow.proposal_id == proposal_id,
         )
@@ -1491,9 +1491,9 @@ class SqlProposalRepository:
     async def list_by_agent(
         self,
         agent_id: str,
-        status: Any | None = None,
+        status: "ProposalStatus | None" = None,
         limit: int = 50,
-    ) -> list[Any]:
+    ) -> "list[ImprovementProposal]":
         stmt = select(EvolutionProposalRow).where(
             EvolutionProposalRow.agent_id == agent_id,
         )
@@ -1520,7 +1520,7 @@ class SqlProposalRepository:
     async def update_status(
         self,
         proposal_id: str,
-        status: Any,
+        status: "ProposalStatus",
         **kwargs: object,
     ) -> None:
         async with self._sf() as session:
@@ -1545,7 +1545,7 @@ class SqlProposalRepository:
             await session.commit()
 
     @staticmethod
-    def _to_model(row: EvolutionProposalRow) -> Any:
+    def _to_model(row: EvolutionProposalRow) -> "ImprovementProposal":
         from agent_platform.evolution.models import (
             Evidence,
             ImprovementProposal,

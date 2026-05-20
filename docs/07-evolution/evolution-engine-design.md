@@ -1,9 +1,9 @@
 # Evolution Engine 设计
 
-> Status: Draft
-> Stage: S9 Proposal
+> Status: Implemented (Engine + Risk + Repo + API)
+> Stage: S9
 > Owner: platform
-> Last updated: 2026-05-19
+> Last updated: 2026-05-20
 
 Evolution Engine 是自进化 Agent 系统的决策层。它不直接改代码，不直接发布，只负责把运行反馈转化为可审计、可验证、可执行的候选资产和改进提案。
 

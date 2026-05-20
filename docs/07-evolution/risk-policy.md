@@ -1,9 +1,9 @@
 # 自进化风险策略
 
-> Status: Draft
-> Stage: S9 Proposal
+> Status: Implemented (Risk Classifier + PathGuard)
+> Stage: S9
 > Owner: platform
-> Last updated: 2026-05-19
+> Last updated: 2026-05-20
 
 本文档定义自进化 Agent 系统中哪些动作可以自动化、哪些必须人工确认、哪些只能生成报告。
 

@@ -28,6 +28,13 @@ class EvolutionMemoryRepository(Protocol):
         status: MemoryStatus | None = None,
         limit: int = 50,
     ) -> list[EvolutionMemory]: ...
+    async def list_all(
+        self,
+        *,
+        memory_type: MemoryType | None = None,
+        status: MemoryStatus | None = None,
+        limit: int = 100,
+    ) -> list[EvolutionMemory]: ...
     async def update(self, memory: EvolutionMemory) -> None: ...
     async def delete(self, memory_id: str) -> bool: ...
 
@@ -87,6 +94,16 @@ class InMemoryEvolutionMemoryRepository:
         limit: int = 50,
     ) -> list[EvolutionMemory]:
         ids = self._by_tenant.get(tenant_id, [])
+        return self._filter_and_sort(ids, memory_type=memory_type, status=status, limit=limit)
+
+    async def list_all(
+        self,
+        *,
+        memory_type: MemoryType | None = None,
+        status: MemoryStatus | None = None,
+        limit: int = 100,
+    ) -> list[EvolutionMemory]:
+        ids = list(self._store.keys())
         return self._filter_and_sort(ids, memory_type=memory_type, status=status, limit=limit)
 
     async def update(self, memory: EvolutionMemory) -> None:

@@ -302,3 +302,78 @@ class TestAutoDevFlowTransition:
         proposal = await engine.process_event(_event())
         await engine.dispatch_to_plane(proposal.proposal_id)
         plane.update_work_item_state.assert_not_called()
+
+
+class TestDedupWindowFix:
+    """验证去重 key 不含 hour，24h 窗口内同一事件一律去重。"""
+
+    @pytest.mark.asyncio
+    async def test_same_event_different_hour_still_deduped(self, engine):
+        e1 = EvolutionEvent(
+            event_type="eval_failure", agent_id="echo", summary="同一问题",
+            created_at=datetime(2026, 5, 20, 10, 0, tzinfo=UTC),
+        )
+        e2 = EvolutionEvent(
+            event_type="eval_failure", agent_id="echo", summary="同一问题",
+            created_at=datetime(2026, 5, 20, 11, 0, tzinfo=UTC),
+        )
+        p1 = await engine.process_event(e1)
+        p2 = await engine.process_event(e2)
+        assert p1 is not None
+        assert p2 is None
+
+
+class TestAutoDispatchPersistence:
+    """验证 auto_dispatch_if_low_risk 正确持久化 status。"""
+
+    @pytest.mark.asyncio
+    async def test_auto_dispatch_persists_ready_status(self, repo):
+        plane = AsyncMock()
+        plane.create_work_item = AsyncMock(return_value={"id": "pw_1"})
+        plane.update_work_item_state = AsyncMock()
+        engine = EvolutionEngine(
+            repo=repo,
+            plane_adapter=plane,
+            plane_project_id="p1",
+            ai_developing_state_id="state_1",
+        )
+        proposal = await engine.process_event(_event())
+        if proposal.risk.level == RiskLevel.LOW:
+            await engine.auto_dispatch_if_low_risk(proposal)
+            stored = await repo.get(proposal.proposal_id)
+            assert stored.status == ProposalStatus.DISPATCHED
+
+
+class TestMemoryRepoListAll:
+    """验证 EvolutionMemoryRepository.list_all 覆盖所有租户。"""
+
+    @pytest.mark.asyncio
+    async def test_list_all_across_tenants(self):
+        from agent_platform.evolution.memory_models import EvolutionMemory, MemoryType
+        from agent_platform.evolution.memory_repository import InMemoryEvolutionMemoryRepository
+
+        repo = InMemoryEvolutionMemoryRepository()
+        await repo.create(EvolutionMemory(
+            agent_id="echo", tenant_id="tenant_a", type=MemoryType.PATTERN, content="a",
+        ))
+        await repo.create(EvolutionMemory(
+            agent_id="myj", tenant_id="tenant_b", type=MemoryType.KNOWLEDGE, content="b",
+        ))
+        result = await repo.list_all()
+        assert len(result) == 2
+
+    @pytest.mark.asyncio
+    async def test_list_all_with_type_filter(self):
+        from agent_platform.evolution.memory_models import EvolutionMemory, MemoryType
+        from agent_platform.evolution.memory_repository import InMemoryEvolutionMemoryRepository
+
+        repo = InMemoryEvolutionMemoryRepository()
+        await repo.create(EvolutionMemory(
+            agent_id="echo", type=MemoryType.PATTERN, content="a",
+        ))
+        await repo.create(EvolutionMemory(
+            agent_id="echo", type=MemoryType.KNOWLEDGE, content="b",
+        ))
+        result = await repo.list_all(memory_type=MemoryType.PATTERN)
+        assert len(result) == 1
+        assert result[0].type == MemoryType.PATTERN

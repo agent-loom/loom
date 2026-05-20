@@ -2160,8 +2160,8 @@ def create_app() -> FastAPI:
                 tenant_id, memory_type=type_filter, status=status_filter, limit=limit,
             )
         else:
-            memories = await _memory_repo.list_by_tenant(
-                "default", memory_type=type_filter, status=status_filter, limit=limit,
+            memories = await _memory_repo.list_all(
+                memory_type=type_filter, status=status_filter, limit=limit,
             )
         return [m.model_dump(mode="json") for m in memories]
 

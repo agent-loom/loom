@@ -30,6 +30,7 @@ def _manifest_to_skill_entry(
     agent_id: str,
     manifest_path: Path,
     data: dict[str, Any],
+    agents_dir: Path,
 ) -> SkillEntry:
     provenance_raw = data.get("created_by", "user_created")
     try:
@@ -47,7 +48,7 @@ def _manifest_to_skill_entry(
         agent_id=agent_id,
         name=data.get("skill_id") or data.get("title") or manifest_path.parent.name,
         description=data.get("description", ""),
-        path=str(manifest_path.relative_to(manifest_path.parents[3])),
+        path=str(manifest_path.relative_to(agents_dir.parent)),
         provenance=provenance,
         status=status,
         tags=data.get("tags", []),
@@ -77,7 +78,7 @@ def scan_agent_skills(agents_dir: Path) -> list[SkillEntry]:
             data = _load_yaml(manifest_path)
             if data is None:
                 continue
-            entry = _manifest_to_skill_entry(agent_id, manifest_path, data)
+            entry = _manifest_to_skill_entry(agent_id, manifest_path, data, agents_dir)
             entries.append(entry)
             logger.info("发现 skill: agent=%s name=%s path=%s", agent_id, entry.name, entry.path)
 
