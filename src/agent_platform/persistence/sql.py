@@ -36,6 +36,11 @@ from agent_platform.persistence.tables import (
     RoutingDecisionRow,
     WebhookDeliveryRow,
     DeadLetterEntryModel,
+    EvolutionMemoryRow,
+    RuntimeMemoryRow,
+    SkillEntryRow,
+    CandidateRow,
+    ReviewForkAuditRow,
 )
 from agent_platform.registry.deployment import DeploymentEvent
 from agent_platform.webhooks.dead_letter import DeadLetterEntry, DeadLetterQueue
@@ -1589,3 +1594,659 @@ class SqlProposalRepository:
             outcome=row.outcome,
             metadata=row.metadata_json or {},
         )
+
+
+class SqlEvolutionMemoryRepository:
+    """EvolutionMemory 的 SQL 持久化实现。"""
+
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._sf = session_factory
+
+    async def create(self, memory: "EvolutionMemory") -> None:
+        row = EvolutionMemoryRow(
+            id=memory.memory_id,
+            memory_id=memory.memory_id,
+            agent_id=memory.agent_id,
+            tenant_id=memory.tenant_id,
+            type=memory.type.value,
+            content=memory.content,
+            confidence=memory.confidence,
+            trust_score=memory.trust_score,
+            status=memory.status.value,
+            source_proposal_id=memory.source_proposal_id,
+            source_type=memory.source_type,
+            tags_json=memory.tags,
+            use_count=memory.use_count,
+            helpful_count=memory.helpful_count,
+            unhelpful_count=memory.unhelpful_count,
+            metadata_json=memory.metadata,
+            created_at=memory.created_at,
+            updated_at=memory.updated_at,
+        )
+        _fill_audit(row)
+        async with self._sf() as session:
+            session.add(row)
+            await session.commit()
+
+    async def get(self, memory_id: str) -> "EvolutionMemory | None":
+        stmt = select(EvolutionMemoryRow).where(EvolutionMemoryRow.memory_id == memory_id)
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row is None:
+                return None
+            return self._to_model(row)
+
+    async def list_by_agent(
+        self,
+        agent_id: str,
+        *,
+        memory_type: Any | None = None,
+        status: Any | None = None,
+        limit: int = 50,
+    ) -> "list[EvolutionMemory]":
+        stmt = select(EvolutionMemoryRow).where(EvolutionMemoryRow.agent_id == agent_id)
+        if memory_type is not None:
+            stmt = stmt.where(EvolutionMemoryRow.type == str(memory_type))
+        if status is not None:
+            stmt = stmt.where(EvolutionMemoryRow.status == str(status))
+        stmt = stmt.order_by(EvolutionMemoryRow.created_at.desc()).limit(limit)
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            return [self._to_model(r) for r in result.scalars().all()]
+
+    async def list_by_tenant(
+        self,
+        tenant_id: str,
+        *,
+        memory_type: Any | None = None,
+        status: Any | None = None,
+        limit: int = 50,
+    ) -> "list[EvolutionMemory]":
+        stmt = select(EvolutionMemoryRow).where(EvolutionMemoryRow.tenant_id == tenant_id)
+        if memory_type is not None:
+            stmt = stmt.where(EvolutionMemoryRow.type == str(memory_type))
+        if status is not None:
+            stmt = stmt.where(EvolutionMemoryRow.status == str(status))
+        stmt = stmt.order_by(EvolutionMemoryRow.created_at.desc()).limit(limit)
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            return [self._to_model(r) for r in result.scalars().all()]
+
+    async def list_all(
+        self,
+        *,
+        memory_type: Any | None = None,
+        status: Any | None = None,
+        limit: int = 100,
+    ) -> "list[EvolutionMemory]":
+        stmt = select(EvolutionMemoryRow)
+        if memory_type is not None:
+            stmt = stmt.where(EvolutionMemoryRow.type == str(memory_type))
+        if status is not None:
+            stmt = stmt.where(EvolutionMemoryRow.status == str(status))
+        stmt = stmt.order_by(EvolutionMemoryRow.created_at.desc()).limit(limit)
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            return [self._to_model(r) for r in result.scalars().all()]
+
+    async def update(self, memory: "EvolutionMemory") -> None:
+        async with self._sf() as session:
+            stmt = select(EvolutionMemoryRow).where(EvolutionMemoryRow.memory_id == memory.memory_id)
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row is None:
+                return
+            row.type = memory.type.value
+            row.content = memory.content
+            row.confidence = memory.confidence
+            row.trust_score = memory.trust_score
+            row.status = memory.status.value
+            row.source_proposal_id = memory.source_proposal_id
+            row.source_type = memory.source_type
+            row.tags_json = memory.tags
+            row.use_count = memory.use_count
+            row.helpful_count = memory.helpful_count
+            row.unhelpful_count = memory.unhelpful_count
+            row.metadata_json = memory.metadata
+            row.updated_at = datetime.now(UTC)
+            await session.commit()
+
+    async def delete(self, memory_id: str) -> bool:
+        async with self._sf() as session:
+            stmt = select(EvolutionMemoryRow).where(EvolutionMemoryRow.memory_id == memory_id)
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row is None:
+                return False
+            await session.delete(row)
+            await session.commit()
+            return True
+
+    @staticmethod
+    def _to_model(row: EvolutionMemoryRow) -> "EvolutionMemory":
+        from agent_platform.evolution.memory_models import EvolutionMemory, MemoryStatus, MemoryType
+        return EvolutionMemory(
+            memory_id=row.memory_id,
+            agent_id=row.agent_id,
+            tenant_id=row.tenant_id or "default",
+            type=MemoryType(row.type),
+            content=row.content,
+            confidence=row.confidence,
+            trust_score=row.trust_score,
+            status=MemoryStatus(row.status),
+            source_proposal_id=row.source_proposal_id,
+            source_type=row.source_type,
+            tags=row.tags_json or [],
+            use_count=row.use_count,
+            helpful_count=row.helpful_count,
+            unhelpful_count=row.unhelpful_count,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+            metadata=row.metadata_json or {},
+        )
+
+
+class SqlRuntimeMemoryRepository:
+    """RuntimeMemory 的 SQL 持久化实现。"""
+
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._sf = session_factory
+
+    async def create(self, memory: "RuntimeMemory") -> None:
+        row = RuntimeMemoryRow(
+            id=memory.memory_id,
+            memory_id=memory.memory_id,
+            agent_id=memory.agent_id,
+            tenant_id=memory.tenant_id,
+            scope=memory.scope.value,
+            subject_id=memory.subject_id,
+            session_id=memory.session_id,
+            type=memory.type.value,
+            content=memory.content,
+            source_type=memory.source_type,
+            source_id=memory.source_id,
+            confidence=memory.confidence,
+            privacy_level=memory.privacy_level,
+            status=memory.status.value,
+            ttl_seconds=memory.ttl_seconds,
+            expires_at=memory.expires_at,
+            metadata_json=memory.metadata,
+            created_at=memory.created_at,
+        )
+        _fill_audit(row)
+        async with self._sf() as session:
+            session.add(row)
+            await session.commit()
+
+    async def get(self, memory_id: str) -> "RuntimeMemory | None":
+        stmt = select(RuntimeMemoryRow).where(RuntimeMemoryRow.memory_id == memory_id)
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row is None:
+                return None
+            model = self._to_model(row)
+            if model.is_expired():
+                return None
+            return model
+
+    async def list_by_agent(
+        self,
+        agent_id: str,
+        *,
+        scope: Any | None = None,
+        status: Any | None = None,
+        limit: int = 50,
+    ) -> "list[RuntimeMemory]":
+        stmt = select(RuntimeMemoryRow).where(RuntimeMemoryRow.agent_id == agent_id)
+        if scope is not None:
+            stmt = stmt.where(RuntimeMemoryRow.scope == str(scope))
+        if status is not None:
+            stmt = stmt.where(RuntimeMemoryRow.status == str(status))
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            models = [self._to_model(r) for r in result.scalars().all()]
+            # 动态排除已过期的
+            valid_models = [m for m in models if not m.is_expired()]
+            return sorted(valid_models, key=lambda m: m.created_at, reverse=True)[:limit]
+
+    async def list_by_user(
+        self,
+        user_id: str,
+        *,
+        status: Any | None = None,
+        limit: int = 50,
+    ) -> "list[RuntimeMemory]":
+        from agent_platform.evolution.memory_models import RuntimeMemoryScope
+        stmt = select(RuntimeMemoryRow).where(
+            RuntimeMemoryRow.scope == RuntimeMemoryScope.USER.value,
+            RuntimeMemoryRow.subject_id == user_id,
+        )
+        if status is not None:
+            stmt = stmt.where(RuntimeMemoryRow.status == str(status))
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            models = [self._to_model(r) for r in result.scalars().all()]
+            valid_models = [m for m in models if not m.is_expired()]
+            return sorted(valid_models, key=lambda m: m.created_at, reverse=True)[:limit]
+
+    async def list_by_session(
+        self,
+        session_id: str,
+        *,
+        status: Any | None = None,
+        limit: int = 50,
+    ) -> "list[RuntimeMemory]":
+        stmt = select(RuntimeMemoryRow).where(RuntimeMemoryRow.session_id == session_id)
+        if status is not None:
+            stmt = stmt.where(RuntimeMemoryRow.status == str(status))
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            models = [self._to_model(r) for r in result.scalars().all()]
+            valid_models = [m for m in models if not m.is_expired()]
+            return sorted(valid_models, key=lambda m: m.created_at, reverse=True)[:limit]
+
+    async def list_by_tenant(
+        self,
+        tenant_id: str,
+        *,
+        scope: Any | None = None,
+        status: Any | None = None,
+        limit: int = 50,
+    ) -> "list[RuntimeMemory]":
+        stmt = select(RuntimeMemoryRow).where(RuntimeMemoryRow.tenant_id == tenant_id)
+        if scope is not None:
+            stmt = stmt.where(RuntimeMemoryRow.scope == str(scope))
+        if status is not None:
+            stmt = stmt.where(RuntimeMemoryRow.status == str(status))
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            models = [self._to_model(r) for r in result.scalars().all()]
+            valid_models = [m for m in models if not m.is_expired()]
+            return sorted(valid_models, key=lambda m: m.created_at, reverse=True)[:limit]
+
+    async def list_all(
+        self,
+        *,
+        scope: Any | None = None,
+        status: Any | None = None,
+        limit: int = 100,
+    ) -> "list[RuntimeMemory]":
+        stmt = select(RuntimeMemoryRow)
+        if scope is not None:
+            stmt = stmt.where(RuntimeMemoryRow.scope == str(scope))
+        if status is not None:
+            stmt = stmt.where(RuntimeMemoryRow.status == str(status))
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            models = [self._to_model(r) for r in result.scalars().all()]
+            valid_models = [m for m in models if not m.is_expired()]
+            return sorted(valid_models, key=lambda m: m.created_at, reverse=True)[:limit]
+
+    async def update(self, memory: "RuntimeMemory") -> None:
+        async with self._sf() as session:
+            stmt = select(RuntimeMemoryRow).where(RuntimeMemoryRow.memory_id == memory.memory_id)
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row is None:
+                return
+            row.scope = memory.scope.value
+            row.subject_id = memory.subject_id
+            row.session_id = memory.session_id
+            row.type = memory.type.value
+            row.content = memory.content
+            row.source_type = memory.source_type
+            row.source_id = memory.source_id
+            row.confidence = memory.confidence
+            row.privacy_level = memory.privacy_level
+            row.status = memory.status.value
+            row.ttl_seconds = memory.ttl_seconds
+            row.expires_at = memory.expires_at
+            row.metadata_json = memory.metadata
+            row.updated_at = datetime.now(UTC)
+            await session.commit()
+
+    async def delete(self, memory_id: str) -> bool:
+        async with self._sf() as session:
+            stmt = select(RuntimeMemoryRow).where(RuntimeMemoryRow.memory_id == memory_id)
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row is None:
+                return False
+            await session.delete(row)
+            await session.commit()
+            return True
+
+    @staticmethod
+    def _to_model(row: RuntimeMemoryRow) -> "RuntimeMemory":
+        from agent_platform.evolution.memory_models import RuntimeMemory, MemoryStatus, RuntimeMemoryScope, RuntimeMemoryType
+        return RuntimeMemory(
+            memory_id=row.memory_id,
+            tenant_id=row.tenant_id or "default",
+            agent_id=row.agent_id,
+            scope=RuntimeMemoryScope(row.scope),
+            subject_id=row.subject_id,
+            session_id=row.session_id,
+            type=RuntimeMemoryType(row.type),
+            content=row.content,
+            source_type=row.source_type,
+            source_id=row.source_id,
+            confidence=row.confidence,
+            privacy_level=row.privacy_level,
+            status=MemoryStatus(row.status),
+            ttl_seconds=row.ttl_seconds,
+            created_by=row.created_by,
+            created_at=row.created_at,
+            expires_at=row.expires_at,
+            metadata=row.metadata_json or {},
+        )
+
+
+class SqlSkillRepository:
+    """SkillEntry 的 SQL 持久化实现。"""
+
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._sf = session_factory
+
+    async def create(self, skill: "SkillEntry") -> None:
+        row = SkillEntryRow(
+            id=skill.skill_id,
+            skill_id=skill.skill_id,
+            agent_id=skill.agent_id,
+            name=skill.name,
+            description=skill.description,
+            path=skill.path,
+            provenance=skill.provenance.value,
+            status=skill.status.value,
+            tags_json=skill.tags,
+            use_count=skill.use_count,
+            view_count=skill.view_count,
+            last_used_at=skill.last_used_at,
+            metadata_json=skill.metadata,
+            created_at=skill.created_at,
+            updated_at=skill.updated_at,
+        )
+        _fill_audit(row)
+        async with self._sf() as session:
+            session.add(row)
+            await session.commit()
+
+    async def get(self, skill_id: str) -> "SkillEntry | None":
+        stmt = select(SkillEntryRow).where(SkillEntryRow.skill_id == skill_id)
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row is None:
+                return None
+            return self._to_model(row)
+
+    async def list_by_agent(
+        self,
+        agent_id: str,
+        *,
+        status: Any | None = None,
+        limit: int = 50,
+    ) -> "list[SkillEntry]":
+        stmt = select(SkillEntryRow).where(SkillEntryRow.agent_id == agent_id)
+        if status is not None:
+            stmt = stmt.where(SkillEntryRow.status == str(status))
+        stmt = stmt.order_by(SkillEntryRow.created_at.desc()).limit(limit)
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            return [self._to_model(r) for r in result.scalars().all()]
+
+    async def list_all(
+        self,
+        *,
+        status: Any | None = None,
+        limit: int = 100,
+    ) -> "list[SkillEntry]":
+        stmt = select(SkillEntryRow)
+        if status is not None:
+            stmt = stmt.where(SkillEntryRow.status == str(status))
+        stmt = stmt.order_by(SkillEntryRow.created_at.desc()).limit(limit)
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            return [self._to_model(r) for r in result.scalars().all()]
+
+    async def update(self, skill: "SkillEntry") -> None:
+        async with self._sf() as session:
+            stmt = select(SkillEntryRow).where(SkillEntryRow.skill_id == skill.skill_id)
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row is None:
+                return
+            row.name = skill.name
+            row.description = skill.description
+            row.path = skill.path
+            row.provenance = skill.provenance.value
+            row.status = skill.status.value
+            row.tags_json = skill.tags
+            row.use_count = skill.use_count
+            row.view_count = skill.view_count
+            row.last_used_at = skill.last_used_at
+            row.metadata_json = skill.metadata
+            row.updated_at = datetime.now(UTC)
+            await session.commit()
+
+    async def delete(self, skill_id: str) -> bool:
+        async with self._sf() as session:
+            stmt = select(SkillEntryRow).where(SkillEntryRow.skill_id == skill_id)
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row is None:
+                return False
+            await session.delete(row)
+            await session.commit()
+            return True
+
+    @staticmethod
+    def _to_model(row: SkillEntryRow) -> "SkillEntry":
+        from agent_platform.evolution.memory_models import SkillEntry, MemoryStatus, SkillProvenance
+        return SkillEntry(
+            skill_id=row.skill_id,
+            agent_id=row.agent_id,
+            name=row.name,
+            description=row.description,
+            path=row.path,
+            provenance=SkillProvenance(row.provenance),
+            status=MemoryStatus(row.status),
+            tags=row.tags_json or [],
+            use_count=row.use_count,
+            view_count=row.view_count,
+            last_used_at=row.last_used_at,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+            metadata=row.metadata_json or {},
+        )
+
+
+class SqlCandidateRepository:
+    """Candidate 的 SQL 持久化实现。"""
+
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._sf = session_factory
+
+    async def create(self, candidate: "Candidate") -> None:
+        row = CandidateRow(
+            id=candidate.candidate_id,
+            candidate_id=candidate.candidate_id,
+            candidate_type=candidate.candidate_type.value,
+            generated_by=candidate.generated_by,
+            generator_role=candidate.generator_role,
+            agent_id=candidate.agent_id,
+            tenant_id=candidate.tenant_id,
+            environment=candidate.environment,
+            source_event_ids_json=candidate.source_event_ids,
+            evidence_ids_json=candidate.evidence_ids,
+            payload_json=candidate.payload,
+            risk_level=candidate.risk_level.value,
+            status=candidate.status.value,
+            promotion_target=candidate.promotion_target.value,
+            validation_errors_json=candidate.validation_errors,
+            created_at=candidate.created_at,
+            updated_at=candidate.updated_at,
+            promoted_at=candidate.promoted_at,
+        )
+        _fill_audit(row)
+        async with self._sf() as session:
+            session.add(row)
+            await session.commit()
+
+    async def get(self, candidate_id: str) -> "Candidate | None":
+        stmt = select(CandidateRow).where(CandidateRow.candidate_id == candidate_id)
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row is None:
+                return None
+            return self._to_model(row)
+
+    async def list_all(
+        self,
+        *,
+        candidate_type: Any | None = None,
+        agent_id: str | None = None,
+        status: Any | None = None,
+        limit: int = 100,
+    ) -> "list[Candidate]":
+        stmt = select(CandidateRow)
+        if candidate_type is not None:
+            stmt = stmt.where(CandidateRow.candidate_type == str(candidate_type))
+        if agent_id is not None:
+            stmt = stmt.where(CandidateRow.agent_id == agent_id)
+        if status is not None:
+            stmt = stmt.where(CandidateRow.status == str(status))
+        stmt = stmt.order_by(CandidateRow.created_at.desc()).limit(limit)
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            return [self._to_model(r) for r in result.scalars().all()]
+
+    async def update_status(
+        self,
+        candidate_id: str,
+        status: "CandidateStatus",
+        *,
+        validation_errors: list[str] | None = None,
+    ) -> None:
+        async with self._sf() as session:
+            stmt = select(CandidateRow).where(CandidateRow.candidate_id == candidate_id)
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row is None:
+                return
+            row.status = status.value
+            row.updated_at = datetime.now(UTC)
+            from agent_platform.evolution.models import CandidateStatus
+            if status == CandidateStatus.PROMOTED:
+                row.promoted_at = datetime.now(UTC)
+            if validation_errors is not None:
+                row.validation_errors_json = validation_errors
+            await session.commit()
+
+    async def delete(self, candidate_id: str) -> None:
+        async with self._sf() as session:
+            stmt = select(CandidateRow).where(CandidateRow.candidate_id == candidate_id)
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row is not None:
+                await session.delete(row)
+                await session.commit()
+
+    @staticmethod
+    def _to_model(row: CandidateRow) -> "Candidate":
+        from agent_platform.evolution.models import Candidate, CandidateType, CandidateStatus, PromotionTarget, RiskLevel
+        return Candidate(
+            candidate_id=row.candidate_id,
+            candidate_type=CandidateType(row.candidate_type),
+            generated_by=row.generated_by,
+            generator_role=row.generator_role,
+            tenant_id=row.tenant_id or "default",
+            agent_id=row.agent_id,
+            environment=row.environment,
+            source_event_ids=row.source_event_ids_json or [],
+            evidence_ids=row.evidence_ids_json or [],
+            payload=row.payload_json or {},
+            risk_level=RiskLevel(row.risk_level),
+            status=CandidateStatus(row.status),
+            promotion_target=PromotionTarget(row.promotion_target),
+            validation_errors=row.validation_errors_json or [],
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+            promoted_at=row.promoted_at,
+        )
+
+
+class SqlReviewForkAuditRepository:
+    """ReviewForkAudit 的 SQL 持久化实现。"""
+
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._sf = session_factory
+
+    async def create(self, audit: "ReviewForkAudit") -> None:
+        row = ReviewForkAuditRow(
+            id=audit.review_fork_id,
+            review_fork_id=audit.review_fork_id,
+            source_event_id=audit.source_event_id,
+            source_event_type=audit.source_event_type,
+            agent_id=audit.agent_id,
+            tenant_id=audit.tenant_id,
+            input_evidence_ids_json=audit.input_evidence_ids,
+            output_type=audit.output_type,
+            candidate_id=audit.candidate_id,
+            proposal_id=audit.proposal_id,
+            risk_level=audit.risk_level,
+            model_provider=audit.model_provider,
+            status=audit.status,
+            error_message=audit.error_message,
+            created_at=audit.created_at,
+        )
+        _fill_audit(row)
+        async with self._sf() as session:
+            session.add(row)
+            await session.commit()
+
+    async def get(self, review_fork_id: str) -> "ReviewForkAudit | None":
+        stmt = select(ReviewForkAuditRow).where(ReviewForkAuditRow.review_fork_id == review_fork_id)
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row is None:
+                return None
+            return self._to_model(row)
+
+    async def list_all(
+        self,
+        *,
+        agent_id: str | None = None,
+        limit: int = 100,
+    ) -> "list[ReviewForkAudit]":
+        stmt = select(ReviewForkAuditRow)
+        if agent_id is not None:
+            stmt = stmt.where(ReviewForkAuditRow.agent_id == agent_id)
+        stmt = stmt.order_by(ReviewForkAuditRow.created_at.desc()).limit(limit)
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            return [self._to_model(r) for r in result.scalars().all()]
+
+    @staticmethod
+    def _to_model(row: ReviewForkAuditRow) -> "ReviewForkAudit":
+        from agent_platform.evolution.review_fork import ReviewForkAudit
+        return ReviewForkAudit(
+            review_fork_id=row.review_fork_id,
+            source_event_id=row.source_event_id,
+            source_event_type=row.source_event_type,
+            agent_id=row.agent_id,
+            tenant_id=row.tenant_id or "default",
+            input_evidence_ids=row.input_evidence_ids_json or [],
+            output_type=row.output_type,
+            candidate_id=row.candidate_id,
+            proposal_id=row.proposal_id,
+            risk_level=row.risk_level,
+            model_provider=row.model_provider,
+            status=row.status,
+            error_message=row.error_message,
+            created_at=row.created_at,
+        )
+

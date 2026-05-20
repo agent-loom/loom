@@ -256,7 +256,10 @@ class InMemoryRuntimeMemoryRepository:
         self._store[memory.memory_id] = memory
 
     async def get(self, memory_id: str) -> RuntimeMemory | None:
-        return self._store.get(memory_id)
+        m = self._store.get(memory_id)
+        if m and m.is_expired():
+            return None
+        return m
 
     async def list_by_agent(
         self,

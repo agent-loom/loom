@@ -133,6 +133,9 @@ class RuntimeMemory(BaseModel):
     def is_expired(self) -> bool:
         """检查 memory 是否已过期。"""
         if self.expires_at is not None:
-            return datetime.now(UTC) > self.expires_at
+            expires_at = self.expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=UTC)
+            return datetime.now(UTC) > expires_at
         return False
 

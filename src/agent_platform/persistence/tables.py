@@ -428,3 +428,121 @@ class EvolutionProposalRow(AuditMixin, Base):
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     outcome: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_json: Mapped[str] = mapped_column(JSON, nullable=False, default=dict)
+
+
+class EvolutionMemoryRow(AuditMixin, Base):
+    """自进化提取的知识记忆表行模型。"""
+    __tablename__ = "evolution_memories"
+    __table_args__ = (
+        Index("ix_evomem_agent_type", "agent_id", "type"),
+    )
+
+    memory_id: Mapped[str] = mapped_column(
+        String(128), nullable=False, unique=True, index=True
+    )
+    agent_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    type: Mapped[str] = mapped_column(String(64), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.7)
+    trust_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active", index=True)
+    source_proposal_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    source_type: Mapped[str] = mapped_column(String(64), nullable=False, default="evolution_engine")
+    tags_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    use_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    helpful_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    unhelpful_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+
+class RuntimeMemoryRow(AuditMixin, Base):
+    """在线运行对话隔离与 TTL 记忆表行模型。"""
+    __tablename__ = "runtime_memories"
+    __table_args__ = (
+        Index("ix_runmem_agent_scope_subject", "agent_id", "scope", "subject_id"),
+        Index("ix_runmem_session", "session_id"),
+    )
+
+    memory_id: Mapped[str] = mapped_column(
+        String(128), nullable=False, unique=True, index=True
+    )
+    agent_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    scope: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    subject_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    session_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    type: Mapped[str] = mapped_column(String(64), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    source_type: Mapped[str] = mapped_column(String(64), nullable=False, default="user_input")
+    source_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.7)
+    privacy_level: Mapped[str] = mapped_column(String(64), nullable=False, default="internal")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active", index=True)
+    ttl_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+
+class SkillEntryRow(AuditMixin, Base):
+    """Agent 扩展技能索引表行模型。"""
+    __tablename__ = "skill_entries"
+
+    skill_id: Mapped[str] = mapped_column(
+        String(128), nullable=False, unique=True, index=True
+    )
+    agent_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    path: Mapped[str] = mapped_column(String(256), nullable=False)
+    provenance: Mapped[str] = mapped_column(String(64), nullable=False, default="user_created")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active", index=True)
+    tags_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    use_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    view_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+
+class CandidateRow(AuditMixin, Base):
+    """自进化候选资产结构化缓冲表行模型。"""
+    __tablename__ = "evolution_candidates"
+    __table_args__ = (
+        Index("ix_cand_agent_status", "agent_id", "status"),
+    )
+
+    candidate_id: Mapped[str] = mapped_column(
+        String(128), nullable=False, unique=True, index=True
+    )
+    candidate_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    generated_by: Mapped[str] = mapped_column(String(64), nullable=False, default="hermes")
+    generator_role: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    agent_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    environment: Mapped[str] = mapped_column(String(64), nullable=False, default="prod")
+    source_event_ids_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    evidence_ids_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    payload_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    risk_level: Mapped[str] = mapped_column(String(32), nullable=False, default="low")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft", index=True)
+    promotion_target: Mapped[str] = mapped_column(String(64), nullable=False, default="none")
+    validation_errors_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    promoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ReviewForkAuditRow(AuditMixin, Base):
+    """后台评审分支异步审计表行模型。"""
+    __tablename__ = "review_fork_audits"
+
+    review_fork_id: Mapped[str] = mapped_column(
+        String(128), nullable=False, unique=True, index=True
+    )
+    source_event_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    source_event_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    agent_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    input_evidence_ids_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    output_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    candidate_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    proposal_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    risk_level: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    model_provider: Mapped[str] = mapped_column(String(64), nullable=False, default="stub")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+

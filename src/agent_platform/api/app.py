@@ -724,8 +724,13 @@ def create_app() -> FastAPI:
 
     tool_executor.audit_repo = tool_audit_repo
 
-    _runtime_memory_repo = InMemoryRuntimeMemoryRepository()
-    _skill_repo = InMemorySkillRepository()
+    if db_session_factory is not None:
+        from agent_platform.persistence.sql import SqlRuntimeMemoryRepository, SqlSkillRepository
+        _runtime_memory_repo = SqlRuntimeMemoryRepository(db_session_factory)
+        _skill_repo = SqlSkillRepository(db_session_factory)
+    else:
+        _runtime_memory_repo = InMemoryRuntimeMemoryRepository()
+        _skill_repo = InMemorySkillRepository()
 
     registry = AgentRegistry(
         Path(settings.registry_root),
@@ -1191,11 +1196,6 @@ def create_app() -> FastAPI:
     )
     from agent_platform.evolution.repository import InMemoryCandidateRepository
 
-    _memory_repo = InMemoryEvolutionMemoryRepository()
-    _candidate_repo = InMemoryCandidateRepository()
-    app.state.memory_repo = _memory_repo
-    app.state.candidate_repo = _candidate_repo
-
     # ── Background Review Fork ──
     from agent_platform.evolution.review_fork import (
         InMemoryReviewForkAuditRepository,
@@ -1203,7 +1203,24 @@ def create_app() -> FastAPI:
         ReviewForkEvent,
         ReviewForkEventType,
     )
-    _review_audit_repo = InMemoryReviewForkAuditRepository()
+
+    if db_session_factory is not None:
+        from agent_platform.persistence.sql import (
+            SqlEvolutionMemoryRepository,
+            SqlCandidateRepository,
+            SqlReviewForkAuditRepository,
+        )
+        _memory_repo = SqlEvolutionMemoryRepository(db_session_factory)
+        _candidate_repo = SqlCandidateRepository(db_session_factory)
+        _review_audit_repo = SqlReviewForkAuditRepository(db_session_factory)
+    else:
+        _memory_repo = InMemoryEvolutionMemoryRepository()
+        _candidate_repo = InMemoryCandidateRepository()
+        _review_audit_repo = InMemoryReviewForkAuditRepository()
+
+    app.state.memory_repo = _memory_repo
+    app.state.candidate_repo = _candidate_repo
+
     review_fork = BackgroundReviewFork(
         model_gateway=model_gateway,
         candidate_repo=_candidate_repo,
