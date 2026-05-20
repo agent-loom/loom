@@ -31,6 +31,12 @@ from agent_platform.persistence.repositories import (
     AgentRunRepository,
     AgentSessionRepository,
 )
+from agent_platform.evolution.memory_repository import (
+    RuntimeMemoryRepository,
+    SkillRepository,
+    InMemoryRuntimeMemoryRepository,
+    InMemorySkillRepository,
+)
 from agent_platform.runtime.context_builder import ContextBuilder
 from agent_platform.runtime.hermes import HermesRuntimeBackend
 from agent_platform.runtime.langgraph import LangGraphRuntimeBackend
@@ -61,11 +67,15 @@ class RuntimeManager:
         knowledge_service: Any | None = None,
         langfuse_tracer: Any | None = None,
         approval_gate: ApprovalGate | None = None,
+        runtime_memory_repo: RuntimeMemoryRepository | None = None,
+        skill_repo: SkillRepository | None = None,
     ):
         self.run_store = run_store or InMemoryAgentRunRepository()
         self.session_store: AgentSessionRepository = (
             session_store or InMemoryAgentSessionRepository()
         )
+        self.runtime_memory_repo = runtime_memory_repo or InMemoryRuntimeMemoryRepository()
+        self.skill_repo = skill_repo or InMemorySkillRepository()
         self._backends = {
             NativeRuntimeBackend.name: NativeRuntimeBackend(tool_executor=tool_executor),
             HermesRuntimeBackend.name: HermesRuntimeBackend(
@@ -178,12 +188,16 @@ class RuntimeManager:
                 session.add_message("user", request.request.input.query)
 
             # Build runtime context using ContextBuilder
-            builder = ContextBuilder()
-            runtime_context = builder.build(
+            builder = ContextBuilder(
+                runtime_memory_repo=self.runtime_memory_repo,
+                skill_repo=self.skill_repo,
+            )
+            runtime_context = await builder.build(
                 spec=request.agent_spec,
                 request=request.request,
                 session_history=session.history if session else [],
                 knowledge_results=request.knowledge_context,
+                run_id=run_id,
             )
             # Store on the request so backends can access it
             request.runtime_context = runtime_context

@@ -1,6 +1,6 @@
 # 自进化 Agent 系统落地路线
 
-> Status: Phase 0-3.5, 1.6 已实现，Phase 1.5/4增强/5 待实现
+> Status: Phase 0-3.5, 1.6, 9 已实现，Phase 1.5/4增强/10 待实现
 > Stage: S9
 > Owner: platform
 > Last updated: 2026-05-20
@@ -188,24 +188,26 @@
 
 ---
 
-## Phase 5：生产化治理 — 🔶 部分完成
+## Phase 5：生产化治理 — 🔶 部分完成 (S9 Phase 9 已完成)
 
 目标：进入可长期运行状态。
 
-对应 development-plan：Phase 5（指标）+ Phase 9（RuntimeMemory）+ Phase 10（治理）。
+对应 development-plan：Phase 5（指标）+ Phase 9（RuntimeMemory + Skill 注入）+ Phase 10（治理）。
 
 范围：
 
 1. ✅ ProposalRepository SQL 持久化。
 2. ✅ EvolutionMemory model + InMemory repository + API。
 3. ✅ SkillRegistry scanner + API。
-4. ⬜ Memory/Skill SQL 持久化。
-5. ⬜ 去重、限流、暂停策略。
-6. ⬜ Admin UI 查看 proposals、evidence、状态。
-7. ⬜ 自进化指标和告警。
-8. ⬜ Agent 级开关。
-9. ⬜ Evolution Insights。
-10. ⬜ Trajectory / RepairTrajectory 数据沉淀。
+4. ✅ RuntimeMemory 注入与 4 层作用域隔离 (S9 Phase 9)
+5. ✅ Skill selector 与 runtime 注入及审计统计 (S9 Phase 9)
+6. ⬜ Memory/Skill SQL 持久化。
+7. ⬜ 去重、限流、暂停策略。
+8. ⬜ Admin UI 查看 proposals、evidence、状态。
+9. ⬜ 自进化指标和告警。
+10. ⬜ Agent 级开关。
+11. ⬜ Evolution Insights。
+12. ⬜ Trajectory / RepairTrajectory 数据沉淀。
 
 验收：
 
@@ -231,15 +233,15 @@ Phase 1-3 基础版已完成。建议按以下顺序推进：
   -> Hermes-Platform 结构化缓冲层，为 Review Fork / Analyst 提供了基础层（已完成）
   -> 对应 development-plan Phase 6
 
+🔴 已完成：RuntimeMemory + Skill 注入
+  -> 让 Memory/Skill 产生实际 runtime 价值
+  -> 依赖 Candidate Store，已于 2026-05-20 完成
+  -> 对应 development-plan Phase 9
+
 🔴 最高优先：Phase 1.5 Background Review Fork
   -> 异步后台分析 + 候选资产自动生成
   -> 依赖 Candidate Store
   -> 对应 development-plan Phase 7
-
-🔴 最高优先（可并行）：RuntimeMemory + Skill 注入
-  -> 让 Memory/Skill 产生实际 runtime 价值
-  -> 依赖 Candidate Store，可与 Review Fork 并行
-  -> 对应 development-plan Phase 9
 
 🟠 第二优先：Phase 4 增强 + Hermes Analyst
   -> LLM 驱动 of 的分析替代规则

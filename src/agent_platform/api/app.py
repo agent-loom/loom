@@ -83,6 +83,11 @@ from agent_platform.persistence.memory import (
     InMemoryToolAuditRepository,
     InMemoryWebhookDeliveryRepository,
 )
+from agent_platform.evolution.memory_repository import (
+    InMemoryRuntimeMemoryRepository,
+    InMemorySkillRepository,
+    InMemoryEvolutionMemoryRepository,
+)
 from agent_platform.policy import PolicyEngine
 from agent_platform.registry.artifact import ArtifactStore
 from agent_platform.registry.deployment import DeploymentAuditLog
@@ -196,6 +201,21 @@ class CreateMemoryRequest(BaseModel):
     confidence: float = Field(default=0.7, ge=0.0, le=1.0)
     tags: list[str] = Field(default_factory=list)
     source_proposal_id: str | None = None
+
+
+class CreateRuntimeMemoryRequest(BaseModel):
+    agent_id: str
+    tenant_id: str = "default"
+    scope: str  # session | user | tenant | agent
+    subject_id: str | None = None
+    session_id: str | None = None
+    type: str  # preference | session_summary | context_hint | user_profile
+    content: str
+    source_type: str = "user_input"
+    source_id: str | None = None
+    confidence: float = Field(default=0.7, ge=0.0, le=1.0)
+    privacy_level: str = "internal"
+    ttl_seconds: int | None = None
 
 
 class MemoryFeedbackRequest(BaseModel):
@@ -704,6 +724,9 @@ def create_app() -> FastAPI:
 
     tool_executor.audit_repo = tool_audit_repo
 
+    _runtime_memory_repo = InMemoryRuntimeMemoryRepository()
+    _skill_repo = InMemorySkillRepository()
+
     registry = AgentRegistry(
         Path(settings.registry_root),
         definition_repo=definition_repo,
@@ -723,6 +746,8 @@ def create_app() -> FastAPI:
         knowledge_service=app_knowledge_service,
         langfuse_tracer=langfuse_tracer,
         approval_gate=approval_gate,
+        runtime_memory_repo=_runtime_memory_repo,
+        skill_repo=_skill_repo,
     )
     eval_runner = EvalRunner(runtime_manager, eval_repo=eval_repo)
     task_pack_generator = TaskPackGenerator()
@@ -776,6 +801,8 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Agent Platform", version="0.2.0", lifespan=_app_lifespan)
     app.state._settings = settings
     app.state._closeables = []
+    app.state.runtime_memory_repo = _runtime_memory_repo
+    app.state.skill_repo = _skill_repo
     if db_engine:
         app.state._closeables.append(("SQLAlchemy engine", db_engine))
     if langfuse_tracer.enabled:
@@ -1161,15 +1188,12 @@ def create_app() -> FastAPI:
     # ── Memory / Skills / Candidate ──
     from agent_platform.evolution.memory_repository import (
         InMemoryEvolutionMemoryRepository,
-        InMemorySkillRepository,
     )
     from agent_platform.evolution.repository import InMemoryCandidateRepository
 
     _memory_repo = InMemoryEvolutionMemoryRepository()
-    _skill_repo = InMemorySkillRepository()
     _candidate_repo = InMemoryCandidateRepository()
     app.state.memory_repo = _memory_repo
-    app.state.skill_repo = _skill_repo
     app.state.candidate_repo = _candidate_repo
 
     # ── Background Review Fork ──
@@ -2124,6 +2148,9 @@ def create_app() -> FastAPI:
     ) -> dict:
         from agent_platform.evolution.models import EvolutionEvent
 
+        if _auth.role != "platform_admin":
+            payload.tenant_id = _auth.tenant_id
+
         event = EvolutionEvent(
             event_type=payload.event_type,
             agent_id=payload.agent_id,
@@ -2149,6 +2176,7 @@ def create_app() -> FastAPI:
     ) -> list[dict]:
         from agent_platform.evolution.models import ProposalStatus
 
+        tenant_filter = None if _auth.role == "platform_admin" else _auth.tenant_id
         status_filter = ProposalStatus(status) if status else None
         if agent_id:
             proposals = await _evo_repo.list_by_agent(
@@ -2158,6 +2186,8 @@ def create_app() -> FastAPI:
             proposals = await _evo_repo.list_all(
                 status=status_filter, limit=limit,
             )
+        if tenant_filter:
+            proposals = [p for p in proposals if p.tenant_id == tenant_filter]
         return [p.model_dump(mode="json") for p in proposals]
 
     @app.get("/api/v1/evolution/proposals/{proposal_id}")
@@ -2171,6 +2201,8 @@ def create_app() -> FastAPI:
                 status_code=404,
                 detail=f"proposal not found: {proposal_id}",
             )
+        if _auth.role != "platform_admin" and proposal.tenant_id != _auth.tenant_id:
+            raise HTTPException(status_code=403, detail="Permission denied")
         return proposal.model_dump(mode="json")
 
     @app.post("/api/v1/evolution/proposals/{proposal_id}/dispatch")
@@ -2178,6 +2210,12 @@ def create_app() -> FastAPI:
         proposal_id: str,
         _auth: AuthIdentity = _SCOPE_ADMIN,
     ) -> dict:
+        proposal = await _evo_repo.get(proposal_id)
+        if proposal is None:
+            raise HTTPException(status_code=404, detail="Proposal not found")
+        if _auth.role != "platform_admin" and proposal.tenant_id != _auth.tenant_id:
+            raise HTTPException(status_code=403, detail="Permission denied")
+
         result = await evolution_engine.dispatch_to_plane(proposal_id)
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
@@ -2189,6 +2227,12 @@ def create_app() -> FastAPI:
         body: DismissProposalRequest,
         _auth: AuthIdentity = _SCOPE_ADMIN,
     ) -> dict:
+        proposal = await _evo_repo.get(proposal_id)
+        if proposal is None:
+            raise HTTPException(status_code=404, detail="Proposal not found")
+        if _auth.role != "platform_admin" and proposal.tenant_id != _auth.tenant_id:
+            raise HTTPException(status_code=403, detail="Permission denied")
+
         await evolution_engine.dismiss(proposal_id, body.reason)
         return {"status": "dismissed", "proposal_id": proposal_id}
 
@@ -2200,6 +2244,9 @@ def create_app() -> FastAPI:
         _auth: AuthIdentity = _SCOPE_ADMIN,
     ) -> dict:
         from agent_platform.evolution.memory_models import EvolutionMemory, MemoryType
+
+        if _auth.role != "platform_admin":
+            body.tenant_id = _auth.tenant_id
 
         memory = EvolutionMemory(
             agent_id=body.agent_id,
@@ -2225,6 +2272,7 @@ def create_app() -> FastAPI:
         from agent_platform.evolution.memory_models import MemoryStatus as MS
         from agent_platform.evolution.memory_models import MemoryType
 
+        tenant_filter = None if _auth.role == "platform_admin" else _auth.tenant_id
         type_filter = MemoryType(memory_type) if memory_type else None
         status_filter = MS(status) if status else None
         if agent_id:
@@ -2239,6 +2287,9 @@ def create_app() -> FastAPI:
             memories = await _memory_repo.list_all(
                 memory_type=type_filter, status=status_filter, limit=limit,
             )
+
+        if tenant_filter:
+            memories = [m for m in memories if m.tenant_id == tenant_filter]
         return [m.model_dump(mode="json") for m in memories]
 
     @app.get("/api/v1/evolution/memories/{memory_id}")
@@ -2249,6 +2300,8 @@ def create_app() -> FastAPI:
         memory = await _memory_repo.get(memory_id)
         if memory is None:
             raise HTTPException(status_code=404, detail=f"memory not found: {memory_id}")
+        if _auth.role != "platform_admin" and memory.tenant_id != _auth.tenant_id:
+            raise HTTPException(status_code=403, detail="Permission denied")
         return memory.model_dump(mode="json")
 
     @app.post("/api/v1/evolution/memories/{memory_id}/feedback")
@@ -2260,6 +2313,9 @@ def create_app() -> FastAPI:
         memory = await _memory_repo.get(memory_id)
         if memory is None:
             raise HTTPException(status_code=404, detail=f"memory not found: {memory_id}")
+        if _auth.role != "platform_admin" and memory.tenant_id != _auth.tenant_id:
+            raise HTTPException(status_code=403, detail="Permission denied")
+
         memory.record_feedback(body.helpful)
         await _memory_repo.update(memory)
         return {"memory_id": memory_id, "trust_score": memory.trust_score}
@@ -2269,9 +2325,128 @@ def create_app() -> FastAPI:
         memory_id: str,
         _auth: AuthIdentity = _SCOPE_ADMIN,
     ) -> dict:
+        memory = await _memory_repo.get(memory_id)
+        if memory is None:
+            raise HTTPException(status_code=404, detail=f"memory not found: {memory_id}")
+        if _auth.role != "platform_admin" and memory.tenant_id != _auth.tenant_id:
+            raise HTTPException(status_code=403, detail="Permission denied")
+
         deleted = await _memory_repo.delete(memory_id)
         if not deleted:
             raise HTTPException(status_code=404, detail=f"memory not found: {memory_id}")
+        return {"status": "deleted", "memory_id": memory_id}
+
+    # ── Runtime Memory API ──
+
+    @app.post("/api/v1/runtime-memory")
+    async def create_runtime_memory(
+        body: CreateRuntimeMemoryRequest,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ) -> dict:
+        from agent_platform.evolution.memory_models import RuntimeMemory, RuntimeMemoryScope, RuntimeMemoryType, MemoryStatus
+        from datetime import UTC, datetime, timedelta
+
+        if _auth.role != "platform_admin":
+            body.tenant_id = _auth.tenant_id
+
+        expires_at = None
+        if body.ttl_seconds is not None:
+            expires_at = datetime.now(UTC) + timedelta(seconds=body.ttl_seconds)
+
+        memory = RuntimeMemory(
+            agent_id=body.agent_id,
+            tenant_id=body.tenant_id,
+            scope=RuntimeMemoryScope(body.scope),
+            subject_id=body.subject_id,
+            session_id=body.session_id,
+            type=RuntimeMemoryType(body.type),
+            content=body.content,
+            source_type=body.source_type,
+            source_id=body.source_id,
+            confidence=body.confidence,
+            privacy_level=body.privacy_level,
+            ttl_seconds=body.ttl_seconds,
+            expires_at=expires_at,
+            status=MemoryStatus.ACTIVE,
+        )
+        await _runtime_memory_repo.create(memory)
+        return memory.model_dump(mode="json")
+
+    @app.get("/api/v1/runtime-memory")
+    async def list_runtime_memories(
+        agent_id: str | None = None,
+        tenant_id: str | None = None,
+        scope: str | None = None,
+        subject_id: str | None = None,
+        session_id: str | None = None,
+        limit: int = Query(default=100, ge=1, le=500),
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> list[dict]:
+        from agent_platform.evolution.memory_models import RuntimeMemoryScope, MemoryStatus
+
+        tenant_filter = None if _auth.role == "platform_admin" else _auth.tenant_id
+        scope_enum = RuntimeMemoryScope(scope) if scope else None
+
+        if agent_id:
+            memories = await _runtime_memory_repo.list_by_agent(
+                agent_id, scope=scope_enum, status=MemoryStatus.ACTIVE, limit=limit
+            )
+            # Filter by tenant_id if specified or by caller's tenant
+            t_id = tenant_filter or tenant_id
+            if t_id:
+                memories = [m for m in memories if m.tenant_id == t_id]
+        elif tenant_filter or tenant_id:
+            t_id = tenant_filter or tenant_id
+            memories = await _runtime_memory_repo.list_by_tenant(
+                t_id, scope=scope_enum, status=MemoryStatus.ACTIVE, limit=limit
+            )
+        elif session_id:
+            memories = await _runtime_memory_repo.list_by_session(
+                session_id, status=MemoryStatus.ACTIVE, limit=limit
+            )
+            if tenant_filter:
+                memories = [m for m in memories if m.tenant_id == tenant_filter]
+        elif subject_id:
+            memories = await _runtime_memory_repo.list_by_user(
+                subject_id, status=MemoryStatus.ACTIVE, limit=limit
+            )
+            if tenant_filter:
+                memories = [m for m in memories if m.tenant_id == tenant_filter]
+        else:
+            memories = await _runtime_memory_repo.list_all(
+                scope=scope_enum, status=MemoryStatus.ACTIVE, limit=limit
+            )
+            if tenant_filter:
+                memories = [m for m in memories if m.tenant_id == tenant_filter]
+
+        return [m.model_dump(mode="json") for m in memories]
+
+    @app.get("/api/v1/runtime-memory/{memory_id}")
+    async def get_runtime_memory(
+        memory_id: str,
+        _auth: AuthIdentity = _SCOPE_READ,
+    ) -> dict:
+        memory = await _runtime_memory_repo.get(memory_id)
+        if memory is None or memory.is_expired():
+            raise HTTPException(status_code=404, detail=f"runtime memory not found or expired: {memory_id}")
+        if _auth.role != "platform_admin" and memory.tenant_id != _auth.tenant_id:
+            raise HTTPException(status_code=403, detail="Permission denied")
+        return memory.model_dump(mode="json")
+
+    @app.delete("/api/v1/runtime-memory/{memory_id}")
+    async def delete_runtime_memory(
+        memory_id: str,
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ) -> dict:
+        memory = await _runtime_memory_repo.get(memory_id)
+        if memory is None:
+            raise HTTPException(status_code=404, detail=f"runtime memory not found: {memory_id}")
+        if _auth.role != "platform_admin" and memory.tenant_id != _auth.tenant_id:
+            raise HTTPException(status_code=403, detail="Permission denied")
+
+        deleted = await _runtime_memory_repo.delete(memory_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail=f"runtime memory not found: {memory_id}")
         return {"status": "deleted", "memory_id": memory_id}
 
     # ── Skill Registry API ──
@@ -2415,6 +2590,9 @@ def create_app() -> FastAPI:
     ) -> dict:
         from agent_platform.evolution.models import Candidate, CandidateType, CandidateStatus, PromotionTarget, RiskLevel
 
+        if _auth.role != "platform_admin":
+            payload["tenant_id"] = _auth.tenant_id
+
         try:
             cand = Candidate(
                 candidate_type=CandidateType(payload["candidate_type"]),
@@ -2447,6 +2625,7 @@ def create_app() -> FastAPI:
     ) -> list[dict]:
         from agent_platform.evolution.models import CandidateType, CandidateStatus
 
+        tenant_filter = None if _auth.role == "platform_admin" else _auth.tenant_id
         c_type = None
         if candidate_type:
             try:
@@ -2467,6 +2646,8 @@ def create_app() -> FastAPI:
             status=c_status,
             limit=limit,
         )
+        if tenant_filter:
+            candidates = [c for c in candidates if c.tenant_id == tenant_filter]
         return [c.model_dump(mode="json") for c in candidates]
 
     @app.get("/api/v1/evolution/candidates/{candidate_id}")
@@ -2477,6 +2658,8 @@ def create_app() -> FastAPI:
         cand = await _candidate_repo.get(candidate_id)
         if cand is None:
             raise HTTPException(status_code=404, detail="Candidate not found")
+        if _auth.role != "platform_admin" and cand.tenant_id != _auth.tenant_id:
+            raise HTTPException(status_code=403, detail="Permission denied")
         return cand.model_dump(mode="json")
 
     @app.post("/api/v1/evolution/candidates/{candidate_id}/validate")
@@ -2490,6 +2673,8 @@ def create_app() -> FastAPI:
         cand = await _candidate_repo.get(candidate_id)
         if cand is None:
             raise HTTPException(status_code=404, detail="Candidate not found")
+        if _auth.role != "platform_admin" and cand.tenant_id != _auth.tenant_id:
+            raise HTTPException(status_code=403, detail="Permission denied")
 
         validator = CandidateValidator()
         errors = validator.validate(cand)
@@ -2527,6 +2712,8 @@ def create_app() -> FastAPI:
         cand = await _candidate_repo.get(candidate_id)
         if cand is None:
             raise HTTPException(status_code=404, detail="Candidate not found")
+        if _auth.role != "platform_admin" and cand.tenant_id != _auth.tenant_id:
+            raise HTTPException(status_code=403, detail="Permission denied")
 
         if cand.status not in (CandidateStatus.DRAFT, CandidateStatus.VALIDATED):
             raise HTTPException(
@@ -2549,6 +2736,8 @@ def create_app() -> FastAPI:
         cand = await _candidate_repo.get(candidate_id)
         if cand is None:
             raise HTTPException(status_code=404, detail="Candidate not found")
+        if _auth.role != "platform_admin" and cand.tenant_id != _auth.tenant_id:
+            raise HTTPException(status_code=403, detail="Permission denied")
 
         # 策略自动审批：如果是 LOW 风险且状态是 VALIDATED，我们可以在此处直接晋升为 APPROVED
         if cand.status == CandidateStatus.VALIDATED and cand.risk_level == RiskLevel.LOW:
@@ -2587,6 +2776,8 @@ def create_app() -> FastAPI:
         cand = await _candidate_repo.get(candidate_id)
         if cand is None:
             raise HTTPException(status_code=404, detail="Candidate not found")
+        if _auth.role != "platform_admin" and cand.tenant_id != _auth.tenant_id:
+            raise HTTPException(status_code=403, detail="Permission denied")
 
         errors = [reason.get("reason", "rejected by user")] if reason else ["rejected by user"]
         await _candidate_repo.update_status(
@@ -2604,6 +2795,8 @@ def create_app() -> FastAPI:
         cand = await _candidate_repo.get(candidate_id)
         if cand is None:
             raise HTTPException(status_code=404, detail="Candidate not found")
+        if _auth.role != "platform_admin" and cand.tenant_id != _auth.tenant_id:
+            raise HTTPException(status_code=403, detail="Permission denied")
 
         await _candidate_repo.delete(candidate_id)
         return {"status": "deleted", "candidate_id": candidate_id}

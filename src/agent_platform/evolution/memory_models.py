@@ -93,3 +93,46 @@ class SkillEntry(BaseModel):
     created_at: datetime = Field(default_factory=_utc_now)
     updated_at: datetime = Field(default_factory=_utc_now)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RuntimeMemoryScope(StrEnum):
+    SESSION = "session"
+    USER = "user"
+    TENANT = "tenant"
+    AGENT = "agent"
+
+
+class RuntimeMemoryType(StrEnum):
+    PREFERENCE = "preference"
+    SESSION_SUMMARY = "session_summary"
+    CONTEXT_HINT = "context_hint"
+    USER_PROFILE = "user_profile"
+
+
+class RuntimeMemory(BaseModel):
+    """Runtime Memory，服务在线对话或用户体验，具有隔离和 TTL 属性。"""
+    memory_id: str = Field(default_factory=_memory_id)
+    tenant_id: str = "default"
+    agent_id: str
+    scope: RuntimeMemoryScope
+    subject_id: str | None = None
+    session_id: str | None = None
+    type: RuntimeMemoryType
+    content: str
+    source_type: str = "user_input"
+    source_id: str | None = None
+    confidence: float = Field(ge=0.0, le=1.0, default=0.7)
+    privacy_level: str = "internal"
+    status: MemoryStatus = MemoryStatus.ACTIVE
+    ttl_seconds: int | None = None
+    created_by: str = "system"
+    created_at: datetime = Field(default_factory=_utc_now)
+    expires_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    def is_expired(self) -> bool:
+        """检查 memory 是否已过期。"""
+        if self.expires_at is not None:
+            return datetime.now(UTC) > self.expires_at
+        return False
+

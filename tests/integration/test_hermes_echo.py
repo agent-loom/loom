@@ -6,7 +6,9 @@ from agent_platform.api.app import create_app
 
 
 @pytest.mark.asyncio
-async def test_hermes_echo_returns_non_stub_response():
+async def test_hermes_echo_returns_non_stub_response(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "mock-anthropic-key-for-test")
+    monkeypatch.setenv("OPENAI_API_KEY", "mock-openai-key-for-test")
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(

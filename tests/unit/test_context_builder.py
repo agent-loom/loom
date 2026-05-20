@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import pytest
 
 from agent_platform.domain.models import (
     AgentInput,
@@ -100,15 +101,17 @@ def _make_request(query: str = "hello") -> AgentRequest:
 
 
 class TestContextBuilderSystemPrompt:
-    def test_fallback_when_no_orchestrator_prompt(self):
+    @pytest.mark.asyncio
+    async def test_fallback_when_no_orchestrator_prompt(self):
         builder = ContextBuilder()
         spec = _make_spec(prompts={})
         request = _make_request()
 
-        ctx = builder.build(spec, request)
+        ctx = await builder.build(spec, request)
         assert ctx.system_prompt == "You are agent test-agent."
 
-    def test_loads_prompt_from_file(self, tmp_path: Path):
+    @pytest.mark.asyncio
+    async def test_loads_prompt_from_file(self, tmp_path: Path):
         prompt_file = tmp_path / "orchestrator.md"
         prompt_file.write_text("Custom system prompt content", encoding="utf-8")
 
@@ -119,10 +122,11 @@ class TestContextBuilderSystemPrompt:
         request = _make_request()
         builder = ContextBuilder()
 
-        ctx = builder.build(spec, request)
+        ctx = await builder.build(spec, request)
         assert ctx.system_prompt == "Custom system prompt content"
 
-    def test_fallback_when_prompt_file_missing(self, tmp_path: Path):
+    @pytest.mark.asyncio
+    async def test_fallback_when_prompt_file_missing(self, tmp_path: Path):
         spec = _make_spec(
             prompts={"orchestrator": "nonexistent.md"},
             package_path=tmp_path,
@@ -130,23 +134,25 @@ class TestContextBuilderSystemPrompt:
         request = _make_request()
         builder = ContextBuilder()
 
-        ctx = builder.build(spec, request)
+        ctx = await builder.build(spec, request)
         assert ctx.system_prompt == "You are agent test-agent."
 
 
 class TestContextBuilderMessages:
-    def test_builds_messages_with_user_query(self):
+    @pytest.mark.asyncio
+    async def test_builds_messages_with_user_query(self):
         builder = ContextBuilder()
         spec = _make_spec()
         request = _make_request(query="What time is it?")
 
-        ctx = builder.build(spec, request)
+        ctx = await builder.build(spec, request)
 
         assert len(ctx.messages) == 1
         assert ctx.messages[0]["role"] == "user"
         assert ctx.messages[0]["content"] == "What time is it?"
 
-    def test_includes_session_history(self):
+    @pytest.mark.asyncio
+    async def test_includes_session_history(self):
         builder = ContextBuilder()
         spec = _make_spec(history_window=10)
         request = _make_request(query="follow up")
@@ -155,7 +161,7 @@ class TestContextBuilderMessages:
             SessionMessage(role="assistant", content="first answer"),
         ]
 
-        ctx = builder.build(spec, request, session_history=history)
+        ctx = await builder.build(spec, request, session_history=history)
 
         # 2 history messages + 1 user query = 3
         assert len(ctx.messages) == 3
@@ -163,7 +169,8 @@ class TestContextBuilderMessages:
         assert ctx.messages[1]["content"] == "first answer"
         assert ctx.messages[2]["content"] == "follow up"
 
-    def test_window_limits_history(self):
+    @pytest.mark.asyncio
+    async def test_window_limits_history(self):
         builder = ContextBuilder()
         spec = _make_spec(history_window=2)
         request = _make_request(query="latest")
@@ -175,7 +182,7 @@ class TestContextBuilderMessages:
             SessionMessage(role="user", content="msg3"),
         ]
 
-        ctx = builder.build(spec, request, session_history=history)
+        ctx = await builder.build(spec, request, session_history=history)
 
         # window=2 keeps last 2 history msgs + 1 new user msg = 3
         assert len(ctx.messages) == 3
@@ -185,12 +192,13 @@ class TestContextBuilderMessages:
 
 
 class TestContextBuilderToolDefs:
-    def test_builds_tool_definitions(self):
+    @pytest.mark.asyncio
+    async def test_builds_tool_definitions(self):
         builder = ContextBuilder()
         spec = _make_spec(tools_allow=["search", "calculator"])
         request = _make_request()
 
-        ctx = builder.build(spec, request)
+        ctx = await builder.build(spec, request)
 
         assert len(ctx.tools) == 2
         names = {t["name"] for t in ctx.tools}
@@ -198,42 +206,46 @@ class TestContextBuilderToolDefs:
         for t in ctx.tools:
             assert t["type"] == "function"
 
-    def test_empty_tools_when_none_allowed(self):
+    @pytest.mark.asyncio
+    async def test_empty_tools_when_none_allowed(self):
         builder = ContextBuilder()
         spec = _make_spec(tools_allow=[])
         request = _make_request()
 
-        ctx = builder.build(spec, request)
+        ctx = await builder.build(spec, request)
         assert ctx.tools == []
 
 
 class TestContextBuilderKnowledge:
-    def test_knowledge_snippets_passed_through(self):
+    @pytest.mark.asyncio
+    async def test_knowledge_snippets_passed_through(self):
         builder = ContextBuilder()
         spec = _make_spec()
         request = _make_request()
         knowledge = ["snippet 1", "snippet 2"]
 
-        ctx = builder.build(spec, request, knowledge_results=knowledge)
+        ctx = await builder.build(spec, request, knowledge_results=knowledge)
 
         assert ctx.knowledge_snippets == ["snippet 1", "snippet 2"]
 
-    def test_no_knowledge(self):
+    @pytest.mark.asyncio
+    async def test_no_knowledge(self):
         builder = ContextBuilder()
         spec = _make_spec()
         request = _make_request()
 
-        ctx = builder.build(spec, request)
+        ctx = await builder.build(spec, request)
         assert ctx.knowledge_snippets == []
 
 
 class TestContextBuilderMetadata:
-    def test_metadata_includes_context_fields(self):
+    @pytest.mark.asyncio
+    async def test_metadata_includes_context_fields(self):
         builder = ContextBuilder()
         spec = _make_spec()
         request = _make_request()
 
-        ctx = builder.build(spec, request)
+        ctx = await builder.build(spec, request)
 
         assert ctx.metadata["agent_id"] == "test-agent"
         assert ctx.metadata["tenant_id"] == "t1"

@@ -1,6 +1,6 @@
 # 开发计划（S9：自进化 Agent 系统）
 
-> Status: Phase 7 待开始
+> Status: Phase 9 已完成
 > Last updated: 2026-05-20
 
 本计划承接 S8（生产交付）。S9 核心目标：让平台具备**受治理的自进化能力**——从运行反馈自动发现问题、生成改进提案、通过 DevFlow 执行修改、经 Eval 验证后由人工 review 合并。
@@ -199,7 +199,7 @@
 
 ---
 
-## Phase 9：RuntimeMemory + Skill Runtime 注入 — ⬜ 待实现
+## Phase 9：RuntimeMemory + Skill Runtime 注入 — ✅ 完成
 
 **目标**：让 Memory/Skills 真正影响线上行为——通过 ContextBuilder 注入 runtime context。
 
@@ -210,12 +210,12 @@
 
 | # | 任务 | 验收标准 | 状态 |
 |---|---|---|---|
-| 9.9.1 | RuntimeMemory 模型 | scope（session/user/tenant/agent）+ TTL + privacy_level + status | ⬜ |
-| 9.9.2 | RuntimeMemoryRepository | Protocol + InMemory（SQL 在 Phase 10 补齐） | ⬜ |
-| 9.9.3 | ContextBuilder memory 注入 | 按 scope / TTL / policy / token budget 注入；标注 "context, not truth" | ⬜ |
-| 9.9.4 | SkillSelector | 根据 agent / task_type / channel 选择 active skill；限制注入数量 | ⬜ |
-| 9.9.5 | Skill runtime 注入 | ContextBuilder 注入 skill 摘要 + skill.used 审计事件 | ⬜ |
-| 9.9.6 | 隔离测试 | 多租户/多用户 memory 不串读；TTL 过期后不注入 | ⬜ |
+| 9.9.1 | RuntimeMemory 模型 | scope（session/user/tenant/agent）+ TTL + privacy_level + status | ✅ |
+| 9.9.2 | RuntimeMemoryRepository | Protocol + InMemory（SQL 在 Phase 10 补齐） | ✅ |
+| 9.9.3 | ContextBuilder memory 注入 | 按 scope / TTL / policy / token budget 注入；标注 "context, not truth" | ✅ |
+| 9.9.4 | SkillSelector | 根据 agent / task_type / channel 选择 active skill；限制注入数量 | ✅ |
+| 9.9.5 | Skill runtime 注入 | ContextBuilder 注入 skill 摘要 + skill.used 审计事件 | ✅ |
+| 9.9.6 | 隔离测试 | 多租户/多用户 memory 不串读；TTL 过期后不注入 | ✅ |
 
 ---
 
