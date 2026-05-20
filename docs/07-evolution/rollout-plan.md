@@ -1,6 +1,6 @@
 # 自进化 Agent 系统落地路线
 
-> Status: Phase 0-3 已实现（基础版），Phase 1.5/1.6/3.5/4增强/5 待实现
+> Status: Phase 0-3 已实现（基础版），Phase 3.5（安全加固）已完成，Phase 1.5/1.6/4增强/5 待实现
 > Stage: S9
 > Owner: platform
 > Last updated: 2026-05-20
@@ -142,26 +142,26 @@
 
 ---
 
-## Phase 3.5：Runner Checkpoint + Command Guard — ⬜ 待实现
+## Phase 3.5：Runner Checkpoint + Command Guard — ✅ 完成
 
 目标：在允许低风险自动改代码前补齐安全兜底。
 
-对应 development-plan：Phase 10（9.10.4-9.10.5）。
+对应 development-plan：Phase 5（9.5.1-9.5.2）。
 
 范围：
 
-1. runner 执行前创建 workspace checkpoint。
-2. validation 前创建 checkpoint。
-3. commit 前创建 checkpoint。
-4. command guard 拦截 hard block 命令。
-5. path guard 命中 blocked paths 时停止并保留现场。
+1. ✅ runner 执行前创建 workspace checkpoint。
+2. ✅ validation 前创建 checkpoint。
+3. ✅ commit 前创建 checkpoint。
+4. ✅ command guard 拦截 hard block 命令。
+5. ✅ path guard 命中 blocked paths 时停止并保留现场。
 
 验收：
 
-1. blocked path 变更不会被 commit。
-2. 危险命令不会执行。
-3. validation 失败时能查看 diff、checkpoint 和 runner log。
-4. MR report 包含 checkpoint id 和安全检查结果。
+1. ✅ blocked path 变更不会被 commit。
+2. ✅ 危险命令不会执行。
+3. ✅ validation 失败时能查看 diff、checkpoint 和 runner log。
+4. ✅ MR report 包含 checkpoint id 和安全检查结果。
 
 ---
 
@@ -222,30 +222,40 @@
 Phase 1-3 基础版已完成。建议按以下顺序推进：
 
 ```text
-第一优先：Phase 5 指标 + E2E 验证
-  -> 验证现有闭环真正跑通
-  -> 建立质量基线
+🔴 已完成：Phase 3.5 Checkpoint + Guard + Phase 5 指标/E2E
+  -> Phase 3 自动 DevFlow 已开启但无安全网，需立即补齐（已于 2026-05-20 完成）
+  -> 同时验证全链路 E2E 跑通，建立质量基线（已完成）
+  -> 对应 development-plan Phase 5
 
-第二优先：Phase 1.6 Candidate Store + Promotion
-  -> Hermes-Platform 缓冲层
-  -> 后续 Review Fork 和 Analyst 的前置条件
+🔴 最高优先：Phase 1.6 Candidate Store + Promotion
+  -> Hermes-Platform 结构化缓冲层
+  -> 后续 Review Fork / Analyst / RuntimeMemory 的前置条件
+  -> 对应 development-plan Phase 6
 
-第三优先：Phase 1.5 Background Review Fork
-  -> 异步后台分析
+🟠 第二优先：Phase 1.5 Background Review Fork
+  -> 异步后台分析 + 候选资产自动生成
   -> 依赖 Candidate Store
+  -> 对应 development-plan Phase 7
 
-第四优先：Phase 3.5 Checkpoint + Command Guard
-  -> 安全兜底
-  -> 生产化前必须完成
+🟠 第二优先（可并行）：RuntimeMemory + Skill 注入
+  -> 让 Memory/Skill 产生实际 runtime 价值
+  -> 依赖 Candidate Store，可与 Review Fork 并行
+  -> 对应 development-plan Phase 9
 
-第五优先：Phase 4 增强 + Hermes Analyst
-  -> LLM 驱动的分析替代规则
+🟡 第三优先：Phase 4 增强 + Hermes Analyst
+  -> LLM 驱动 of 的分析替代规则
   -> 依赖 Review Fork
+  -> 对应 development-plan Phase 8
+
+🟡 第三优先：Phase 5 生产化治理
+  -> SQL 持久化 + 限流 + Insights
+  -> 对应 development-plan Phase 10
 ```
 
 原因：
 
-1. 先验证现有链路真正可用（E2E），再扩展功能。
-2. Candidate Store 是多个后续 Phase 的基础。
-3. Review Fork 和 Analyst 是设计文档的核心差异化功能。
-4. Checkpoint + Guard 是生产化前的安全门槛。
+1. 自动 DevFlow 已经通过 Checkpoint + Guard 补齐了最紧急的安全守卫，并在 E2E 测试中全链路跑通。
+2. E2E 验证证明现有自进化链路真正可用，建立了可量化的质量基线。
+3. Candidate Store 是多个后续 Phase 的基础架构组件。
+4. Review Fork 和 Analyst 是设计文档的核心差异化功能。
+5. RuntimeMemory 让 Phase 4 的 Memory/Skill 投入产生实际价值。

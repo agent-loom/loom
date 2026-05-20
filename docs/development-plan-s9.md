@@ -1,6 +1,6 @@
 # 开发计划（S9：自进化 Agent 系统）
 
-> Status: Phase 5 待开始
+> Status: Phase 6 待开始
 > Last updated: 2026-05-20
 
 本计划承接 S8（生产交付）。S9 核心目标：让平台具备**受治理的自进化能力**——从运行反馈自动发现问题、生成改进提案、通过 DevFlow 执行修改、经 Eval 验证后由人工 review 合并。
@@ -109,7 +109,7 @@
 
 ---
 
-## Phase 5：安全加固 + E2E 验证 — ⬜ 下一步
+## Phase 5：安全加固 + E2E 验证 — ✅ 完成
 
 **目标**：Phase 2 已开启自动 DevFlow，但安全兜底尚未到位。本 Phase 补齐 Checkpoint + Command Guard，并验证全链路 E2E。
 
@@ -119,10 +119,10 @@
 
 | # | 任务 | 验收标准 | 状态 |
 |---|---|---|---|
-| 9.5.1 | Runner Checkpoint | before_runner / before_validation / before_commit / after_commit 四个检查点；validation 失败时保留现场 | ⬜ |
-| 9.5.2 | Command Guard | Hard Block 命令拦截（rm -rf / mkfs / sudo 等）；blocked path 变更拒绝 commit | ⬜ |
-| 9.5.3 | E2E 验证 | eval failure → proposal → Plane → DevFlow → MR → eval pass 全链路跑通 | ⬜ |
-| 9.5.4 | 自进化指标 | 提案生成数 / auto-dispatch 成功率 / proposal outcome（merged/rejected/abandoned） | ⬜ |
+| 9.5.1 | Runner Checkpoint | before_runner / before_validation / before_commit / after_commit 四个检查点；validation 失败时保留现场 | ✅ |
+| 9.5.2 | Command Guard | Hard Block 命令拦截（rm -rf / mkfs / sudo 等）；blocked path 变更拒绝 commit | ✅ |
+| 9.5.3 | E2E 验证 | eval failure → proposal → Plane → DevFlow → MR → eval pass 全链路跑通 | ✅ |
+| 9.5.4 | 自进化指标 | 提案生成数 / auto-dispatch 成功率 / proposal outcome（merged/rejected/abandoned） | ✅ |
 
 **为什么提前**：Phase 2 让系统可以自动改代码并提 MR，没有 Checkpoint + Guard 就是在没有安全网的情况下运行。这是风险缺口，必须优先补齐。
 
@@ -286,7 +286,7 @@ Phase 7-9 完成后 ──▶ Phase 10（生产化治理）
 | Phase 1: Eval Failure → Proposal | Phase 1 | ✅ |
 | Phase 2: Proposal → Plane Work Item | Phase 1 | ✅ |
 | Phase 3: Low Risk 自动 DevFlow | Phase 2 | ✅ |
-| Phase 3.5: Runner Checkpoint + Command Guard | **Phase 5**（9.5.1-9.5.2） | ⬜ |
+| Phase 3.5: Runner Checkpoint + Command Guard | **Phase 5**（9.5.1-9.5.2） | ✅ |
 | Phase 4: Feedback / Log Pattern → Proposal | Phase 3（基础版）+ **Phase 8**（增强版） | 🔶 |
 | Phase 1.6: Candidate Store + Promotion | **Phase 6** | ⬜ |
 | Phase 1.5: Background Review Fork | **Phase 7** | ⬜ |
@@ -300,7 +300,7 @@ Phase 7-9 完成后 ──▶ Phase 10（生产化治理）
 | M2: 自动修复 | 2 | ✅ 低风险提案自动 DevFlow 生成 MR |
 | M3: 统一闭环 | 3 | ✅ FeedbackIntelligence + EvolutionEngine + SQL |
 | M4: 知识治理 | 4 | ✅ EvolutionMemory + SkillRegistry 可查询 |
-| M5: 安全可验证 | 5 | Checkpoint + Guard 就位 + E2E 全链路跑通 |
+| M5: 安全可验证 | 5 | ✅ Checkpoint + Guard 就位 + E2E 全链路跑通 |
 | M6: 候选缓冲 | 6 | Candidate Store + Promotion Workflow 运行 |
 | M7: 后台 Review | 7 | AgentRun 后自动 Review Fork → Candidate |
 | M8: 智能分析 | 8 | Hermes Analyst 输出高质量候选资产 |

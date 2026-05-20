@@ -11,6 +11,7 @@ import uuid
 from pathlib import Path
 
 from agent_platform.devflow.runner.adapters.utils import build_safe_env
+from agent_platform.devflow.runner.command_guard import CommandGuard, GuardVerdict
 from agent_platform.devflow.runner.models import CommandResult, ValidationResult
 
 logger = logging.getLogger(__name__)
@@ -194,6 +195,17 @@ class WorkspaceManager:
         all_passed = True
 
         for cmd in commands:
+            guard_result = CommandGuard.check(cmd)
+            if guard_result.verdict == GuardVerdict.BLOCKED:
+                logger.warning("Command Guard 拦截危险命令: %s — %s", cmd, guard_result.reason)
+                results.append(CommandResult(
+                    command=cmd, exit_code=1,
+                    stdout="", stderr=f"Command Guard: {guard_result.reason}",
+                    duration_ms=0,
+                ))
+                all_passed = False
+                continue
+
             cmd_base = cmd.strip().split()[0] if cmd.strip() else ""
             if cmd_base not in self._ALLOWED_COMMANDS:
                 logger.warning("拒绝执行不在白名单的命令: %s", cmd_base)

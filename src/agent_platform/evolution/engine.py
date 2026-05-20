@@ -120,11 +120,11 @@ class EvolutionEngine:
 
         try:
             result = await self._plane.create_work_item(
-                project_id=self._plane_project_id,
+                self._plane_project_id,
                 name=proposal.title,
                 description=body,
                 labels=[],
-                custom_properties=custom_props,
+                properties=custom_props,
             )
             work_item_id = result.get("id", "")
             await self._repo.update_status(

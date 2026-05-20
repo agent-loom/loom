@@ -92,3 +92,4 @@ class CodingJob(BaseModel):
     retry_count: int = 0
     max_retries: int = 1
     timeout_seconds: int = 600
+    checkpoints: list[dict] = Field(default_factory=list)

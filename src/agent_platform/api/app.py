@@ -2264,6 +2264,31 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail=f"skill not found: {skill_id}")
         return {"status": "deleted", "skill_id": skill_id}
 
+    @app.get("/api/v1/evolution/metrics")
+    async def evolution_metrics(
+        _auth: AuthIdentity = _SCOPE_ADMIN,
+    ) -> dict:
+        from agent_platform.evolution.metrics import EvolutionMetricsCollector
+
+        collector = EvolutionMetricsCollector(_evo_repo)
+        metrics = await collector.collect()
+        return {
+            "total_proposals": metrics.total_proposals,
+            "by_status": metrics.by_status,
+            "by_risk": metrics.by_risk,
+            "by_agent": metrics.by_agent,
+            "by_root_cause": metrics.by_root_cause,
+            "dispatched_count": metrics.dispatched_count,
+            "dismissed_count": metrics.dismissed_count,
+            "closed_count": metrics.closed_count,
+            "auto_dispatch_count": metrics.auto_dispatch_count,
+            "outcome_merged": metrics.outcome_merged,
+            "outcome_rejected": metrics.outcome_rejected,
+            "outcome_abandoned": metrics.outcome_abandoned,
+            "avg_time_to_dispatch_hours": metrics.avg_time_to_dispatch_hours,
+            "avg_time_to_close_hours": metrics.avg_time_to_close_hours,
+        }
+
     # ── OpenTelemetry FastAPI Instrumentation ──
     # 在所有路由注册完成后挂载，如未安装 opentelemetry-instrumentation-fastapi 则静默跳过
     from agent_platform.observability.fastapi_instrumentation import (

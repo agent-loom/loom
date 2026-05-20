@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from agent_platform.devflow.runner.checkpoint import CheckpointManager
 from agent_platform.devflow.runner.execution_log import (
     ExecutionLogEntry,
     ExecutionLogRepository,
@@ -63,6 +64,7 @@ class CodingAgentRunner:
         self._gitlab_base_url = gitlab_base_url
         self._job_repo = job_repo
         self._log_repo = log_repo
+        self._checkpoint_mgr = CheckpointManager()
 
     async def run(
         self,
@@ -94,6 +96,7 @@ class CodingAgentRunner:
             job.state = JobState.RUNNING
             await self._persist_job(job)
             path_guard = PathGuard.from_task(task, workspace_root=workspace_dir)
+            await self._checkpoint(workspace_dir, job, "before_runner")
             # 执行 AI 代理编写代码，包含重试机制
             adapter_result = await self._execute_with_retry(job, task)
             
@@ -136,6 +139,7 @@ class CodingAgentRunner:
                 return job
 
             job.state = JobState.VALIDATING
+            await self._checkpoint(workspace_dir, job, "before_validation")
             # 运行任务包要求的验证命令 (如 pytest 等)
             validation = await self.workspace_manager.run_validation(
                 workspace_dir,
@@ -145,6 +149,7 @@ class CodingAgentRunner:
             job.state = JobState.COMMITTING
             commit_sha = None
             if changed_files and validation.all_passed:
+                await self._checkpoint(workspace_dir, job, "before_commit")
                 # 只有验证完全通过才将变更提交并推送
                 commit_sha = await self.workspace_manager.commit_and_push(
                     workspace_dir,
@@ -155,6 +160,7 @@ class CodingAgentRunner:
 
             # commit 成功后创建 MR（MR 天然包含 commit）
             if commit_sha:
+                await self._checkpoint(workspace_dir, job, "after_commit")
                 mr_result = await self._create_mr_safe(
                     task=task,
                     plane_project_id=plane_project_id,
@@ -282,6 +288,21 @@ class CodingAgentRunner:
         except Exception:
             logger.warning("Failed to persist job %s", job.job_id)
 
+    async def _checkpoint(
+        self, workspace_dir: Path, job: CodingJob, checkpoint_type: str,
+    ) -> None:
+        try:
+            cp = await self._checkpoint_mgr.create(workspace_dir, checkpoint_type)
+            job.checkpoints.append({
+                "id": cp.checkpoint_id,
+                "type": cp.checkpoint_type,
+                "head_sha": cp.head_sha,
+                "changed_files_count": len(cp.changed_files),
+                "created_at": cp.created_at.isoformat(),
+            })
+        except Exception:
+            logger.warning("Checkpoint [%s] 创建失败，不阻塞流程", checkpoint_type)
+
     async def _report_result(self, job: CodingJob) -> None:
         """
         将执行结果通过评论等形式回传至 GitLab 和项目管理平台。
@@ -380,6 +401,15 @@ class CodingAgentRunner:
             for cmd in result.validation.commands_executed:
                 status = "PASS" if cmd.exit_code == 0 else "FAIL"
                 lines.append(f"| `{cmd.command}` | {status} | {cmd.duration_ms}ms |")
+
+        if job.checkpoints:
+            lines.extend(["", "### Checkpoints", ""])
+            for cp in job.checkpoints:
+                lines.append(
+                    f"- **{cp['type']}** `{cp['id']}` "
+                    f"head=`{cp['head_sha'][:8]}` "
+                    f"files={cp['changed_files_count']}",
+                )
 
         return "\n".join(lines)
 
