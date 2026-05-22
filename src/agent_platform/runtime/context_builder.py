@@ -1,4 +1,29 @@
-"""运行时上下文构建器，组装系统提示、消息历史、工具定义和知识片段。"""
+"""运行时上下文构建器：组装系统提示、消息历史、工具定义和知识片段。
+
+设计定位：
+  运行时数据面 (Runtime Data Plane) 的核心组件之一 (ContextBuilder)。
+  负责在执行引擎 (Engine) 调度底层后端之前，完成全部 Prompt 资源和检索特征的汇聚与组装。
+  具体管线时序见：docs/02-architecture/agent-platform-core-design.md §3.4 Runtime 执行管线。
+
+系统提示词组装时序：
+  [Manifest Orchestrator Prompt]
+            │
+            ▼
+  [1. 注入运行时记忆 (Runtime Memory)]
+       ├─ 按 Session, User, Tenant, Agent 范围筛选活跃的 (MemoryStatus.ACTIVE) 记忆快照
+       └─ 进行去重，并在 2000 字符上限内截断注入系统 Prompt 尾部
+            │
+            ▼
+  [2. 注入动态技能 (Agent Skills)]
+       ├─ 通过 SkillSelector 从技能库中动态选出相关性最高的 Top 3 技能
+       └─ 解析其 SKILL.md 运行指南，并在 6000 字符上限内截断注入系统 Prompt 尾部
+            │
+            ▼
+  [3. 拼接 Knowledge Context] (如果提供了检索知识片段)
+            │
+            ▼
+  最终汇聚成的 system_prompt
+"""
 
 from __future__ import annotations
 
@@ -36,7 +61,12 @@ class RuntimeContext(BaseModel):
 
 
 class ContextBuilder:
-    """Assembles RuntimeContext from request, session, knowledge, and agent config."""
+    """运行时上下文组装器 (Context Builder)
+
+    负责提取 Agent 的静态清单定义，并融合动态的租户会话上下文、运行时沉淀记忆与动态编排的技能卡片，
+    构建符合大模型要求的多维度运行时输入 (RuntimeContext)。
+    设计详见 docs/02-architecture/agent-platform-core-design.md §3.4。
+    """
 
     def __init__(
         self,
@@ -58,8 +88,8 @@ class ContextBuilder:
         knowledge_results: list[str] | None = None,
         run_id: str | None = None,
     ) -> RuntimeContext:
-        """从请求、会话历史和知识库结果构建完整的运行时上下文。"""
-        # 1. Load system prompt from manifest prompts
+        """从请求参数、会话多轮历史和知识检索结果组装完整的 RuntimeContext。"""
+        # 1. 载入 Manifest 中声明的基础系统 Orchestrator 提示词
         system_prompt = self._load_system_prompt(spec)
 
         # ── 9.9.3: Runtime Memory Injection ──
