@@ -1,4 +1,16 @@
-"""Agent 注册中心：发现、注册、部署管理。"""
+"""Agent 注册中心：发现、注册、部署管理。
+
+设计定位：
+  控制面 (Control Plane) 的核心组件，负责 Agent Package 的物理包发现、定义解析、状态生命周期转换和灰度分流。
+  架构组件图详见：docs/02-architecture/agent-platform-design.md §2 控制面。
+
+生命周期规范 (docs/02-architecture/agent-platform-core-design.md §3.5)：
+  DRAFT (草案) -> ACTIVE (启用) -> DEPRECATED (弃用) -> ARCHIVED (归档)
+
+当前实现差距说明 (P0 TODO)：
+  1. register() 当前直接写入 ACTIVE 状态并布署到 dev 渠道，缺少从 DRAFT 状态经人工或 CI 自动化评测达标后触发的 activate() 转化流程。
+  2. unregister() 当前是硬删除，缺少 DEPRECATED 和 ARCHIVED 的两级软卸载过渡逻辑。
+"""
 
 from __future__ import annotations
 
@@ -81,7 +93,14 @@ class AgentRegistry:
         await self._definition_repo.save(definition)
 
     async def register(self, spec: AgentSpec) -> AgentSpec:
-        """注册一个 AgentSpec 并创建对应的 dev 部署记录。"""
+        """注册一个 AgentSpec 并创建对应的 dev 部署记录。
+
+        TODO: 核心设计规范差距 (core-design.md §3.5)
+        当前实现简化为直接转为 ACTIVE 状态。后续版本需重构为：
+        1. 注册时默认状态设为 DRAFT。
+        2. 通过 `docs/04-devflow/` CI 评测流运行 evals.runner 检验。
+        3. 评测指标通过后，由 activate() API 将定义状态提升为 ACTIVE 并同步至路由表。
+        """
         self._deleted_ids.discard(spec.agent_id)
         self._local_specs[spec.agent_id] = spec
         await self.persist_definition(spec)
@@ -95,7 +114,14 @@ class AgentRegistry:
         return spec
 
     async def unregister(self, agent_id: str) -> None:
-        """Unregister an agent, preventing resurrection from DB or disk."""
+        """从注册中心彻底注销一个 Agent，阻止从 DB 或磁盘自动发现与加载。
+
+        TODO: 核心设计规范差距 (core-design.md §3.5)
+        当前实现直接将 Agent 从物理缓存中移除并打上删除标记。
+        未来应支持两级软下线流程：
+        1. deprecate(): 将状态设为 DEPRECATED，拒绝新 Session 路由，但保持已有 Session 存活。
+        2. archive(): 彻底转为 ARCHIVED，全量下线并释放资源。
+        """
         self._local_specs.pop(agent_id, None)
         self._deleted_ids.add(agent_id)
 

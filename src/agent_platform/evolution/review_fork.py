@@ -1,10 +1,24 @@
 """S9 Phase 7: Background Review Fork (后台异步评审分支)
 
 实现后台异步分析 Trace、反馈和评测结果，以生成候选资产（Candidate），而不阻塞用户主请求链路。
-包含：
-1. ReviewForkEvent 事件模型与 ReviewForkAudit 审计记录模型。
-2. ReviewForkAuditRepository 仓储接口与内存实现。
-3. BackgroundReviewFork 后台评审执行器，集成受限工具集与质量熔断（Circuit Breaker）机制。
+
+整体流程：
+  触发事件 → trigger() → asyncio.create_task(_run_fork_task)
+    ├─ 质量熔断检查 is_suspended()
+    │    └─ 手动挂起 OR 近 window_size 条已结算 Candidate 的 REJECTED 比例 > threshold
+    ├─ _execute_llm_review()（真实 LLM 流）
+    │    └─ 3-phase tool_choice 策略强制工具调用顺序：
+    │         Phase 1: 强制 evidence_read（读取证据）
+    │         Phase 2: required（必须调用写入工具）
+    │         Phase 3: auto（自由决策）
+    └─ _run_stub_scoped_tools()（离线/测试流）
+         └─ 按 event_type 规则直接生成对应 Candidate
+
+组件说明：
+  1. ReviewForkEvent — 触发事件模型（5 种 event_type）
+  2. ReviewForkAudit — 审计记录（success / failed / skipped_circuit_breaker / no_candidate）
+  3. ReviewForkAuditRepository — 审计仓储接口与内存实现
+  4. BackgroundReviewFork — 执行器，集成受限工具集（4 种 Scoped Tools）与质量熔断
 """
 from __future__ import annotations
 
@@ -134,10 +148,10 @@ class BackgroundReviewFork:
         candidate_repo: CandidateRepository,
         audit_repo: ReviewForkAuditRepository,
         proposal_repo: Any,  # EvolutionProposalRepository
-        window_size: int = 10,
-        rejection_threshold: float = 0.5,
-        min_candidates: int = 5,
-        timeout_seconds: float = 120.0,
+        window_size: int = 10,            # 熔断窗口：取最近 N 条 Candidate 计算拒绝率
+        rejection_threshold: float = 0.5, # 拒绝率超过此值触发自动熔断
+        min_candidates: int = 5,          # 最少 N 条已结算样本后才启用熔断判定
+        timeout_seconds: float = 120.0,   # 单次 LLM 评审的超时上限
     ) -> None:
         self._gateway = model_gateway
         self._candidate_repo = candidate_repo
@@ -290,7 +304,12 @@ class BackgroundReviewFork:
 
     async def _execute_llm_review(self, review_fork_id: str, event: ReviewForkEvent) -> None:
         """调用 LLM 进行自进化分析并执行 Scoped Tools 写入资产。"""
-        # 构建 Scoped Tools 的 JSON Schema 声明
+        # ── Scoped Toolset 声明 ──
+        # 后台评审仅允许以下 4 个工具，禁止 shell/git/deploy 等危险操作
+        # evidence_read: 读取触发事件的详细证据
+        # memory_write:  沉淀经验模式为候选记忆
+        # proposal_write: 生成 Prompt/Eval 改进提案
+        # eval_draft_write: 补充回归评测用例
         tools_schemas = [
             {
                 "name": "evidence_read",
@@ -450,7 +469,10 @@ class BackgroundReviewFork:
         evidence_read_done = False
         candidate_generated = False
 
-        # 分析对话最多迭代 5 步，防止陷入死循环或死工具链
+        # ── 3-phase tool_choice 策略 ──
+        # Phase 1: 未读取证据 → 强制调用 evidence_read
+        # Phase 2: 已读取证据但未生成候选 → required（必须调用某个写入工具）
+        # Phase 3: 已生成候选 → auto（模型自行决定是否继续）
         for step in range(5):
             active_tools = write_tools_schemas if evidence_read_done else tools_schemas
             if not evidence_read_done:

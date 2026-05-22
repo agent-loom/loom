@@ -1,4 +1,10 @@
-"""工具注册中心：定义、注册、发现与动态加载 Agent 工具。"""
+"""工具注册中心：定义、注册、发现与动态加载 Agent 工具。
+
+设计定位：
+  能力层 (Capability Layer) 的核心组件，负责平台级工具与 Agent Package 内置业务工具的动态加载、解耦与生命周期热拔插。
+  对应架构图中的 Capability.Tools (Tool Registry) 组件。
+  具体设计详见：docs/02-architecture/agent-platform-core-design.md §3.6 ToolRegistry 与 ToolExecutor。
+"""
 
 from __future__ import annotations
 
@@ -36,7 +42,12 @@ class ToolDefinition(BaseModel):
 
 
 class ToolRegistry:
-    """工具注册中心，管理工具的注册、查找和按所有者过滤。"""
+    """工具注册中心 (Tool Registry)
+
+    负责在内存中管理并索引所有的工具定义。
+    提供 register、unregister、get 以及根据所有者过滤的 list_by_owner 能力。
+    一致性规范：docs/02-architecture/agent-platform-core-design.md §3.6 目标状态。
+    """
 
     def __init__(self) -> None:
         """初始化空的工具注册中心。"""
@@ -73,10 +84,11 @@ class ToolRegistry:
 
 
 def create_default_tool_registry() -> ToolRegistry:
-    """Return an empty tool registry.
+    """创建一个默认的空工具注册中心。
 
-    Agent-specific tools should be loaded dynamically via
-    ``load_agent_tools`` instead of being hardcoded here.
+    一致性规范 (core-design.md §3.6)：
+      "目标状态：初始为空，在发现和加载 Agent 实例阶段，根据 handler_ref 动态注册和加载工具。"
+      平台不应该硬编码包含任何具体业务工具，而是由 load_agent_tools() 动态按需填充。
     """
     return ToolRegistry()
 
@@ -86,16 +98,15 @@ def load_agent_tools(
     package_path: Path,
     agent_id: str,
 ) -> None:
-    """Dynamically load tools from an agent package.
+    """从指定的 Agent Package 中动态加载其专属的业务工具集。
 
-    Scans ``package_path / "tools"`` for Python modules and looks
-    for a ``register_tools(registry)`` or
-    ``register_{name}_tools(registry)`` callable in each module.
-    Falls back to a module-level ``TOOL_DEFINITIONS`` list of
-    ``ToolDefinition`` instances.
-
-    After registration, every newly registered tool gets its
-    ``owner`` field set to *agent_id*.
+    实现细节与注册约定 (core-design.md §3.1)：
+      1. 动态 import 机制：扫描 package_path/tools/ 下所有的 Python 模块文件并动态 import。
+      2. 约定 1 (函数注册模式)：若模块提供 `register_tools` 或 `register_{name}_tools`  callable 实体，
+         则优先将 registry 实例传入以完成该模块工具的内嵌初始化。
+      3. 约定 2 (静态声明模式)：若无前述注册函数，则降级查找模块内声明的 `TOOL_DEFINITIONS` 静态列表，
+         并遍历调用 `registry.register()` 注册。
+      4. 所有加载后的工具，其 `owner` 字段都会被自动覆写为该 `agent_id`，以实现多租户下的工具权限隔离。
     """
     tools_dir = package_path / "tools"
     if not tools_dir.is_dir():

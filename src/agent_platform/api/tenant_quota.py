@@ -1,6 +1,18 @@
 """多租户配额管理：按租户追踪 token 用量、API 调用次数，执行配额检查。
 
-支持内存和 Redis 两种持久化后端。
+架构概览：
+  TenantQuotaManager（核心门面）
+    ├─ 本地缓存层 (_cache_quotas / _cache_usage) — 读写热路径零 IO
+    ├─ 可插拔后端 (QuotaBackend Protocol)
+    │     ├─ InMemoryQuotaBackend — 单实例部署
+    │     └─ RedisQuotaBackend   — 多实例共享，自动过期
+    └─ 配额检查维度（4 维度，均用 >= 判定超限）
+          ├─ requests_per_day  — 每日 API 请求次数
+          ├─ tokens_per_day    — 每日 LLM token 消耗
+          ├─ storage_mb        — 存储用量
+          └─ max_agents        — Agent 实例数
+
+日计数器通过 _maybe_reset() 在 last_reset 超过 86400 秒后自动归零。
 """
 
 from __future__ import annotations
@@ -50,6 +62,7 @@ class QuotaExceededError(Exception):
         )
 
 
+# 未配置配额的租户统一使用此默认值（10000 req/day, 5M tokens/day, 1GB, 50 agents）
 DEFAULT_QUOTA = TenantQuota(tenant_id="__default__")
 
 
@@ -127,6 +140,7 @@ class RedisQuotaBackend:
                 "agent_count": str(usage.agent_count),
                 "last_reset": str(usage.last_reset),
             })
+            # TTL = 距当日结束的剩余秒数，确保过期后自动清理旧周期数据
             remaining = max(0, 86400 - int(time.time() - usage.last_reset))
             await self._redis.expire(key, remaining or 86400)
         except Exception:
@@ -211,6 +225,7 @@ class TenantQuotaManager:
         return usage
 
     def _maybe_reset(self, usage: TenantUsage) -> None:
+        # 距上次重置超过 24h 时自动归零日计数器
         now = time.time()
         if now - usage.last_reset >= 86400:
             usage.requests_today = 0
@@ -250,6 +265,7 @@ class TenantQuotaManager:
     # ── 配额检查 ─────────────────────────────────────────────
 
     def check_request_quota(self, tenant_id: str) -> None:
+        # 使用 >= 而非 >：第 N 次请求已记录后再检查，current==limit 即表示已用尽
         quota = self.get_quota(tenant_id)
         usage = self._get_usage(tenant_id)
         if usage.requests_today >= quota.max_requests_per_day:
@@ -278,6 +294,7 @@ class TenantQuotaManager:
             )
 
     def check_all(self, tenant_id: str) -> list[str]:
+        # 一次性扫描全部 4 个维度，返回所有超限描述（不抛异常）
         violations: list[str] = []
         quota = self.get_quota(tenant_id)
         usage = self._get_usage(tenant_id)

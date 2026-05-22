@@ -1,4 +1,19 @@
-"""部署审计日志：记录部署事件，支持回滚追踪和哈希链完整性校验。"""
+"""部署审计日志：记录部署事件，支持回滚追踪和哈希链完整性校验。
+
+安全机制 — SHA-256 链式哈希防篡改：
+  GENESIS_HASH ("000...0", 64 字符)
+       │
+       ▼
+  Event₁: integrity_hash = SHA256(GENESIS_HASH + "|" + canonical_json₁)
+       │   prev_hash = GENESIS_HASH
+       ▼
+  Event₂: integrity_hash = SHA256(Event₁.integrity_hash + "|" + canonical_json₂)
+       │   prev_hash = Event₁.integrity_hash
+       ▼  ...
+
+verify_chain() 按时间序重放所有事件，逐条比对 prev_hash 与前一事件的
+integrity_hash，任一不匹配即返回 (False, 断裂索引)。
+"""
 
 from __future__ import annotations
 
@@ -19,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 def _compute_event_hash(event_data: str, prev_hash: str) -> str:
-    """计算审计事件的完整性哈希（SHA-256 链式哈希）。"""
+    """SHA-256(prev_hash + "|" + canonical_json)，将当前事件链接到前一事件。"""
     payload = f"{prev_hash}|{event_data}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -49,6 +64,7 @@ class DeploymentAuditLog:
     每条事件通过 SHA-256 链式哈希确保不可变性和防篡改。
     """
 
+    # 链锚点：创世哈希，64 个零字符，作为第一条事件的 prev_hash
     GENESIS_HASH = "0" * 64
 
     def __init__(self, *, repo: DeploymentAuditRepository | None = None) -> None:
@@ -76,7 +92,7 @@ class DeploymentAuditLog:
             logger.debug("从持久化恢复哈希链状态失败，使用 GENESIS", exc_info=True)
 
     def _seal_event(self, event: DeploymentEvent) -> DeploymentEvent:
-        """为事件计算完整性哈希并链接到前一事件。"""
+        """为事件计算完整性哈希并链接到前一事件。使用 sort_keys=True 的 canonical JSON 确保同一内容始终产生相同哈希。"""
         canonical = json.dumps(
             {
                 "ts": event.timestamp.isoformat(),
@@ -187,7 +203,7 @@ class DeploymentAuditLog:
         agent_id: str | None = None,
         channel: str | None = None,
     ) -> tuple[bool, int]:
-        """校验审计事件链的完整性，返回 (是否完整, 已验证事件数)。"""
+        """按时间序重放审计事件，逐条校验 prev_hash 链接，返回 (是否完整, 已验证事件数)。"""
         events = await self._repo.list_events(
             agent_id=agent_id, channel=channel, limit=10000,
         )

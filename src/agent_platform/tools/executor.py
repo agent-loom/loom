@@ -30,7 +30,24 @@ class ToolExecutionResult(BaseModel):
 
 
 class ToolExecutor:
-    """工具执行器，负责权限检查、输入校验及带重试的异步执行。"""
+    """工具执行器 (Tool Executor)
+
+    能力层 (Capability Layer) 核心的工具运行、拦截与安全守卫调度中心。
+    配合 docs/02-architecture/agent-platform-design.md 中的"能力层"定位。
+
+    核心流程管线 (execute / _execute_inner)：
+      1. Manifest 权限拦截：比对该部署版本所声明的 `allowed_tools` 白名单。
+      2. Policy 动态安全检查：调用 `policy_engine.check_tool_allowed()`，防止模型执行受阻断的敏感工具。
+      3. 输入 Schema 检验：基于 `validate_tool_input()` 对 payload 做严格参数类型和结构校验。
+      4. 审批门守卫 (ApprovalGate)：对 "high" / "critical" 高风险工具触发人工或系统外审确认（如点单结账）。
+      5. 运行前钩子触发 (pre_tool)：Hook 管道发送通知。
+      6. 重试与超时沙箱执行：按 manifest 约定的 max_retries 和 timeout_ms 带恢复重试地执行工具 handler。
+      7. 运行后钩子触发 (post_tool)：Hook 管道通知成功或失败状态。
+      8. 数据指标统计与审计归档：收集 Prometheus Metrics 并将入参、出参和 TraceID 沉淀至 `audit_repo`。
+
+    设计文档详见：
+      docs/02-architecture/agent-platform-core-design.md §3.6 ToolRegistry 与 ToolExecutor
+    """
 
     def __init__(
         self,

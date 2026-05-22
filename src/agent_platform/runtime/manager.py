@@ -50,10 +50,36 @@ tracer = get_tracer("agent_platform.runtime")
 
 
 class RuntimeManager:
-    """Agent 运行时管理器。
-    
-    负责管理不同运行时后端（如 Native, Hermes, LangGraph）的生命周期，
-    处理请求的策略检查、会话管理、Hooks 触发和指标收集，并将请求路由到对应的后端。
+    """运行时数据面核心调度器 (Engine)
+
+    对应设计文档 docs/02-architecture/agent-platform-design.md 中"运行时数据面"的 Engine 组件。
+    它负责协调和管理完整的 Agent 执行管线生命周期，将请求路由并分发至底层的 RuntimeBackend。
+
+    完整执行管线流程：
+      RuntimeRequest -> RequestParser 协议归一化
+                           │
+                           ▼
+                       [开始调度] RuntimeManager.run()
+                           │
+                           ├─ 1. Route Decision 路由决策 (确定 backend)
+                           ├─ 2. Policy Engine 输入校验 (check_input)
+                           ├─ 3. Hook Pipeline 路由钩子 (on_route) & 运行前钩子 (pre_run)
+                           ├─ 4. Knowledge Enrichment 知识注入 (从 KnowledgeService 检索)
+                           ├─ 5. Context Builder 上下文构建 (整合 manifest, 记忆, 技能, 历史与知识元数据)
+                           ├─ 6. Backend Execution 后端核心处理 (Native / Hermes / LangGraph)
+                           │       ├─ LLM Model Call 模型网关交互
+                           │       └─ Tool Executor 工具调用
+                           ├─ 7. Policy Engine 输出校验 (check_output)
+                           ├─ 8. Session Persistence 会话与状态持久化 (通过 SessionStore)
+                           ├─ 9. Hook Pipeline 运行后钩子 (post_run)
+                           └─ 10. Trace & Metrics 观测与日志上报 (TraceCollector)
+                           │
+                           ▼
+                     RuntimeResponse
+
+    设计文档详见：
+    - docs/02-architecture/agent-platform-design.md §3 分层职责
+    - docs/02-architecture/agent-platform-core-design.md §3.4 Runtime 执行管线
     """
     def __init__(
         self,

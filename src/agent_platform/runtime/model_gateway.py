@@ -1,4 +1,17 @@
-"""模型网关层，统一管理多种 LLM 提供商的调用与路由。"""
+"""模型网关层，统一管理多种 LLM 提供商的调用与路由。
+
+架构概览：
+  ModelGateway（核心网关）
+    ├─ 多 Provider 注册：OpenAI / Anthropic / Stub
+    ├─ 优先级 Fallback 链：primary → fallback₁ → fallback₂
+    ├─ Per-provider CircuitBreaker：CLOSED ↔ OPEN ↔ HALF_OPEN
+    └─ 统一 tool_choice 参数传递（各 Provider 内部自行转换格式）
+
+Provider 差异化处理：
+  - OpenAICompatibleProvider: tool_choice 直传（兼容 OpenAI 格式）
+  - AnthropicProvider: "required"→{"type":"any"}, "none"→移除 tools,
+                       {"type":"function","function":{"name":"X"}}→{"type":"tool","name":"X"}
+"""
 
 from __future__ import annotations
 
@@ -104,6 +117,9 @@ class ModelProvider(Protocol):
 
 # ── Cost table ────────────────────────────────────────────────────
 
+# ── 成本估算表 ── 格式: model_prefix → (input_$/M_tokens, output_$/M_tokens)
+# estimate_cost() 按最长前缀匹配查找对应模型的价格
+
 COST_PER_MILLION: dict[str, tuple[float, float]] = {
     "gpt-4o-mini": (0.150, 0.600),
     "gpt-4o": (5.00, 15.00),
@@ -131,7 +147,7 @@ def estimate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> flo
     return None
 
 
-# ── Circuit breaker ───────────────────────────────────────────────
+# ── 熔断器 ── 三态状态机: CLOSED(正常) → OPEN(熔断) → HALF_OPEN(探测恢复)
 
 
 class CircuitState(StrEnum):
@@ -502,15 +518,17 @@ class AnthropicProvider:
             ]
         if stop:
             body["stop_sequences"] = stop
+        # Anthropic tool_choice 格式转换：OpenAI → Anthropic Messages API
         if tool_choice is not None:
             if isinstance(tool_choice, str):
                 if tool_choice == "required":
-                    body["tool_choice"] = {"type": "any"}
+                    body["tool_choice"] = {"type": "any"}   # 强制调用任意工具
                 elif tool_choice == "auto":
-                    body["tool_choice"] = {"type": "auto"}
+                    body["tool_choice"] = {"type": "auto"}  # 模型自主决定
                 elif tool_choice == "none":
-                    body.pop("tools", None)
+                    body.pop("tools", None)                 # 禁用工具：移除 tools 字段
             elif isinstance(tool_choice, dict):
+                # {"type":"function","function":{"name":"X"}} → {"type":"tool","name":"X"}
                 func_name = None
                 if tool_choice.get("type") == "function":
                     func_name = tool_choice.get("function", {}).get("name")
@@ -605,7 +623,22 @@ class AnthropicProvider:
 
 
 class ModelGateway:
-    """Routes model calls to providers with fallback and circuit breaking."""
+    """模型调用网关 (Model Gateway)
+
+    能力层 (Capability Layer) 的核心网络适配与降级守卫组件。
+    负责将上层 Agent 运行时（如 Native / Hermes 等）发出的抽象模型请求，统一代理并分发给底层具体的服务商（Providers）。
+
+    核心设计职责与规范 (docs/02-architecture/agent-platform-core-design.md §3.7)：
+      1. Provider 统一注册：通过实现 `ModelProvider` 协议接入新大模型。
+      2. 弹性路由降级 (Fallback)：当主模型调用失败（服务商挂掉/API限流）时，按路由链顺序尝试备用模型。
+      3. 熔断隔离守护 (CircuitBreaker)：限制各 Provider 的错误扩散，故障达到阈值后自动开路，探测期成功后自动闭合。
+      4. 统一工具调用选择 (tool_choice)：在上游网关层统一接口，向下游模型端做针对性协议翻译。
+
+    设计差距说明 (TODO)：
+      1. 架构文档 §3.7 明确指出需具备 "per-agent model call rate limit" (每 Agent 模型的调用速率限制)，
+         防止某个恶性循环的 Agent 迅速烧光全站 API 额度。目前该能力暂未接入，属于关键缺失。
+         实现思路：在 chat() 入口处加锁或通过 Redis 计数器做 per-agent 限流拦截。
+    """
 
     def __init__(
         self,

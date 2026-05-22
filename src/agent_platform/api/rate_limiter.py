@@ -1,4 +1,19 @@
-"""基于令牌桶的 API 限流中间件，支持按角色差异化限流和 Redis 分布式后端。"""
+"""基于令牌桶的 API 限流中间件，支持按角色差异化限流和 Redis 分布式后端。
+
+架构概览：
+  请求 → RateLimiterMiddleware.dispatch()
+         ├─ 跳过健康检查等免限流路径 (_SKIP_PATHS)
+         ├─ 识别客户端身份 (_get_client_key: key_id > x-api-key SHA256 > IP)
+         ├─ 根据角色查表确定 (rpm, burst) 限流参数 (ROLE_RATE_LIMITS)
+         └─ 调用后端 try_consume() 消费令牌
+              ├─ InMemoryRateLimiterBackend — 单进程字典 + LRU 淘汰
+              └─ RedisRateLimiterBackend   — Lua 脚本原子操作，多实例共享
+
+令牌桶算法：
+  - 每个客户端维护独立桶，初始满载 burst 个令牌
+  - 每秒按 rate (= rpm/60) 速率补充令牌，上限为 burst
+  - 每次请求消费 1 个令牌，桶空时返回 429 + Retry-After
+"""
 
 from __future__ import annotations
 
@@ -13,6 +28,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = logging.getLogger(__name__)
 
+# ── 角色限流配置表 ── 格式: role -> (requests_per_minute, burst)
+# 未认证请求使用 Middleware 构造参数的默认值 (60 rpm, burst=10)
 ROLE_RATE_LIMITS: dict[str, tuple[int, int]] = {
     "platform_admin": (300, 50),
     "agent_developer": (120, 20),
@@ -42,6 +59,7 @@ class InMemoryRateLimiterBackend:
         self._buckets: dict[str, _TokenBucket] = {}
 
     async def try_consume(self, key: str, rate: float, burst: int) -> bool:
+        # 桶数量超过上限时淘汰 600 秒未活跃的桶，防止内存无限增长
         if len(self._buckets) > self._MAX_BUCKETS:
             self._evict_idle()
         if key not in self._buckets:
@@ -106,6 +124,7 @@ class RedisRateLimiterBackend:
     async def try_consume(self, key: str, rate: float, burst: int) -> bool:
         await self._ensure_script()
         now = time.time()
+        # TTL = 桶完全恢复时间的 2 倍（至少 120s），避免 Redis 中残留过期桶
         ttl = max(int(burst / max(rate, 0.001)) * 2, 120)
         redis_key = f"rl:{key}"
         try:
@@ -115,6 +134,7 @@ class RedisRateLimiterBackend:
             )
             return bool(result)
         except Exception:
+            # Redis 不可用时降级为放行，避免限流后端故障导致全站不可用
             logger.warning("Redis 限流后端不可用，回退到放行", exc_info=True)
             return True
 
@@ -170,6 +190,7 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
 
     @staticmethod
     def _get_client_key(request: Request) -> str:
+        """确定客户端限流 key，优先级：认证 key_id > x-api-key 哈希 > 客户端 IP。"""
         auth = getattr(request.state, "auth", None)
         if auth and auth.key_id:
             return f"key:{auth.key_id}"

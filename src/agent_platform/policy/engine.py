@@ -57,7 +57,25 @@ class PolicySet(BaseModel):
 
 
 class PolicyEngine:
-    """Loads and enforces agent policies (safety, routing, output) at runtime."""
+    """策略引擎 (Policy Engine)
+
+    控制面设计中的 Policy 守护层，用于在运行时阻断违规行为、控制输出样式并保障系统调用安全。
+    架构图详见 docs/02-architecture/agent-platform-design.md §2 控制面。
+
+    核心接入时序点说明：
+      1. check_input()：在 RequestParser 处理完成后、进入后端核心处理前执行。
+         - 调用点：RuntimeManager.run() (src/agent_platform/runtime/manager.py)
+         - 职责：解析 query 安全规则（如 PII 脱敏、黑名单词），发生 violation 时阻断请求。
+      2. check_tool_allowed()：在 LLM 返回工具调用、Executor 执行前执行。
+         - 调用点：ToolExecutor.execute() (src/agent_platform/tools/executor.py) 或底层的 runtime 后端。
+         - 职责：根据 manifest 白名单策略拦截非授权工具调用。
+      3. check_output()：在后端生成 Response、发回客户端前执行。
+         - 调用点：RuntimeManager.run() (src/agent_platform/runtime/manager.py) 阶段 7
+         - 职责：阻断包含泄露信息的 display 文本，或校验生成的结构化命令（Command）。
+
+    设计文档：
+      docs/02-architecture/agent-platform-core-design.md §3.10 PolicyEngine 目标状态与拦截边界
+    """
 
     def __init__(self) -> None:
         """初始化策略引擎。"""
