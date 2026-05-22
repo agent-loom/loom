@@ -1,15 +1,11 @@
-import hashlib
-import logging
-from dataclasses import dataclass
+"""Agent 路由器：多层级意图分流与金丝雀灰度控制。
 
-from agent_platform.config import Settings
-from agent_platform.domain.models import AgentRequest, AgentSpec
-from agent_platform.observability.tracing import get_tracer
-from agent_platform.registry.registry import AgentRegistry
-from agent_platform.router_semantic import SemanticRouter
-
-logger = logging.getLogger(__name__)
-tracer = get_tracer("agent_platform.router")
+设计定位：
+  路由层 (Routing Layer) 的核心门面调度器 (AgentRouter)。
+  对应 docs/02-architecture/agent-platform-design.md 中的"路由层"组件。
+  负责根据请求上下文（参数、AppID、渠道或语义提取）决策哪一个 Agent 包响应该请求，
+  并对生产环境（prod 渠道）提供基于一致性哈希金丝雀（Canary）灰度切流能力。
+"""
 
 
 @dataclass(frozen=True)
@@ -24,12 +20,35 @@ class RouteResult:
     traffic_bucket: int | None = None
 
 
+import hashlib
+import logging
+from dataclasses import dataclass
+
+from agent_platform.config import Settings
+from agent_platform.domain.models import AgentRequest, AgentSpec
+from agent_platform.observability.tracing import get_tracer
+from agent_platform.registry.registry import AgentRegistry
+from agent_platform.router_semantic import SemanticRouter
+
+logger = logging.getLogger(__name__)
+tracer = get_tracer("agent_platform.router")
+
+
 class AgentRouter:
-    """Agent 路由器。
-    
-    负责根据请求上下文（如 Agent ID、App ID、租户、渠道等）或语义匹配，
-    将传入请求路由到对应的 Agent 实例，并处理流量分配和金丝雀部署。
+    """Agent 路由器 (Agent Router)
+
+    匹配与灰度调度中心。
+    设计详见 docs/02-architecture/agent-platform-design.md §5 路由设计。
+
+    路由决策优先级 (§5.1 入口级路由)：
+      1. 显式指定 `agent_id`
+      2. 携带元数据 `app_id`
+      3. 租户识别 `context.tenant.org_id` (对应零售商 ID)
+      4. 渠道识别 `context.channel.channel_id`
+      5. 语义检索 `semantic_router.match()`
+      6. 配置的默认兜底 `default_agent_id`
     """
+
     def __init__(
         self,
         registry: AgentRegistry,
@@ -111,7 +130,7 @@ class AgentRouter:
         return await self._route_agent(self.settings.default_agent_id, request, "default_agent")
 
     async def _route_agent(self, agent_id: str, request: AgentRequest, reason: str) -> RouteResult:
-        """解析 Agent 的具体部署信息并进行灰度流量计算。"""
+        """解析指定 Agent 的具体部署配置，并基于 MD5 一致性哈希计算灰度分桶分流。"""
         spec = await self.registry.get(agent_id)
         canary = None
         # 如果是生产环境，尝试查找是否有金丝雀部署
