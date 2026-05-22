@@ -1,10 +1,20 @@
-from __future__ import annotations
+"""运行时数据面：Hermes Runtime 执行后端与 SDK 桥接器。
 
-import logging
-import os
-from collections.abc import Awaitable, Callable
-from pathlib import Path
-from typing import Any
+设计定位：
+  运行时数据面 (Runtime Data Plane) 的核心后端组件之一 (HermesRuntimeBackend)。
+  架构图详见 docs/02-architecture/agent-platform-design.md 中的"运行时数据面"部分。
+  具体设计与 Hermes 自进化引擎借鉴详见 docs/07-evolution/hermes-self-evolution-analysis.md。
+
+桥接机制说明 (Bridge Design)：
+  由于平台采用多租户、多 Agent 架构，而底层 Hermes 引擎采用单租户全局单例设计，该模块实现了一套高内聚的桥接层：
+  1. 属性翻译 (ManifestMapper)：实现 AgentSpec 结构与 Hermes 运行时参数映射。
+  2. 命名空间隔离 (ToolBridge)：通过在平台工具名前方添加 `{agent_id}__` 前缀，解决多 Agent 工具同名冲突。
+  3. 三段式会话隔离 (SessionBridge)：使用 `{tenant_id}:{agent_id}:{session_id}` 防止跨租户数据串线。
+  4. 双流执行安全降级：
+     - 若 Hermes SDK 可用，运行 `_run_with_hermes` 并在运行后通过 deregister() 安全反注册，清理全局环境。
+     - 若 SDK 不可用，降级到 converse() 轻量对话迭代器。
+  5. 审批阻断桥接 (HITL Bridge)：衔接平台的 `ApprovalGate` 审批门，截获敏感 tool 动作。
+"""
 
 from agent_platform.domain.models import (
     AgentError,
@@ -463,6 +473,12 @@ class ConversationEngine:
 # ---------------------------------------------------------------------------
 
 class HermesRuntimeBackend:
+    """Hermes 运行时调度后端
+
+    协调 Manifest 转换、会话状态同步、安全策略检测及人机协同审批（HITL），
+    驱动 AI 代理引擎（AIAgent）运行。
+    设计详见 docs/03-runtime/hermes-backend-spike.md 及 docs/07-evolution/candidate-contract.md。
+    """
     name = "hermes"
 
     def __init__(
@@ -550,6 +566,17 @@ class HermesRuntimeBackend:
         return HermesMemoryBridge(provider=provider)
 
     async def run(self, request: RuntimeRequest) -> RuntimeResponse:
+        """执行 Hermes 后端请求的核心主入口。
+
+        管线流程：
+          1. 策略前置检查：调用 policy_enforcer.check_pre_run() 拦截同时在 allow/deny 列表里的工具定义。
+          2. 加载会话历史：调用 memory_bridge.prepare() 从 Session 库中恢复上一轮历史消息。
+          3. 任务派发：
+             ├─ 若 SDK 可用：执行 `_run_with_hermes` (后台拉起 AIAgent 跑线程隔离的 run_conversation)
+             └─ 若 SDK 不可用/执行出错且支持 fallback：降级运行本地 `_run_with_engine` (converse 多轮迭代)
+          4. 记忆提交：调用 memory_bridge.commit() 将新交互写回会话库。
+          5. 状态快照存档：保存 token 消耗和运行状态至 session.state_snapshot。
+        """
         violations = self.policy_enforcer.check_pre_run(request.agent_spec)
         if violations:
             return self._policy_error(request, violations)
