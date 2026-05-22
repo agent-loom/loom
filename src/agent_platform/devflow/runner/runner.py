@@ -33,9 +33,23 @@ logger = logging.getLogger(__name__)
 
 
 class CodingAgentRunner:
-    """
-    AI 编码代理运行器。
-    用于管理整个代码生成的生命周期：包括工作区分配、代理调用、验证检查以及变更提交和结果上报。
+    """AI 代码开发沙箱执行器 (Coding Agent Runner)
+
+    研发自动化流水线 (DevFlow) 的核心执行引擎，在一个独立的受限沙箱工作区 (Workspace) 中调度 coding-agent 自动改写代码。
+    设计详见 docs/04-devflow/devflow-runner-workspace-design.md 中的安全沙箱设计。
+
+    核心执行阶段与一致性边界：
+      1. WORKSPACE_CREATING：拉取主干最新代码，创建专属的隔离分支目录。
+      2. RUNNING：
+           ├─ 调用底层的 AI 代理 (Adapter，如 ClaudeCode/Codex) 开始尝试修复/实现需求。
+           └─ 通过 checkpoint() 记录执行前的初始状态用于回滚审计。
+      3. PATH_GUARD 安全审计：
+           ├─ 检查修改后的变更文件列表 (changed_files)。
+           └─ 强比对 `allowed_paths` 范围 (基于 PathGuard 拦截防越界修改，非 prompt/eval/docs 越权操作强制阻断并报错)。
+      4. VALIDATING 单元测试验证：
+           └─ 执行 task 要求的编译/单元测试指令 (如 pytest 等)，非 PASS 状态拒绝推进。
+      5. PUSHING & SUBMITTING：
+           └─ 提交代码 (带有 AI 生成专属 commit 头)，push 到远端，最终返回合并请求 (MR) 挂载信息。
     """
 
     def __init__(

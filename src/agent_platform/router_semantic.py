@@ -1,4 +1,11 @@
-"""基于关键词和正则的语义路由器。"""
+"""基于关键词和正则的语义路由器。
+
+设计定位：
+  路由层 (Routing Layer) 的核心语义识别分流器 (Semantic Router)。
+  对应 docs/02-architecture/agent-platform-design.md 中的"路由层"组件。
+  当常规 API 入口处的显式路由参数（如 agent_id/app_id）缺失或未命中时，
+  该模块分析用户的 query 文本，将其安全匹配到最可能符合条件的已注册 Agent 上。
+"""
 
 from __future__ import annotations
 
@@ -35,16 +42,16 @@ class SemanticRule:
 
 
 class SemanticRouter:
-    """Keyword and pattern-based semantic routing for agent selection.
+    """语义分流路由器 (Semantic Router)
 
-    Used as a fallback when explicit agent_id/app_id/retailer_id routing fails.
-    Only activates when confidence >= threshold (default 0.85 per design doc §17).
+    工作原理：
+      1. 从 AgentRegistry 获取所有在线的 AgentSpec。
+      2. 提取其 manifest.yaml 中 `routing.rules` 段落的关键词和正则表达式，映射到 SemanticRule。
+      3. 对用户输入通过 match() 执行关键词匹配比率（Matched_Keywords / Total_Keywords）和正则检索。
+      4. 返回最佳置信度 (confidence) 匹配结果，若置信度低于 `confidence_threshold` (默认 0.85)，则拒决分流。
 
-    Rules can be loaded:
-    - Programmatically via :meth:`add_rule`.
-    - Automatically from Agent manifests via :meth:`load_from_registry` —
-      each manifest's ``routing.rules`` section is translated into
-      :class:`SemanticRule` objects and merged into the active rule set.
+    设计时序见：
+      docs/02-architecture/agent-platform-design.md §4 多 Agent 路由图
     """
 
     def __init__(self, confidence_threshold: float = 0.85) -> None:

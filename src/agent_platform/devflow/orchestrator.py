@@ -34,11 +34,26 @@ class DevFlowResult:
 
 
 class DevFlowOrchestrator:
-    """
-    开发流程编排器。
-    负责监听外部系统（如 Plane）的 Webhook 事件，并在状态变更为"准备 AI 开发"时，
-    触发代码生成流程，包括创建任务包、创建分支以及派发代码编写任务。
-    MR 的创建推迟到 Runner 完成 commit+push 后执行。
+    """研发流水线编排器 (DevFlow Orchestrator)
+
+    研发自动化流水线 (DevFlow) 层的主控制器，负责将外部协同工具 (如 Plane) 与平台自研代码开发引擎 (Coding Runner) 串联。
+    具体设计见 docs/04-devflow/devflow-runner-workspace-design.md 和 devflow-state-sync-design.md。
+
+    监听与分发全生命周期时序：
+      Plane Webhook (issue/work_item 更新)
+           │
+           ▼
+      handle_webhook_event()
+           │
+           ├─ 1. 状态匹配过滤 (只响应 READY_FOR_AI_DEV_STATES "准备 AI 开发" 状态)
+           ├─ 2. 分发去重幂等校验 (基于 project_id + item_id + delivery_id 的原子锁)
+           ├─ 3. 归属权路由解析 (OwnershipResolver 匹配此需求应当交给哪个 Agent)
+           ├─ 4. 创建任务包 (TaskPackGenerator 生成结构化 DevelopmentTask，定义修改范围和验证指令)
+           ├─ 5. 分支拉取与隔离 (ScmAdapter 创建专属的 feature/ 隔离开发分支)
+           ├─ 6. 派发异步 Runner 任务 (CodingRunner 异步处理，防 Webhook 响应超时)
+           │
+           ▼
+      AI Developing (状态流转)
     """
 
     def __init__(
