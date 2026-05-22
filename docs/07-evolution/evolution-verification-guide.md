@@ -1,6 +1,6 @@
 # 自进化能力验证指南
 
-> Status: Draft
+> Status: 平台基础能力已实现，真实模型 Review Fork 候选生成闭环仍处于联调/不稳定状态
 >
 > 目标：先验证 Agent Platform 已经具备“自进化可能性”，再逐步验证完整生产闭环。本文档只描述验证方案，不把当前能力误判为生产完成。
 
@@ -18,6 +18,14 @@
 8. Runner 能在 PathGuard / validation 限制下修改 Agent Package，提交 GitLab MR。
 
 第一轮验证只要求证明第 1 到第 6 步成立。第 7 到第 8 步属于真实 DevFlow E2E，应在自进化低风险闭环稳定后再跑。
+
+
+
+## 1.5 验证模式说明
+
+自进化及评审分支的验证分为两种模式：
+- **Stub 模式**：通过代码规则或预设的模拟逻辑执行 Scoped Tools 动作。这是测试和 CI 离线状态下的默认校验模式，能够 100% 成功。
+- **真实 Provider 模式**：调用真实的 LLM 接口，依据 evidence 进行智能分析并触发受限工具。目前已通过 `ModelGateway` 新增的 `tool_choice` 参数（对 OpenAI-compatible 传 `tool_choice`，对 Anthropic 映射 `tool_choice`）实现强制调用 Scoped Tools，但由于长文本理解、幻觉或者是模型本身的不确定性，真实模型在生成高质量 Candidate 上仍处于调试/联调阶段，稳定性未达到生产级别。
 
 ## 2. 当前已知边界
 

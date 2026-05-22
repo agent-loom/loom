@@ -1,6 +1,6 @@
 # 自进化 Agent 系统总体设计
 
-> Status: Fully Implemented（Engine/Risk/Repo/API/Memory/Skills/Candidate Store/Review Fork/RuntimeMemory 均已完全实现；外围 Canary 灰度与可视化大盘待后续集成）
+> Status: 平台基础能力已实现，真实模型 Review Fork 候选生成闭环仍处于联调/不稳定状态
 > Stage: S9
 > Owner: platform
 > Last updated: 2026-05-20

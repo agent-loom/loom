@@ -98,6 +98,7 @@ class ModelProvider(Protocol):
         max_tokens: int = 1024,
         tools: list[dict[str, Any]] | None = None,
         stop: list[str] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> ModelResponse: ...
 
 
@@ -217,6 +218,7 @@ class StubModelProvider:
         max_tokens: int = 1024,
         tools: list[dict[str, Any]] | None = None,
         stop: list[str] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> ModelResponse:
         last_user = ""
         for m in reversed(messages):
@@ -263,6 +265,7 @@ class OpenAICompatibleProvider:
         max_tokens: int = 1024,
         tools: list[dict[str, Any]] | None = None,
         stop: list[str] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> ModelResponse:
         effective_model = model or self._default_model
         body: dict[str, Any] = {
@@ -278,6 +281,8 @@ class OpenAICompatibleProvider:
             body["tools"] = [{"type": "function", "function": t} for t in tools]
         if stop:
             body["stop"] = stop
+        if tool_choice is not None:
+            body["tool_choice"] = tool_choice
         if effective_model.startswith("openai/gpt-5"):
             body["reasoning_effort"] = os.getenv(
                 "OPENAI_REASONING_EFFORT",
@@ -465,6 +470,7 @@ class AnthropicProvider:
         max_tokens: int = 1024,
         tools: list[dict[str, Any]] | None = None,
         stop: list[str] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> ModelResponse:
         system_content = ""
         api_messages: list[dict[str, str]] = []
@@ -496,6 +502,24 @@ class AnthropicProvider:
             ]
         if stop:
             body["stop_sequences"] = stop
+        if tool_choice is not None:
+            if isinstance(tool_choice, str):
+                if tool_choice == "required":
+                    body["tool_choice"] = {"type": "any"}
+                elif tool_choice == "auto":
+                    body["tool_choice"] = {"type": "auto"}
+                elif tool_choice == "none":
+                    body.pop("tools", None)
+            elif isinstance(tool_choice, dict):
+                func_name = None
+                if tool_choice.get("type") == "function":
+                    func_name = tool_choice.get("function", {}).get("name")
+                elif "name" in tool_choice:
+                    func_name = tool_choice.get("name")
+                if func_name:
+                    body["tool_choice"] = {"type": "tool", "name": func_name}
+                else:
+                    body["tool_choice"] = tool_choice
         logger.info(
             "LLM request: provider=%s model=%s url=%s tools=%d stop=%d",
             self.name,
@@ -734,6 +758,7 @@ class ModelGateway:
         temperature: float = 0.2,
         max_tokens: int = 1024,
         tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> ChatResult:
         attempt_order = self._build_attempt_order(provider_name)
         last_error: Exception | None = None
@@ -753,6 +778,7 @@ class ModelGateway:
                     temperature=temperature,
                     max_tokens=max_tokens,
                     tools=tools,
+                    tool_choice=tool_choice,
                 )
                 if resp.finish_reason == "error":
                     breaker.record_failure()

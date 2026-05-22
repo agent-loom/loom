@@ -1,6 +1,6 @@
 # Platform Memory 与 Agent Skills 设计
 
-> Status: Fully Implemented（EvolutionMemory + SkillRegistry + Candidate Store + Promotion Workflow + RuntimeMemory/Skill Runtime 动态注入均已完全实现）
+> Status: 平台基础能力已实现，动态注入与隔离通过验证，真实模型 Review Fork 生成闭环仍在调优中
 > Stage: S9
 > Owner: platform
 > Last updated: 2026-05-20

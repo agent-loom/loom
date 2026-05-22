@@ -532,10 +532,6 @@ def run_smoke(args: argparse.Namespace) -> int:
                 actual_agent_id=first.get("agent_id"),
                 expected_agent_id=args.agent,
                 candidate_id=first.get("candidate_id"),
-                note=(
-                    "已知差距：Review Fork post_run hook 当前可能无法正确写入 "
-                    "candidate.agent_id。"
-                ),
             )
 
         print("\n--- Phase E: Candidate Promotion ---")

@@ -14,3 +14,11 @@ htmlcov/
 .coverage
 coverage.xml
 
+
+# Runtime database and files
+agent_platform.db
+.agent-platform/
+logs/
+
+# Secret keys
+*-secret-key-*.csv

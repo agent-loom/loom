@@ -1,6 +1,6 @@
 # 自进化 Agent 系统落地路线
 
-> Status: Phase 0-5, 9, 10 全套核心机制均已 100% 物理实现（仅 Phase 4 语义聚类、外围看板 UI 待后续阶段增强）
+> Status: Phase 0-5, 9, 10 平台基础能力已实现，真实模型 Review Fork 候选生成闭环仍处于联调/不稳定状态（语义聚类、外围看板待后续增强）
 > Stage: S9
 > Owner: platform
 > Last updated: 2026-05-20

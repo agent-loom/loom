@@ -183,7 +183,7 @@ Package 内部路由决定由哪个 worker 或工具处理任务。
 
 ## 6. Agent Package 目录草案
 
-```text
+```
 agents/
   myj/
     manifest.yaml
@@ -877,7 +877,7 @@ class RuntimeBackend(Protocol):
 
 然后提供两个实现：
 
-```text
+```
 RuntimeBackend
 ├── NativeGraphBackend
 │   └── 当前 myj LangGraph / FastAPI 路径
@@ -907,7 +907,7 @@ RuntimeBackend
 
 `myj` 不建议一开始重写为通用平台。更稳妥的方式是把现有能力包起来：
 
-```text
+```
 src/
   platform/
     contracts.py          # AgentRequest / AgentResponse / RuntimeContext

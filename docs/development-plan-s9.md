@@ -1,6 +1,6 @@
 # 开发计划（S9：自进化 Agent 系统）
 
-> Status: Phase 7, 9, 10 核心已完成，自进化引擎与全链路冒烟验证已通过
+> Status: 平台基础能力已实现，真实模型 Review Fork 候选生成闭环仍处于联调/不稳定状态
 > Last updated: 2026-05-21
 
 本计划承接 S8（生产交付）。S9 核心目标：让平台具备**受治理的自进化能力**——从运行反馈自动发现问题、生成改进提案、通过 DevFlow 执行修改、经 Eval 验证后由人工 review 合并。
@@ -40,9 +40,15 @@
 | 角色 | 说明 | 状态 |
 |---|---|---|
 | **Runtime Backend** | 运行业务 Agent（HermesRuntimeBackend + hermes_echo） | ✅ 已集成 |
-| **Evolution Analyst** | 分析 trace/feedback，生成候选资产和提案 | ✅ 已实现 (Review Fork + Real Model) |
+| **Evolution Analyst** | 分析 trace/feedback，生成候选资产和提案 | 🔶 平台基础机制已实现，真实模型生成仍不稳定 |
 
-当前 EvolutionEngine 在真实评审分支中可调用 `openai/gpt-5.2-codex` 作为 Evolution Analyst 进行智能化背景分析、根因定位并提报 Candidate 缓冲资产（Review Fork 机制已打通）。规则引擎作为低风险场景或 LLM 不可用时的 Fallback。
+当前 EvolutionEngine 已打通 Review Fork Executor 机制并接入真实模型（如 `openai/gpt-5.2-codex`），但 Candidate 自动生成的稳定性仍在优化调试中。规则引擎作为低风险场景或 LLM 不可用时的 Fallback。
+
+具体完成度分层：
+1. Review Fork Executor：已实现，真实模型调用已接入。
+2. Candidate 生成稳定性：进行中（真实模型路径由于模型幻觉与不确定性尚不稳定，现已通过 tool_choice 强制调用以作加固）。
+3. Hermes Evolution Analyst：未完成（S9 待办，涉及更复杂的 LLM 根因归因与证据聚合）。
+4. 全自动自进化闭环：未完成（人工 review MR 仍是必需的，且端到端真实模型自动闭环尚未达到生产级稳定性）。
 
 ---
 

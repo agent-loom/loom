@@ -291,7 +291,7 @@ class TestBackgroundReviewForkCore:
         # 检查审计日志，说明它由于没产生候选资产且完成了对话，写了一条空 Candidate 的 success 审计（或者包含报错的 success 审计）
         audits = await audit_repo.list_all(agent_id="strict_agent")
         assert len(audits) == 1
-        assert audits[0].status == "success"
+        assert audits[0].status == "no_candidate"
         assert audits[0].candidate_id is None
 
         # 检查传入 chat 列表中的对话上下文，最后一次工具调用的输出应该是安全拦截提示

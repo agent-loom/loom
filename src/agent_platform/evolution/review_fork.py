@@ -453,10 +453,18 @@ class BackgroundReviewFork:
         # 分析对话最多迭代 5 步，防止陷入死循环或死工具链
         for step in range(5):
             active_tools = write_tools_schemas if evidence_read_done else tools_schemas
+            if not evidence_read_done:
+                tool_choice = {"type": "function", "function": {"name": "evidence_read"}}
+            elif not candidate_generated:
+                tool_choice = "required"
+            else:
+                tool_choice = "auto"
+
             chat_result: ChatResult = await self._gateway.chat(
                 messages=messages,
                 tools=active_tools,
                 temperature=0.1,
+                tool_choice=tool_choice,
             )
             logger.info(
                 "Review Fork step=%d provider=%s finish_reason=%s tool_calls=%s content=%s",
@@ -613,7 +621,7 @@ class BackgroundReviewFork:
                 tenant_id=event.tenant_id,
                 input_evidence_ids=[event.event_id],
                 model_provider=default_provider or "unknown",
-                status="success",
+                status="no_candidate",
                 error_message="Completed analysis, but did not generate any candidates.",
             )
             await self._audit_repo.create(audit)

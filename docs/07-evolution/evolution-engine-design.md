@@ -1,6 +1,6 @@
 # Evolution Engine 设计
 
-> Status: Fully Implemented（Engine/Risk/Repo/API/Candidate Store/Promotion Workflow/Review Fork 已实现；注：问题去重采用哈希和滑窗规则，未实现复杂的 ML 语义 Pattern Clusterer）
+> Status: 平台基础能力已实现，真实模型 Review Fork 候选生成闭环仍处于联调/不稳定状态
 > Stage: S9
 > Owner: platform
 > Last updated: 2026-05-20
