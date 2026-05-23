@@ -16,6 +16,14 @@
   5. 审批阻断桥接 (HITL Bridge)：衔接平台的 `ApprovalGate` 审批门，截获敏感 tool 动作。
 """
 
+from __future__ import annotations
+
+import logging
+import os
+from collections.abc import Awaitable, Callable
+from pathlib import Path
+from typing import Any
+
 from agent_platform.domain.models import (
     AgentError,
     AgentIdentity,

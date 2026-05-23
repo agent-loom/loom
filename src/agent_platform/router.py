@@ -7,19 +7,6 @@
   并对生产环境（prod 渠道）提供基于一致性哈希金丝雀（Canary）灰度切流能力。
 """
 
-
-@dataclass(frozen=True)
-class RouteResult:
-    """路由结果数据类。
-    
-    包含目标 Agent 的规格信息、路由原因以及相关的部署和流量控制信息。
-    """
-    agent_spec: AgentSpec
-    reason: str
-    deployment_id: str | None = None
-    traffic_bucket: int | None = None
-
-
 import hashlib
 import logging
 from dataclasses import dataclass
@@ -32,6 +19,18 @@ from agent_platform.router_semantic import SemanticRouter
 
 logger = logging.getLogger(__name__)
 tracer = get_tracer("agent_platform.router")
+
+
+@dataclass(frozen=True)
+class RouteResult:
+    """路由结果数据类。
+
+    包含目标 Agent 的规格信息、路由原因以及相关的部署和流量控制信息。
+    """
+    agent_spec: AgentSpec
+    reason: str
+    deployment_id: str | None = None
+    traffic_bucket: int | None = None
 
 
 class AgentRouter:

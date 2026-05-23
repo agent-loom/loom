@@ -192,6 +192,7 @@ class MockProvider:
         max_tokens: int = 1024,
         tools: list[dict[str, Any]] | None = None,
         stop: list[str] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> ModelResponse:
         return ModelResponse(
             content=f"mock reply from {model}",
@@ -218,6 +219,7 @@ class AltProvider:
         max_tokens: int = 1024,
         tools: list[dict[str, Any]] | None = None,
         stop: list[str] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> ModelResponse:
         return ModelResponse(
             content=f"alt reply from {model}",

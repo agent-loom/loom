@@ -179,7 +179,7 @@ class TestConversationEngine:
         mock_provider.name = "mock"
         call_count = 0
 
-        async def mock_chat(messages, *, model, temperature, max_tokens, tools=None):
+        async def mock_chat(messages, *, model, temperature, max_tokens, tools=None, **kwargs):
             nonlocal call_count
             call_count += 1
             # First N calls return tool calls, the final fallback returns text
@@ -221,7 +221,7 @@ class TestConversationEngine:
         """Knowledge snippets should be injected as system messages."""
         captured_messages: list[ModelMessage] = []
 
-        async def capture_chat(messages, *, model, temperature, max_tokens, tools=None):
+        async def capture_chat(messages, *, model, temperature, max_tokens, tools=None, **kwargs):
             captured_messages.extend(messages)
             return ModelResponse(content="ok", model=model, finish_reason="stop")
 

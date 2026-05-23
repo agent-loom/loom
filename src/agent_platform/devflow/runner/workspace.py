@@ -1,3 +1,13 @@
+"""运行时工作空间管理器：Git 本地隔离沙箱生命周期控制。
+
+设计定位：
+  DevFlow 研发沙箱运行层 (Sandbox Workspace Manager)。
+  对应 docs/04-devflow/devflow-runner-workspace-design.md 中的"工作区管理器"设计。
+  负责为每次 AI 编码与自动提议任务拉起一个干净、隔离的 Git 本地工作副本目录，
+  处理克隆、动态拉取分支 checkout、变更提取、受限的命令行回归验证，
+  以及将通过验证的代码通过 Git commit & push 最终同步推送至远程演进分支，并最终清理沙箱现场。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -18,13 +28,14 @@ logger = logging.getLogger(__name__)
 
 
 class WorkspaceManager:
-    """
-    工作区管理器。
-    负责为每次 AI 编码任务建立独立的本地环境，处理代码克隆、文件变更检测、
-    执行验证脚本、以及最终的代码提交、推送和工作区清理。
+    """工作空间管理器 (Workspace Manager)
+
+    实现 AI 编码与验证沙箱的完整物理周期治理。
+    状态管线：
+      WORKSPACE_CREATING (克隆) -> RUNNING (代码生成) -> VALIDATING (测试执行) -> COMMITTING (强推发布) -> CLEANING (现场销毁)
     """
 
-    # Timeouts prevent zombie git processes from blocking the runner indefinitely
+    # 限制 Git 进程生命周期，防止僵死子进程无限期阻塞 Runner 引擎
     GIT_CLONE_TIMEOUT = 300
     GIT_COMMAND_TIMEOUT = 120
 
@@ -138,6 +149,10 @@ class WorkspaceManager:
         :param workspace_dir: 工作区目录。
         :return: 变更文件的相对路径列表。
         """
+        # TODO Design Gap:
+        # get_changed_files 获取变更文件时仅使用了 GIT_COMMAND_TIMEOUT 做超时拦截，
+        # 目前已补齐 wait_for 守护，但由于 status 输出量过大时（如大项目被全删全加），可能会面临
+        # IO 阻塞卡顿风险，后续有必要考虑在大型仓库中基于 git diff-index 进行替代以提升查询性能。
         proc = await asyncio.create_subprocess_exec(
             "git", "status", "--porcelain=v1", "-z", "-uall",
             cwd=str(workspace_dir),
@@ -173,6 +188,8 @@ class WorkspaceManager:
                 i += 1
         return files
 
+    # 沙箱运行环境受限制的可信验证指令白名单。
+    # 任何不在白名单内的基础命令头都将被就地拒绝，保障执行的命令边界。
     _ALLOWED_COMMANDS = frozenset({
         "pytest", "python", "python3", "ruff", "mypy", "flake8", "black",
         "npm", "npx", "node", "cargo", "go", "make",
@@ -220,6 +237,12 @@ class WorkspaceManager:
             start = time.monotonic()
             command_args = self._resolve_validation_command(cmd)
 
+            # TODO Design Gap:
+            # 1. 这里执行验证命令的 asyncio.wait_for 中的 timeout 目前硬编码为了 120 秒，
+            #    并未暴露给任务参数或与类级 constants (例如 GIT_COMMAND_TIMEOUT) 联动，导致复杂集成测试极易超时被杀。
+            # 2. stdout_bytes 和 stderr_bytes 的截断只保留了最尾部的 2000 字符 (decode[-2000:])，
+            #    如果测试套件报错信息长达上万字节，头部关键错误栈将会被默默物理截断抛弃，导致 AI 诊断自进化时信息残缺不齐。
+            #    后续应考虑将完整输出重定向写入审计/测试报告文件中持久化保留。
             proc = await asyncio.create_subprocess_exec(
                 *command_args,
                 stdout=asyncio.subprocess.PIPE,
@@ -264,12 +287,11 @@ class WorkspaceManager:
 
     @staticmethod
     def _resolve_validation_command(command: str) -> list[str]:
-        """Resolve Python tool commands against the current interpreter.
+        """对齐当前 python 进程执行器。
 
-        Runner workspaces are intentionally executed with a sanitized
-        environment, so relying on PATH to find ``pytest`` or the intended
-        virtualenv ``python`` is brittle. Use the interpreter that launched the
-        platform process for Python validation commands.
+        工作区沙箱执行时使用经过极度净化的精简安全环境变量，
+        因此若直接依靠 PATH 解析 `pytest` 或虚拟环境的 `python` 是脆弱且易损的。
+        这里强制劫持并重定向替换为启动本平台进程的 python 物理编译解释器路径。
         """
         parts = shlex.split(command)
         if not parts:
@@ -298,9 +320,13 @@ class WorkspaceManager:
         :param changed_files: 需要暂存的文件列表。
         :return: 成功提交后的 commit sha，若没有变更则返回 None。
         """
+        # TODO Design Gap:
+        # 此模块目前缺乏 commit 变更预览与二次确认插槽 (dry-run mode)。
+        # 一旦 AI 沙箱脚本验证全数 PASS，修改将绕过任何人工或高级别安全校验，直接强推 (Push) 至远程生产/进化分支。
+        # 未来有必要引入审批节点拦截机制，输出暂存 diff 后挂起，待 HITL 回复后再执行远程推送。
         if not changed_files:
             return None
-            
+
         cmd = ["git", "add", "--"] + changed_files
         await self._run_git(workspace_dir, cmd)
 

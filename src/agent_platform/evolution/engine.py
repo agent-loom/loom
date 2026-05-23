@@ -1,10 +1,11 @@
-"""EvolutionEngine：从运行反馈到改进提案的核心引擎。
+"""自进化生命周期引擎：信号收集、决策熔断与风险分流控制中心。
 
-职责：
-1. 接收归一化事件（eval failure, feedback, runtime anomaly）
-2. 去重和聚合
-3. 生成 ImprovementProposal（自动风险分类 + 证据绑定）
-4. 可选分发到 Plane
+设计定位：
+  自进化系统 (Self-Evolution Loop) 的首个控制面核心引擎 (EvolutionEngine)。
+  对应 docs/07-evolution/candidate-contract.md 中的"自进化决策引擎"组件。
+  负责接收各管道的运行时反馈事件 (EvolutionEvent)，执行基于内存滑动窗口的去重 (Dedup)，
+  基于回归分析的多轮故障熔断 (Circuit Breaker) 以及连续人类拒绝的动态降级 (Fallback) 策略，
+  产出结构化的改进提案 (ImprovementProposal)，并在满足安全条件的前提下通过三方项目看板系统 (Plane) 分发研发任务。
 """
 from __future__ import annotations
 
@@ -32,6 +33,7 @@ from .risk_classifier import populate_risk_and_paths
 
 logger = logging.getLogger(__name__)
 
+# 事件去重聚合的滑动时间窗口设定（默认为 24 小时）
 _DEDUP_WINDOW = timedelta(hours=24)
 
 _ROOT_CAUSE_MAP: dict[str, RootCauseCategory] = {
@@ -49,7 +51,10 @@ def _dedup_key(event: EvolutionEvent) -> str:
 
 
 class EvolutionEngine:
-    """从运行反馈生成改进提案的引擎。"""
+    """自进化决策与任务分发引擎 (Evolution Engine)
+
+    控制面生命周期的守卫大脑，管控低风险 AI 进化的自动触发与高风险的隔离。
+    """
 
     def __init__(
         self,
@@ -63,6 +68,11 @@ class EvolutionEngine:
         self._plane = plane_adapter
         self._plane_project_id = plane_project_id
         self._ai_developing_state_id = ai_developing_state_id
+        # TODO Design Gap:
+        # _seen_keys 滑动去重窗口目前纯在内存中维护，
+        # 在多实例、负载均衡副本部署环境下无法共享去重记录。
+        # 当服务重启或容器扩缩容时，去重缓存将完全丢失，易引发提案重复生成的“自进化风暴”。
+        # 长期方案应重构为分布式去重（例如利用 Redis EXPIRE Key 锁定模式）。
         self._seen_keys: dict[str, datetime] = {}
         self._manually_suspended: set[str] = set()
 
@@ -86,13 +96,17 @@ class EvolutionEngine:
         if agent_id in self._manually_suspended:
             return True
 
-        # 检查是否连续引入回归
+        # 检查是否连续引入回归 (Circuit Breaker)
         proposals = await self._repo.list_by_agent(agent_id, limit=5)
         closed_proposals = [
             p for p in proposals
             if p.status in (ProposalStatus.CLOSED, ProposalStatus.DISMISSED)
         ]
 
+        # TODO Design Gap:
+        # 回归分析高度依赖 outcome 文字描述匹配检测 `"regression" in outcome`。
+        # 这种模式极其脆弱且容易产生漏判（如果人工或自动化工具写成了 "re-regression" 或 "regressed" 将可能绕过熔断）。
+        # 未来版本应在模型层面引入强类型的 `outcome_type` (如 REGRESSION, FIXED, DISMISSED)。
         regression_count = 0
         for p in closed_proposals:
             outcome = (p.outcome or "").lower()
@@ -188,6 +202,13 @@ class EvolutionEngine:
                 properties=custom_props,
             )
             work_item_id = result.get("id", "")
+
+            # TODO Design Gap:
+            # 状态双写非原子性。
+            # update_status 操作是在本地 DB 执行的，而 create_work_item 发生在 Plane 系统。
+            # 倘若 update_status 抛出异常崩溃，Plane 那边任务已然成功创建，导致两端状态产生不一致。
+            # 另外在 dispatch_to_plane 中将 sha / id 直接内存赋值给已从 repo 取出的 proposal，
+            # 这种就地对象变异如果在后续流程发生崩溃也是脆弱的。
             await self._repo.update_status(
                 proposal_id,
                 ProposalStatus.DISPATCHED,
@@ -264,6 +285,11 @@ class EvolutionEngine:
         )
 
         changes: list[ProposedChange] = []
+        # TODO Design Gap:
+        # 目前仅仅当自进化触发类型为 PROMPT_GAP 或 EVAL_GAP 时，才会填充 changes。
+        # 如果是 TOOL_RUNTIME_ERROR 或 ROUTING_ERROR，生成提案时 changes 会被留空，
+        # 这将导致在风险评估阶段因为匹配不到任何修改路径 (paths) 而默认被升级为 MEDIUM 或更高风险，
+        # 进而丧失在 LOW 风险下的自动化 DevFlow 机会。
         if root_cause_cat in (RootCauseCategory.PROMPT_GAP, RootCauseCategory.EVAL_GAP):
             changes = [
                 ProposedChange(
